@@ -1,0 +1,24 @@
+
+# Activate virtual environment
+# Windows:
+venv\Scripts\activate
+
+
+## 🖥️ Launch Dashboard (Instant)
+
+```bash
+streamlit run swing_trader/dashboard/app.py
+```
+
+
+
+
+1. Settings → Download Data (ilk kez veya haftalık)
+
+2. Scan Stocks → Run Scan
+
+3. Sinyalleri incele (score, entry, stop, target)
+
+4. Manuel olarak broker'da işlem yap
+
+5. (Opsiyonel) Backtest → Strateji performansını gör

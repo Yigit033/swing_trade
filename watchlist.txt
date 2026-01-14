@@ -1,0 +1,50 @@
+# Custom Watchlist
+# One ticker per line
+# Lines starting with # are comments
+
+# Tech Giants
+AAPL
+MSFT
+GOOGL
+AMZN
+META
+NVDA
+TSLA
+
+# Finance
+JPM
+BAC
+WFC
+GS
+MS
+
+# Healthcare
+JNJ
+UNH
+PFE
+ABBV
+TMO
+
+# Consumer
+WMT
+HD
+NKE
+SBUX
+MCD
+
+# Industrial
+CAT
+BA
+GE
+HON
+UPS
+
+# Energy
+XOM
+CVX
+COP
+SLB
+EOG
+
+# Add your own stocks below:
+

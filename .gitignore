@@ -1,0 +1,67 @@
+# Environment
+.env
+.env.local
+venv/
+env/
+.venv/
+ENV/
+
+# Data (database and generated files)
+*.db
+*.sqlite
+*.csv
+data/*.csv
+data/*.db
+*.pkl
+*.pickle
+
+# IDE
+.vscode/
+.idea/
+*.pyc
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.cursorrules
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Config (if contains sensitive data)
+config.local.yaml
+.env
+
+# Output
+output/
+reports/
+*.pdf
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Coverage
+.coverage
+htmlcov/
+
+# Build
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Test artifacts
+.tox/
+.nox/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+~*

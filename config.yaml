@@ -1,0 +1,96 @@
+# Swing Trading System Configuration
+# Professional stock swing trading system parameters
+
+data:
+  source: "yfinance"
+  backup_source: "alphavantage"
+  update_time: "00:30"  # Market close + 30 min (Eastern Time)
+  lookback_days: 250
+  database_path: "data/stocks.db"
+
+filters:
+  min_volume: 500000
+  min_price: 10.0
+  max_price: 500.0
+  min_market_cap: 300000000  # $300M
+
+indicators:
+  # Trend indicators
+  ema_periods: [20, 50, 200]
+  adx_period: 14
+  
+  # Momentum indicators
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  stoch_k: 14
+  stoch_d: 3
+  
+  # Volume indicators
+  volume_ma_period: 20
+  obv_slope_period: 10
+  
+  # Volatility
+  atr_period: 14
+  bb_period: 20
+  bb_std: 2
+  
+  # Support/Resistance
+  support_resistance_period: 20
+
+risk:
+  max_risk_per_trade: 0.02          # 2% of portfolio
+  max_position_size: 0.20           # 20% of portfolio
+  max_open_positions: 5
+  max_sector_allocation: 0.30       # 30% per sector
+  stop_loss_atr_multiplier: 2.0
+  take_profit_multipliers: [1.5, 2.5]  # R:R ratios
+  time_stop_enabled: true             # Enable time-based exits
+
+strategy:
+  min_signal_score: 6               # Legacy score threshold (backward compatibility)
+  min_quality_score: 45             # NEW: Minimum quality score (0-100)
+  top_signals_count: 6              # NEW: Default top N signals to show
+  rsi_entry_min: 25                 # Relaxed: was 30
+  rsi_entry_max: 65                 # Relaxed: was 50
+  rsi_exit: 70
+  rsi_reject_above: 70              # Reject buy signals if RSI above this (overbought)
+  volume_surge_threshold: 1.1       # Relaxed: was 1.2
+  volume_surge_bonus: 1.5
+  support_proximity_percent: 0.05   # Relaxed: was 0.03
+  adx_strong_trend: 25
+  adx_weak_trend: 20
+  # Time-based parameters
+  max_holding_days: 20              # Maximum days to hold a position
+  signal_expiration_days: 3         # Days until signal expires (unused if not entered)
+  expected_hold_days_min: 5         # Minimum expected hold period (display)
+  expected_hold_days_max: 15        # Maximum expected hold period (display)
+
+backtesting:
+  start_date: "2023-01-01"
+  end_date: "2026-01-09"
+  initial_capital: 10000
+  commission_per_trade: 1.0         # $1 per trade
+  slippage_percent: 0.001           # Base 0.1% slippage (used when dynamic is off)
+  # NEW: Realistic cost modeling
+  use_dynamic_slippage: true        # Adjust slippage based on ATR/volume
+  use_spread: true                  # Model bid-ask spread
+  # NEW: Execution model
+  # Entry is now at next-day OPEN (not same-day Close)
+  # Gap protection: if open gaps past stop-loss, trade is skipped
+
+alerts:
+  email_enabled: false
+  telegram_enabled: false
+  min_signal_score: 7
+  email_from: ""
+  email_to: ""
+  telegram_bot_token: ""
+  telegram_chat_id: ""
+  alert_times: ["17:30"]            # Daily alert times
+
+watchlist:
+  default: "sp500"                  # Options: "sp500", "custom"
+  custom_file: "watchlist.txt"      # One ticker per line
+
