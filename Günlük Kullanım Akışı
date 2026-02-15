@@ -1,24 +1,67 @@
+# 🚀 SmallCap Swing Trade — Günlük Kullanım Akışı
 
-# Activate virtual environment
-# Windows:
-venv\Scripts\activate
-
-
-## 🖥️ Launch Dashboard (Instant)
+## Hızlı Başlatma
 
 ```bash
+# Virtual environment aktifleştir (Windows)
+venv\Scripts\activate
+
+# Dashboard'u başlat
 streamlit run swing_trader/dashboard/app.py
 ```
 
+---
 
+## 📋 Günlük Akış (5 Adım)
 
+### 1. 📥 Veri Güncelle
+- **Settings** → **Download Data** tıkla
+- İlk kez: tam indirme (~2 dk)
+- Sonraki: sadece günlük güncelleme
 
-1. Settings → Download Data (ilk kez veya haftalık)
+### 2. 🔍 Tarama Yap
+- **SmallCap Momentum** sayfasına git
+- **Run Scan** tıkla
+- Sistem otomatik tarar: Finviz → Filtreler → Sinyaller
 
-2. Scan Stocks → Run Scan
+### 3. 📊 Sinyalleri İncele
+Her sinyal için gösterilir:
+- **Swing Type** (A/B/C/S) + kalite skoru
+- **Entry:** Giriş fiyatı
+- **Stop Loss:** Zarar kes seviyesi
+- **Target:** Hedef fiyat
+- **Hold Days:** Tutma süresi (min-max)
 
-3. Sinyalleri incele (score, entry, stop, target)
+### 4. 📌 Paper Trading'e Ekle
+- Beğendiğin sinyalde **"📌 Track"** butonuna tıkla
+- Trade **PENDING** olarak kaydedilir
+- Ertesi gün **"🔄 Update Prices"** tıkla:
+  - ✅ Gap normal → Açılış fiyatından **OPEN** olur
+  - ❌ Gap >5%↑ veya >3%↓ → Otomatik **REJECTED**
+- Stop/target ATR ile ertesi gün açılışa göre yeniden hesaplanır
 
-4. Manuel olarak broker'da işlem yap
+### 5. 📈 Takip Et
+- **Paper Trading Tracker** sayfasından açık pozisyonları izle
+- Sistem otomatik kontrol eder:
+  - 🔴 **Stop Loss** → Otomatik kapanır (gap-down slippage dahil)
+  - 🔒 **Trailing Stop** → Kâr koruması (ATR bazlı, otomatik yükselir)
+  - 🎯 **Target** → Hedef vurulunca kapanır
+  - ⏰ **Timeout** → Max gün dolunca kapanır
+- İstersen **Manual Close** ile kendin kapatabilirsin
 
-5. (Opsiyonel) Backtest → Strateji performansını gör
+---
+
+## 📊 Performans Takibi
+
+**Paper Trading Tracker → Performance** sekmesinde:
+- Win Rate, Profit Factor, Toplam P/L
+- En iyi / En kötü trade
+- Kapanmış trade geçmişi
+
+---
+
+## 🔧 Opsiyonel
+
+- **Tek Hisse Analizi:** SmallCap sayfasında ticker gir → detaylı analiz al
+- **Backtest:** `python test_backtest.py` ile geçmiş performansı test et
+- **Manuel Trade Ekle:** Paper Trading → "➕ Manually Add Trade"

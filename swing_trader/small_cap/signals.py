@@ -36,7 +36,7 @@ class SmallCapSignals:
     """
     
     # SENIOR TRADER SIGNAL CONSTANTS
-    MIN_VOLUME_SURGE = 1.8            # 1.8x (was 1.5x - tighter!)
+    MIN_VOLUME_SURGE = 1.2            # 1.2x (was 1.8x — audit showed most stocks rejected at 1.3-1.5x)
     MIN_ATR_PERCENT_TRIGGER = 0.035   # 3.5%
     ATR_PERIOD = 10                   # 10-period ATR (faster)
     GAP_THRESHOLD = 0.03              # 3% gap for catalyst boost

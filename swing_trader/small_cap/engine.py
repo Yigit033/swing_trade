@@ -16,6 +16,9 @@ from .signals import SmallCapSignals
 from .scoring import SmallCapScoring
 from .risk import SmallCapRisk
 from .universe import SmallCapUniverse
+from .sector_rs import SectorRS, get_sector_rs_bonus
+from .catalysts import CatalystDetector, get_catalyst_bonus
+from .narrative import generate_signal_narrative
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +186,7 @@ class SmallCapEngine:
             else:
                 emoji = "⭐"
                 reason = f"Early Stage: 5d={five_day_return:+.0f}%, RSI={rsi:.0f}"
-            return ('C', (2, 4), f"{emoji} {reason}")
+            return ('C', (3, 8), f"{emoji} {reason}")
         
         # ============================================================
         # TYPE B CHECK - Momentum Swing (PRIORITY 3)
@@ -222,19 +225,26 @@ class SmallCapEngine:
         
         # Type B threshold: 6+ points
         if type_b_score >= 6:
-            # RSI-based hold duration (2-6 days)
-            if rsi > 83:
-                hold_days = (1, 2)  # Parabolic
-            elif rsi > 78:
-                hold_days = (2, 3)  # Extreme
-            elif rsi > 73:
-                hold_days = (2, 4)  # Overbought
-            elif rsi > 68:
-                hold_days = (3, 5)  # Elevated
+            # ── STRICT FILTER GATE (v2.2) ──
+            # Tip B is HIGH RISK (chasing extended stocks).
+            # Only enter if ALL conditions met:
+            #   1. Volume >= 5x (extreme conviction)
+            #   2. RSI <= 75 (not too extreme)
+            #   3. Has catalyst (news/squeeze/insider = real reason)
+            # If filter fails → downgrade to Type A (safer hold period)
+            if volume_surge < 5.0 or rsi > 75 or not has_catalyst:
+                # Doesn't meet strict criteria → reclass as Type A
+                pass  # Fall through to Type A
             else:
-                hold_days = (4, 6)  # Room to run
-            
-            return ('B', hold_days, f"🚀 Momentum: 5d={five_day_return:+.0f}%, RSI={rsi:.0f}")
+                # Meets strict criteria → genuine Tip B
+                if rsi > 73:
+                    hold_days = (2, 4)  # Overbought but catalyst-driven
+                elif rsi > 68:
+                    hold_days = (3, 5)  # Elevated
+                else:
+                    hold_days = (4, 6)  # Room to run
+                
+                return ('B', hold_days, f"🚀 Momentum: 5d={five_day_return:+.0f}%, RSI={rsi:.0f}, Cat:✓")
         
         # ============================================================
         # TYPE A - Continuation Swing (FALLBACK)
@@ -263,13 +273,13 @@ class SmallCapEngine:
         if macd_bullish:
             type_a_reasons.append("MACD ✓")
         
-        # Sub-classification for Type A (4-10 days)
+        # Sub-classification for Type A (5-14 days, extended for proper swing)
         if five_day_return <= 15 and rsi <= 55:
-            hold_days = (4, 6)  # Early continuation
+            hold_days = (5, 10)  # Early continuation
         elif five_day_return <= 25 and rsi <= 62:
-            hold_days = (5, 8)  # Standard
+            hold_days = (7, 12)  # Standard
         else:
-            hold_days = (6, 10)  # Extended trend
+            hold_days = (8, 14)  # Extended trend
         
         return ('A', hold_days, "🐢 Continuation: " + ", ".join(type_a_reasons[:2]))
     
@@ -312,14 +322,24 @@ class SmallCapEngine:
             if stock_info is None:
                 stock_info = self.get_stock_info(ticker)
             
-            # Get signal date
-            signal_date = df['Date'].iloc[-1]
-            if isinstance(signal_date, pd.Timestamp):
-                signal_date_str = signal_date.strftime('%Y-%m-%d')
-                signal_date_dt = signal_date.to_pydatetime()
-            else:
-                signal_date_str = str(signal_date)
-                signal_date_dt = datetime.strptime(signal_date_str[:10], '%Y-%m-%d')
+            # Get signal date - handle both index-based and column-based Date
+            try:
+                if 'Date' in df.columns:
+                    signal_date = df['Date'].iloc[-1]
+                else:
+                    signal_date = df.index[-1]
+                
+                if isinstance(signal_date, pd.Timestamp):
+                    signal_date_str = signal_date.strftime('%Y-%m-%d')
+                    signal_date_dt = signal_date.to_pydatetime()
+                    if signal_date_dt.tzinfo is not None:
+                        signal_date_dt = signal_date_dt.replace(tzinfo=None)
+                else:
+                    signal_date_str = str(signal_date)[:10]
+                    signal_date_dt = datetime.strptime(signal_date_str, '%Y-%m-%d')
+            except Exception:
+                signal_date_str = datetime.now().strftime('%Y-%m-%d')
+                signal_date_dt = datetime.now()
             
             # Step 1: Apply universe filters
             filter_passed, filter_results = self.filters.apply_all_filters(
@@ -360,6 +380,40 @@ class SmallCapEngine:
             atr_percent = trigger_details.get('atr_percent', filter_results.get('atr_percent', 0.06))
             float_shares = filter_results.get('float_shares', 0)
             
+            # Get preliminary swing metrics for Sector RS
+            five_day_return_prelim = swing_details.get('five_day_momentum', {}).get('return', 0)
+            sector = stock_info.get('sector', 'Unknown')
+            
+            # ============================================================
+            # SECTOR RS & CATALYST DATA (Senior Trader v2.1)
+            # ============================================================
+            # Sector Relative Strength
+            sector_rs_data = SectorRS.calculate_sector_rs(ticker, sector, five_day_return_prelim)
+            boosters['sector_rs_bonus'] = sector_rs_data['bonus']
+            boosters['sector_rs_score'] = sector_rs_data['rs_score']
+            boosters['is_sector_leader'] = sector_rs_data['is_leader']
+            
+            # Catalyst Data (Short Interest, Insider, News)
+            catalyst_data = CatalystDetector.get_all_catalysts(ticker)
+            boosters['short_interest_bonus'] = catalyst_data['short_interest']['bonus']
+            boosters['short_percent'] = catalyst_data['short_interest']['short_percent']
+            boosters['days_to_cover'] = catalyst_data['short_interest']['days_to_cover']
+            boosters['is_squeeze_candidate'] = catalyst_data['short_interest']['is_squeeze_candidate']
+            boosters['insider_bonus'] = catalyst_data['insider']['bonus']
+            boosters['has_insider_buying'] = catalyst_data['insider']['has_insider_buying']
+            boosters['news_bonus'] = catalyst_data['news']['bonus']
+            boosters['has_recent_news'] = catalyst_data['news']['has_recent_news']
+            boosters['total_catalyst_bonus'] = catalyst_data['total_catalyst_bonus']
+            
+            # RSI Divergence (already in signals but ensure it's in boosters)
+            rsi_div = self.signals.detect_rsi_divergence(df, lookback=14)
+            boosters['rsi_divergence'] = rsi_div['divergence_found']
+            boosters['rsi_divergence_confidence'] = rsi_div.get('confidence', 0)
+            
+            # MACD check
+            macd_data = self.signals.calculate_macd(df)
+            boosters['macd_bullish'] = macd_data['bullish_cross'] or (macd_data['above_zero'] and macd_data['expanding'])
+            
             quality_score = self.scoring.calculate_quality_score(
                 df, volume_surge, atr_percent, float_shares, boosters
             )
@@ -387,10 +441,22 @@ class SmallCapEngine:
             # Type B: Momentum (2-5 days) - RSI-based duration
             # Type A: Continuation (4-8 days) - default
             # ============================================================
+            # Pass all available data to classify (catalyst/divergence were missing before)
+            has_any_catalyst = (
+                boosters.get('has_recent_news', False) or
+                boosters.get('is_squeeze_candidate', False) or
+                boosters.get('has_insider_buying', False) or
+                boosters.get('total_catalyst_bonus', 0) > 0
+            )
             swing_type, hold_days, type_reason = self._classify_swing_type(
                 five_day_return, rsi, volume_surge, higher_lows,
                 close_position=close_position,
-                ma20_distance=ma20_distance
+                ma20_distance=ma20_distance,
+                short_interest=boosters.get('short_percent', 0),
+                days_to_cover=boosters.get('days_to_cover', 0),
+                has_catalyst=has_any_catalyst,
+                rsi_divergence=boosters.get('rsi_divergence', False),
+                macd_bullish=boosters.get('macd_bullish', False)
             )
             
             # Swing type labels
@@ -433,6 +499,32 @@ class SmallCapEngine:
                 'gap_continuation': boosters.get('gap_continuation', False),
                 'higher_highs': boosters.get('higher_highs', False),
                 
+                # ============================================================
+                # NEW SENIOR TRADER v2.1 FIELDS
+                # ============================================================
+                # Sector Relative Strength
+                'sector_rs_score': round(boosters.get('sector_rs_score', 0), 1),
+                'sector_rs_bonus': boosters.get('sector_rs_bonus', 0),
+                'is_sector_leader': boosters.get('is_sector_leader', False),
+                
+                # Short Interest & Squeeze
+                'short_percent': round(boosters.get('short_percent', 0), 1),
+                'days_to_cover': round(boosters.get('days_to_cover', 0), 1),
+                'is_squeeze_candidate': boosters.get('is_squeeze_candidate', False),
+                'short_interest_bonus': boosters.get('short_interest_bonus', 0),
+                
+                # Insider & News
+                'has_insider_buying': boosters.get('has_insider_buying', False),
+                'insider_bonus': boosters.get('insider_bonus', 0),
+                'has_recent_news': boosters.get('has_recent_news', False),
+                'news_bonus': boosters.get('news_bonus', 0),
+                'total_catalyst_bonus': boosters.get('total_catalyst_bonus', 0),
+                
+                # RSI Divergence & MACD
+                'rsi_divergence': boosters.get('rsi_divergence', False),
+                'rsi_divergence_confidence': boosters.get('rsi_divergence_confidence', 0),
+                'macd_bullish': boosters.get('macd_bullish', False),
+                
                 # Filter/trigger details
                 'filter_results': filter_results,
                 'trigger_details': trigger_details,
@@ -450,6 +542,18 @@ class SmallCapEngine:
                 f"SMALL CAP SWING {type_emoji}: {ticker} | Type {swing_type} ({hold_days[0]}-{hold_days[1]}d) | "
                 f"Q:{quality_score:.0f} | 5d:{five_day_return:+.0f}% | RSI:{rsi:.0f} {safe_status}"
             )
+            
+            # Generate narrative analysis (Cuma Çevik style)
+            try:
+                narrative = generate_signal_narrative(signal, language='tr')
+                signal['narrative'] = narrative
+                signal['narrative_text'] = narrative.get('full_text', '')
+                signal['narrative_headline'] = narrative.get('headline', f"{ticker} - {swing_type}")
+            except Exception as e:
+                logger.warning(f"Could not generate narrative for {ticker}: {e}")
+                signal['narrative'] = None
+                signal['narrative_text'] = ''
+                signal['narrative_headline'] = f"{ticker} - Type {swing_type}"
             
             return signal
             

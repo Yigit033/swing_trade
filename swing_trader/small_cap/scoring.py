@@ -308,6 +308,31 @@ class SmallCapScoring:
                 bonus += 8   # PERFECT early entry zone!
             elif 0 < five_day_return < 5:
                 bonus += 5   # Very early (building phase)
+            
+            # ============================================================
+            # SECTOR RS BONUS (NEW - Senior Trader v2.1)
+            # ============================================================
+            sector_rs_bonus = boosters.get('sector_rs_bonus', 0)
+            bonus += sector_rs_bonus  # Max +12 for sector leader
+            
+            # ============================================================
+            # CATALYST BONUSES (NEW - Senior Trader v2.1)
+            # ============================================================
+            # Short Interest
+            short_interest_bonus = boosters.get('short_interest_bonus', 0)
+            bonus += short_interest_bonus  # Max +10 for squeeze candidate
+            
+            # Insider Buying
+            insider_bonus = boosters.get('insider_bonus', 0)
+            bonus += insider_bonus  # Max +8 for >$1M insider buying
+            
+            # News Activity
+            news_bonus = boosters.get('news_bonus', 0)
+            bonus += news_bonus  # Max +5 for high news activity
+            
+            # RSI Divergence (already exists but emphasize)
+            if boosters.get('rsi_divergence'):
+                bonus += 8  # Game changer for early reversal
         
         # ============================================================
         # PENALTY SYSTEM (max -40, expanded from -35)

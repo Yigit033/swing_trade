@@ -65,3 +65,19 @@ dist/
 *.temp
 *.bak
 ~*
+
+# Test results and debug output
+*_results.txt
+audit_report.txt
+
+# Debug/one-off scripts (keep test_backtest.py)
+debug_*.py
+db_audit.py
+db_integrity_check.py
+filter_analysis.py
+
+# Batch launchers (Windows-specific, not needed for Streamlit Cloud)
+*.bat
+
+# Data files (watchlist etc)
+data/watchlist.txt

@@ -30,8 +30,7 @@ class SmallCapFilters:
     - 15-30M: MICRO (+15 pts)
     - 30-45M: SMALL (+10 pts)
     - 45-60M: TIGHT (+5 pts)
-    - 60-80M: Accept but no bonus
-    - >80M:  REJECT
+    - >150M: REJECT
     """
     
     # SENIOR TRADER FILTER CONSTANTS
@@ -39,11 +38,11 @@ class SmallCapFilters:
     MAX_MARKET_CAP = 2_500_000_000    # $2.5B (was $3B)
     MIN_AVG_VOLUME = 750_000          # 750K shares (was 1M)
     MIN_ATR_PERCENT = 0.035           # 3.5% minimum
-    MAX_FLOAT = 80_000_000            # 80M shares (accept but no bonus)
+    MAX_FLOAT = 150_000_000            # 150M shares (was 80M - raised based on data analysis)
     IDEAL_FLOAT = 60_000_000          # 60M - main filter for explosion potential
     MIN_PRICE = 3.00                  # $3 (avoid penny stocks)
     MAX_PRICE = 200.00                # $200 (realistic small-cap)
-    EARNINGS_EXCLUSION_DAYS = 7       # ±7 days (was ±3)
+    EARNINGS_EXCLUSION_DAYS = 3       # ±3 days (was 7 - tightened to only block pre-event risk)
     ATR_PERIOD = 10                   # 10-period ATR (was 14, faster reaction)
     
     # FLOAT TIERING THRESHOLDS (for scoring bonus)
@@ -123,12 +122,12 @@ class SmallCapFilters:
         return True, f"ATR% OK ({atr_pct*100:.1f}%)"
     
     def check_float(self, float_shares: float) -> Tuple[bool, str]:
-        """Check if float is within small-cap range (≤80M, ideal ≤60M)."""
+        """Check if float is within small-cap range (≤150M, ideal ≤60M)."""
         if float_shares is None or float_shares <= 0:
             return True, "Float unknown (allowing)"  # Allow if unknown
         
         if float_shares > self.MAX_FLOAT:
-            return False, f"Float too large ({float_shares/1e6:.0f}M > 80M)"
+            return False, f"Float too large ({float_shares/1e6:.0f}M > 150M)"
         
         # Show tier info
         if float_shares <= self.FLOAT_TIER_ATOMIC:
@@ -139,11 +138,13 @@ class SmallCapFilters:
             return True, f"Float SMALL ({float_shares/1e6:.0f}M) +10pts"
         elif float_shares <= self.FLOAT_TIER_TIGHT:
             return True, f"Float TIGHT ({float_shares/1e6:.0f}M) +5pts"
-        else:
+        elif float_shares <= 80_000_000:
             return True, f"Float OK ({float_shares/1e6:.0f}M) +0pts"
+        else:
+            return True, f"Float WIDE ({float_shares/1e6:.0f}M) -5pts penalty"
     
     def get_float_tier_bonus(self, float_shares: float) -> int:
-        """Get bonus points for float tier."""
+        """Get bonus points for float tier. Negative bonus for wide floats."""
         if float_shares is None or float_shares <= 0:
             return 0
         
@@ -155,8 +156,12 @@ class SmallCapFilters:
             return 10  # SMALL
         elif float_shares <= self.FLOAT_TIER_TIGHT:
             return 5   # TIGHT
+        elif float_shares <= 80_000_000:
+            return 0   # OK - no bonus no penalty
+        elif float_shares <= self.MAX_FLOAT: # 80M < float_shares <= 150M
+            return -5  # WIDE - penalty but not rejected
         else:
-            return 0   # Accept but no bonus
+            return -100 # Rejected by hard filter, but return a large penalty if somehow reached
     
     def check_price(self, price: float) -> Tuple[bool, str]:
         """Check if price is within acceptable range ($3-$200)."""
@@ -172,7 +177,7 @@ class SmallCapFilters:
         return True, f"Price OK (${price:.2f})"
     
     def check_earnings(self, ticker: str, signal_date) -> Tuple[bool, str]:
-        """Check if stock has earnings within ±3 days."""
+        """Check if stock has earnings within ±3 days (tightened from ±7)."""
         try:
             import yfinance as yf
             from datetime import datetime, timedelta
@@ -188,10 +193,15 @@ class SmallCapFilters:
                     
                     for earn_date in earnings_dates.index:
                         earn_dt = earn_date.to_pydatetime().replace(tzinfo=None)
-                        days_diff = abs((earn_dt.date() - signal_date.date()).days)
+                        days_diff = (earn_dt.date() - signal_date.date()).days
                         
-                        if days_diff <= self.EARNINGS_EXCLUSION_DAYS:
-                            return False, f"Earnings within {days_diff} days"
+                        # Only block PRE-earnings (upcoming 3 days)
+                        if 0 <= days_diff <= self.EARNINGS_EXCLUSION_DAYS:
+                            return False, f"Earnings in {days_diff} days (pre-event risk)"
+                        
+                        # Also block day-of (just happened today)
+                        if days_diff == -1:
+                            return False, f"Earnings yesterday (wait for dust to settle)"
             except:
                 pass
             

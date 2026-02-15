@@ -69,7 +69,7 @@ strategy:
 
 backtesting:
   start_date: "2023-01-01"
-  end_date: "2026-01-09"
+  end_date: "2026-03-09"
   initial_capital: 10000
   commission_per_trade: 1.0         # $1 per trade
   slippage_percent: 0.001           # Base 0.1% slippage (used when dynamic is off)

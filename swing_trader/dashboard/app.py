@@ -26,6 +26,9 @@ from swing_trader.strategy.risk_manager import RiskManager
 from swing_trader.backtesting.engine import BacktestEngine
 from swing_trader.backtesting.metrics import PerformanceMetrics
 from swing_trader.small_cap import SmallCapEngine  # NEW: Independent SmallCap Engine
+from swing_trader.paper_trading.storage import PaperTradeStorage
+from swing_trader.paper_trading.tracker import PaperTradeTracker
+from swing_trader.paper_trading.reporter import PaperTradeReporter
 
 # Configure logging
 logging.basicConfig(
@@ -70,6 +73,18 @@ def init_session_state():
         st.session_state.manual_tickers = ""
     if 'manual_scan_time' not in st.session_state:
         st.session_state.manual_scan_time = None
+    
+    # Auto-track settings
+    if 'auto_track_enabled' not in st.session_state:
+        st.session_state.auto_track_enabled = True
+    if 'auto_track_min_quality' not in st.session_state:
+        st.session_state.auto_track_min_quality = 65
+    if 'last_auto_tracked' not in st.session_state:
+        st.session_state.last_auto_tracked = []
+    
+    # Scan history tracking
+    if 'scan_history' not in st.session_state:
+        st.session_state.scan_history = []  # List of {'timestamp': dt, 'type': 'smallcap'/'manual', 'signals': N}
     
     # LargeCap scan results
     if 'largecap_results' not in st.session_state:
@@ -930,6 +945,56 @@ def manual_lookup_page(components):
         st.session_state.manual_results = results
         st.session_state.manual_tickers = ticker_input
         st.session_state.manual_scan_time = datetime.now()
+        
+        # Log scan to history
+        swing_ready_count = sum(1 for r in results if r.get('swing_ready', False))
+        st.session_state.scan_history.append({
+            'timestamp': datetime.now().isoformat(),
+            'type': 'manual',
+            'signals': swing_ready_count
+        })
+        
+        # AUTO-TRACK for Manual Lookup
+        if st.session_state.auto_track_enabled and results:
+            auto_quality = st.session_state.auto_track_min_quality
+            paper_storage = PaperTradeStorage()
+            paper_tracker = PaperTradeTracker(paper_storage)
+            
+            auto_tracked = []
+            auto_skipped = []
+            
+            for result in results:
+                if (result.get('status') == 'analyzed' 
+                    and result.get('swing_ready', False) 
+                    and result.get('quality_score', 0) >= auto_quality):
+                    
+                    # Build signal dict for tracking
+                    track_signal = {
+                        'ticker': result.get('ticker', ''),
+                        'date': datetime.now().strftime('%Y-%m-%d'),
+                        'entry_price': result.get('entry_price', 0),
+                        'stop_loss': result.get('stop_loss', 0),
+                        'target_1': result.get('target_1', 0),
+                        'swing_type': result.get('swing_type', 'A'),
+                        'quality_score': result.get('quality_score', 0),
+                        'position_size': result.get('position_size', 100),
+                        'hold_days_max': result.get('hold_days', (2, 7))[1] if isinstance(result.get('hold_days'), tuple) else 7,
+                        'type_reason': result.get('type_reason', '')
+                    }
+                    
+                    trade_id = paper_tracker.add_trade_from_signal(track_signal)
+                    if trade_id > 0:
+                        auto_tracked.append(result['ticker'])
+                    else:
+                        auto_skipped.append(result['ticker'])
+            
+            if auto_tracked:
+                st.success(
+                    f"📌 **Auto-Track:** {len(auto_tracked)} sinyal paper trade'e eklendi → "
+                    f"{', '.join(auto_tracked)}"
+                )
+            if auto_skipped:
+                st.caption(f"⏭️ Zaten takipte: {', '.join(auto_skipped)}")
     
     # Display persisted results
     if st.session_state.manual_results:
@@ -1057,6 +1122,41 @@ def analyze_smallcap_ticker(ticker, df, info, engine, portfolio_value):
     result['stop_loss'] = signal.get('stop_loss')
     result['target_1'] = signal.get('target_1')
     result['position_size'] = signal.get('position_size')
+    
+    # Generate narrative for swing-ready signals
+    if result.get('swing_ready'):
+        try:
+            from swing_trader.small_cap.narrative import generate_signal_narrative
+            
+            # Build full signal dict for narrative
+            narrative_signal = {
+                'ticker': ticker,
+                'entry_price': today_close,
+                'stop_loss': result.get('stop_loss', 0),
+                'target_1': result.get('target_1', 0),
+                'quality_score': result.get('quality_score', 0),
+                'swing_type': result.get('swing_type', 'A'),
+                'volume_surge': result.get('volume_surge', 1.0),
+                'atr_percent': result.get('atr_percent', 0),
+                'rsi': result.get('rsi', 50),
+                'five_day_return': result.get('five_day_return', 0),
+                'float_millions': result.get('float_shares', 0) / 1_000_000 if result.get('float_shares') else 0,
+                'short_percent': 0,  # Would need separate fetch
+                'sector_rs_score': 0,
+                'is_sector_leader': False,
+                'is_squeeze_candidate': False,
+                'expected_hold_min': result.get('hold_days', (2, 5))[0],
+                'expected_hold_max': result.get('hold_days', (2, 5))[1],
+                'type_reason': result.get('type_reason', '')
+            }
+            
+            narrative = generate_signal_narrative(narrative_signal, language='tr')
+            result['narrative'] = narrative
+            result['narrative_text'] = narrative.get('full_text', '')
+            result['narrative_headline'] = narrative.get('headline', f"{ticker}")
+        except Exception as e:
+            result['narrative_text'] = ''
+            result['narrative_headline'] = f"{ticker} - {result.get('swing_type', 'A')}"
     
     return result
 
@@ -1187,6 +1287,40 @@ def display_ticker_result(result):
         pos_size = result.get('position_size', 0)
         if pos_size:
             st.caption(f"📊 Suggested Position: {pos_size} shares")
+        
+        # Narrative Analysis (Cuma Çevik Style)
+        narrative_text = result.get('narrative_text', '')
+        if narrative_text:
+            with st.expander("📝 Detaylı Analiz (Cuma Çevik Tarzı)", expanded=True):
+                st.markdown(narrative_text)
+                
+                # Add Track button
+                if st.button(f"📌 Track {ticker}", key=f"track_manual_{ticker}"):
+                    from swing_trader.paper_trading.storage import PaperTradeStorage
+                    from swing_trader.paper_trading.tracker import PaperTradeTracker
+                    
+                    paper_storage = PaperTradeStorage()
+                    paper_tracker = PaperTradeTracker(paper_storage)
+                    
+                    # Build signal dict for tracking
+                    track_signal = {
+                        'ticker': ticker,
+                        'date': datetime.now().strftime('%Y-%m-%d'),
+                        'entry_price': result.get('entry_price', 0),
+                        'stop_loss': result.get('stop_loss', 0),
+                        'target_1': result.get('target_1', 0),
+                        'swing_type': result.get('swing_type', 'A'),
+                        'quality_score': result.get('quality_score', 0),
+                        'position_size': pos_size,
+                        'hold_days_max': result.get('hold_days', (2, 7))[1],
+                        'type_reason': result.get('type_reason', '')
+                    }
+                    
+                    trade_id = paper_tracker.add_trade_from_signal(track_signal)
+                    if trade_id > 0:
+                        st.success(f"✅ {ticker} paper trade'e eklendi!")
+                    else:
+                        st.warning(f"⚠️ {ticker} zaten takipte")
     
     else:
         rejection = result.get('rejection_reason', 'Does not meet swing criteria')
@@ -1194,8 +1328,6 @@ def display_ticker_result(result):
         st.warning(f"""
         ### ❌ {ticker} - NOT SWING READY
         **{company_name}** | {sector} | ${market_cap/1e9:.2f}B
-        
-        **Reason:** {rejection}
         """)
         
         # Show more metrics including 5-day return
@@ -1216,16 +1348,124 @@ def display_ticker_result(result):
             else:
                 st.metric("Status", "❌ No Signal")
         
-        # Show filter details if available - AUTO EXPANDED for rejection
-        filter_details = result.get('filter_details', {})
-        if filter_details:
-            st.markdown("**🔍 Filter Details:**")
-            filters = filter_details.get('filters', {})
-            for key, val in filters.items():
-                passed = val.get('passed', False)
-                reason = val.get('reason', '')
-                icon = "✅" if passed else "❌"
-                st.write(f"{icon} **{key}**: {reason}")
+        # ── DETAILED REJECTION BREAKDOWN (Turkish) ──
+        with st.expander("🔍 Neden Reddedildi? — Detaylı Analiz", expanded=True):
+            # Determine which stage failed
+            filter_passed = result.get('filter_passed', False)
+            trigger_passed = result.get('trigger_passed', False)
+            swing_ready = result.get('swing_ready', False)
+            
+            # Stage 1: Filters
+            stage1_icon = "✅" if filter_passed else "❌"
+            # Stage 2: Triggers (only reached if filters pass)
+            stage2_icon = "✅" if trigger_passed else ("❌" if filter_passed else "⬜")
+            # Stage 3: Swing Confirmation (only reached if triggers pass)
+            stage3_icon = "✅" if swing_ready else ("❌" if trigger_passed else "⬜")
+            
+            st.markdown(f"""
+**Analiz Aşamaları:**
+{stage1_icon} Aşama 1: Filtreler (Market Cap, Volume, ATR%, Float, Earnings)
+{stage2_icon} Aşama 2: Sinyal Tetikleyiciler (Volume Patlama, Volatilite, Breakout)
+{stage3_icon} Aşama 3: Swing Onayı (5-Gün Momentum, MA20 Üzerinde, Higher Lows)
+            """)
+            
+            st.markdown("---")
+            
+            # ── STAGE 1: Filters ──
+            filter_details = result.get('filter_details', {})
+            if filter_details:
+                st.markdown("**📊 Aşama 1 — Filtreler:**")
+                filters = filter_details.get('filters', {})
+                filter_labels = {
+                    'market_cap': 'Piyasa Değeri',
+                    'avg_volume': 'Ortalama Hacim',
+                    'atr_percent': 'Volatilite (ATR%)',
+                    'float': 'Float (Halka Açık Pay)',
+                    'earnings': 'Kazanç Raporu',
+                    'price': 'Fiyat'
+                }
+                for key, val in filters.items():
+                    passed = val.get('passed', False)
+                    reason = val.get('reason', '')
+                    icon = "✅" if passed else "❌"
+                    label = filter_labels.get(key, key)
+                    st.write(f"{icon} **{label}**: {reason}")
+                
+                if not filter_passed:
+                    st.error("⛔ Filtrelerden geçemedi — sonraki aşamalar test edilmedi.")
+                    # Show explanation for common failures
+                    for key, val in filters.items():
+                        if not val.get('passed', False):
+                            if 'Float' in val.get('reason', ''):
+                                st.caption("💡 Float (halka açık pay sayısı) çok yüksek. Düşük float'lu hisseler daha patlayıcı hareket eder.")
+                            elif 'Earnings' in val.get('reason', ''):
+                                st.caption("💡 Kazanç raporu yakında açıklanacak. Rapor sonrası büyük düşüş riski var, bu yüzden bloklanıyor.")
+                            elif 'Market cap' in val.get('reason', ''):
+                                st.caption("💡 Piyasa değeri small-cap aralığının ($250M-$2.5B) dışında.")
+                            elif 'Volume' in val.get('reason', ''):
+                                st.caption("💡 Ortalama işlem hacmi çok düşük — likidite riski.")
+                            elif 'ATR' in val.get('reason', ''):
+                                st.caption("💡 Volatilite çok düşük — swing trade için yeterli hareket potansiyeli yok.")
+            
+            # ── STAGE 2: Triggers ──
+            trigger_details = result.get('trigger_details', {})
+            if trigger_details and filter_passed:
+                st.markdown("---")
+                st.markdown("**🎯 Aşama 2 — Sinyal Tetikleyiciler:**")
+                
+                triggers = trigger_details.get('triggers', {})
+                trigger_labels = {
+                    'volume_surge': 'Hacim Patlaması (Volume Surge)',
+                    'atr_percent': 'Volatilite Genişlemesi (ATR%)',
+                    'breakout': 'Breakout (Direnç Kırılımı)'
+                }
+                
+                for key, val in triggers.items():
+                    passed = val.get('passed', False)
+                    reason = val.get('reason', '')
+                    icon = "✅" if passed else "❌"
+                    label = trigger_labels.get(key, key)
+                    st.write(f"{icon} **{label}**: {reason}")
+                
+                if not trigger_passed:
+                    vol_surge = trigger_details.get('volume_surge', 0)
+                    st.error(f"⛔ Sinyal tetiklenmedi — hacim ortalamanın altında ({vol_surge:.1f}x). En az 1.5x olmalı.")
+                    st.caption("💡 Bu hisse şu an yeterli alım ilgisi görmüyor. Hacim patlaması olmadan girmek riskli — momentum olmadan fiyat hareket etmez.")
+            
+            # ── STAGE 3: Swing Confirmation ──
+            swing_details = result.get('swing_details', {})
+            if swing_details and trigger_passed:
+                st.markdown("---")
+                st.markdown("**✨ Aşama 3 — Swing Onayı:**")
+                
+                swing_checks = {
+                    'five_day_momentum': '5-Günlük Momentum',
+                    'above_ma20': '20-Gün Ort. Üzerinde',
+                    'higher_lows': 'Yükselen Dipler',
+                    'multi_day_volume': 'Çok-Gün Hacim Trendi',
+                    'overextension': 'Aşırı Uzama Kontrolü'
+                }
+                
+                for key, label in swing_checks.items():
+                    val = swing_details.get(key, {})
+                    if isinstance(val, dict):
+                        passed = val.get('passed')
+                        if passed is None:
+                            st.write(f"⬜ **{label}**: Kontrol edilmedi")
+                        else:
+                            icon = "✅" if passed else "❌"
+                            ret = val.get('return', val.get('value', ''))
+                            extra = f" ({ret:.1f}%)" if isinstance(ret, (int, float)) else ""
+                            st.write(f"{icon} **{label}**{extra}")
+                
+                if not swing_ready:
+                    st.error("⛔ Swing onayı başarısız — trend teyit edilemedi.")
+                    five_day = swing_details.get('five_day_momentum', {})
+                    ma20 = swing_details.get('above_ma20', {})
+                    if isinstance(five_day, dict) and not five_day.get('passed', True):
+                        st.caption("💡 Son 5 günde negatif momentum — hisse düşüşte.")
+                    if isinstance(ma20, dict) and not ma20.get('passed', True):
+                        st.caption("💡 Fiyat 20-günlük ortalamanın altında — hisse henüz toparlanmadı.")
     
     st.markdown("---")
 
@@ -1269,6 +1509,30 @@ def small_cap_page(components):
     with col3:
         top_n = st.number_input("Top N Results", value=5, min_value=1, max_value=15, key="sc_topn")
     
+    # Auto-Track Settings
+    with st.expander("⚙️ Auto-Track Ayarları", expanded=False):
+        at_col1, at_col2 = st.columns(2)
+        with at_col1:
+            auto_track = st.checkbox(
+                "📌 Otomatik Paper Trade Takibi",
+                value=st.session_state.auto_track_enabled,
+                help="Scan sonucu kaliteli sinyalleri otomatik paper trade'e ekler"
+            )
+            st.session_state.auto_track_enabled = auto_track
+        with at_col2:
+            auto_track_quality = st.slider(
+                "Min kalite (Auto-Track)", 50, 100, 
+                st.session_state.auto_track_min_quality,
+                key="sc_auto_quality",
+                help="Bu puanın üzerindeki sinyaller otomatik takibe alınır"
+            )
+            st.session_state.auto_track_min_quality = auto_track_quality
+        
+        if auto_track:
+            st.info(f"✅ Kalite ≥ **{auto_track_quality}** olan sinyaller otomatik paper trade'e eklenecek")
+        else:
+            st.caption("⏸️ Otomatik takip kapalı — sinyalleri manuel olarak eklemeniz gerekir")
+    
     # Scan button
     if st.button("🚀 Scan SmallCaps", type="primary"):
         with st.spinner("Scanning small cap momentum stocks..."):
@@ -1305,6 +1569,44 @@ def small_cap_page(components):
                     'signals_found': len(signals)
                 }
                 
+                # Log scan to history
+                st.session_state.scan_history.append({
+                    'timestamp': datetime.now().isoformat(),
+                    'type': 'smallcap',
+                    'signals': len(signals)
+                })
+                
+                # ============================================================
+                # AUTO-TRACK: Automatically add qualifying signals to paper trades
+                # ============================================================
+                if st.session_state.auto_track_enabled and signals:
+                    auto_quality = st.session_state.auto_track_min_quality
+                    paper_storage = PaperTradeStorage()
+                    paper_tracker = PaperTradeTracker(paper_storage)
+                    
+                    auto_tracked = []
+                    auto_skipped = []
+                    
+                    for signal in signals:
+                        if signal.get('quality_score', 0) >= auto_quality:
+                            trade_id = paper_tracker.add_trade_from_signal(signal)
+                            if trade_id > 0:
+                                auto_tracked.append(signal['ticker'])
+                            else:
+                                auto_skipped.append(signal['ticker'])
+                    
+                    st.session_state.last_auto_tracked = auto_tracked
+                    
+                    if auto_tracked:
+                        st.success(
+                            f"📌 **Auto-Track:** {len(auto_tracked)} sinyal paper trade'e eklendi → "
+                            f"{', '.join(auto_tracked)}"
+                        )
+                    if auto_skipped:
+                        st.caption(
+                            f"⏭️ Zaten takipte: {', '.join(auto_skipped)}"
+                        )
+                
             except Exception as e:
                 st.error(f"Error during scan: {e}")
                 logging.exception("SmallCap scan error")
@@ -1333,6 +1635,10 @@ def small_cap_page(components):
                 'Vol Surge': f"{s['volume_surge']:.1f}x",
                 'ATR%': f"{s['atr_percent']:.1f}%",
                 'Float': f"{s['float_millions']:.0f}M",
+                # NEW COLUMNS: Senior Trader v2.1
+                'SI%': f"{s.get('short_percent', 0):.1f}%" if s.get('short_percent', 0) > 0 else '-',
+                'RS': f"+{s.get('sector_rs_score', 0):.0f}" if s.get('sector_rs_score', 0) > 0 else f"{s.get('sector_rs_score', 0):.0f}",
+                'Cat': '🔥' if s.get('total_catalyst_bonus', 0) >= 10 else ('✨' if s.get('total_catalyst_bonus', 0) >= 5 else '-'),
                 'Hold': f"{s['expected_hold_min']}-{s['expected_hold_max']}d",
                 '⚠️': '🔴' if s.get('volatility_warning') else '🟢'
             })
@@ -1345,16 +1651,70 @@ def small_cap_page(components):
             st.markdown("""
             | Column | Meaning |
             |--------|---------|
-            | **Quality** | Momentum quality score (0-100) |
+            | **Quality** | Momentum quality score (0-150) |
             | **Entry** | Current close price (enter here) |
             | **Stop** | Stop loss (1-1.5 ATR) |
             | **Target (3R)** | Minimum 3:1 reward target |
             | **Vol Surge** | Volume vs 20-day avg |
             | **ATR%** | Volatility (ATR/Price) |
             | **Float** | Shares floating (smaller = more explosive) |
+            | **SI%** | Short Interest % of Float (>20% = squeeze candidate) |
+            | **RS** | Sector Relative Strength (>+15 = sector leader) |
+            | **Cat** | Catalyst: 🔥 Strong, ✨ Moderate, - None |
             | **Hold** | Expected holding period |
             | **⚠️** | Volatility warning (always 🔴 for small caps) |
             """)
+        
+        # ============================================================
+        # NARRATIVE ANALYSIS SECTION (Cuma Çevik Style)
+        # ============================================================
+        st.markdown("---")
+        st.markdown("### 📝 Sinyal Analizleri")
+        st.caption("Her sinyal için detaylı yorum ve öneri")
+        
+        for signal in signals:
+            ticker = signal['ticker']
+            headline = signal.get('narrative_headline', f"{ticker}")
+            narrative_text = signal.get('narrative_text', '')
+            quality = signal.get('quality_score', 0)
+            
+            # Quality badge
+            if quality >= 75:
+                badge = "🔥"
+            elif quality >= 60:
+                badge = "✅"
+            else:
+                badge = "⚠️"
+            
+            with st.expander(f"{badge} **{headline}**", expanded=False):
+                if narrative_text:
+                    st.markdown(narrative_text)
+                else:
+                    # Fallback if narrative not generated
+                    st.markdown(f"""
+**{ticker}** - Type {signal.get('swing_type', 'A')}
+
+📍 **Entry:** ${signal.get('entry_price', 0):.2f}
+🛑 **Stop:** ${signal.get('stop_loss', 0):.2f}
+🎯 **Target:** ${signal.get('target_1', 0):.2f}
+
+📊 **Metrikler:**
+- Volume: {signal.get('volume_surge', 1):.1f}x
+- RSI: {signal.get('rsi', 50):.0f}
+- 5 Günlük: +{signal.get('five_day_return', 0):.0f}%
+                    """)
+                
+                # Track button inside expander
+                if st.button(f"📌 Track {ticker}", key=f"track_exp_{ticker}"):
+                    paper_storage = PaperTradeStorage()
+                    paper_tracker = PaperTradeTracker(paper_storage)
+                    trade_id = paper_tracker.add_trade_from_signal(signal)
+                    if trade_id > 0:
+                        st.success(f"✅ {ticker} paper trade'e eklendi!")
+                    else:
+                        st.warning(f"⚠️ {ticker} zaten takipte")
+        
+        st.markdown("---")
         
         # Risk reminder - DYNAMIC values
         st.error(f"""
@@ -1372,6 +1732,597 @@ def small_cap_page(components):
         st.info("👆 Click 'Scan SmallCaps' to find momentum opportunities")
 
 
+# ================================================================
+# PAPER TRADES PAGE
+# ================================================================
+
+def paper_trades_page(components: dict):
+    """Paper Trading Tracker page - Track signals without real money."""
+    
+    st.title("📊 Paper Trading Tracker")
+    st.markdown("*Track your SmallCap signals without risking real money*")
+    
+    # Initialize paper trading components
+    storage = PaperTradeStorage()
+    tracker = PaperTradeTracker(storage)
+    reporter = PaperTradeReporter(storage)
+    
+    # Tabs
+    tab1, tab2, tab3 = st.tabs(["📈 Active Trades", "📜 Closed Trades", "📊 Performance"])
+    
+    # ============================================================
+    # TAB 1: ACTIVE TRADES
+    # ============================================================
+    with tab1:
+        st.subheader("Active Paper Trades")
+        
+        # Update button
+        if st.button("🔄 Update Prices", key="update_prices"):
+            with st.spinner("Fetching latest prices..."):
+                # This also confirms pending trades via reporter
+                tracker.confirm_pending_trades()
+                tracker.update_all_open_trades()
+                st.success("Prices updated & pending trades confirmed!")
+                st.rerun()
+        
+        # Get open trades summary
+        open_summary = reporter.get_open_trades_summary()
+        
+        if open_summary['count'] > 0:
+            # Summary metrics
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Open Positions", open_summary['count'])
+            with col2:
+                unrealized = open_summary['total_unrealized_pnl']
+                st.metric(
+                    "Total Unrealized P/L",
+                    f"${unrealized:+.2f}",
+                    delta=f"${unrealized:+.2f}"
+                )
+            
+            st.markdown("---")
+            
+            # Display active trades
+            for trade in open_summary['trades']:
+                trailing = trade.get('trailing_stop', trade['stop_loss'])
+                trail_moved = trailing > trade.get('initial_stop', trade['stop_loss'])
+                trail_label = f" (🔒 Trailing: ${trailing:.2f})" if trail_moved else ""
+                
+                with st.expander(
+                    f"**{trade['ticker']}** | ${trade['current_price']:.2f} | "
+                    f"{trade['unrealized_pnl_pct']:+.1f}% | Day {trade['days_held']}/{trade['max_hold_days']}"
+                    f"{trail_label}",
+                    expanded=True
+                ):
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.write(f"**Entry:** ${trade['entry_price']:.2f}")
+                        stop_display = f"${trade['stop_loss']:.2f}"
+                        if trail_moved:
+                            stop_display = f"~~${trade['stop_loss']:.2f}~~ → **${trailing:.2f}** 🔒"
+                        st.markdown(f"**Stop:** {stop_display}", unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.write(f"**Current:** ${trade['current_price']:.2f}")
+                        st.write(f"**Target:** ${trade['target']:.2f}")
+                    
+                    with col3:
+                        pnl_color = "green" if trade['unrealized_pnl'] >= 0 else "red"
+                        st.markdown(
+                            f"**P/L:** <span style='color:{pnl_color}'>${trade['unrealized_pnl']:+.2f} "
+                            f"({trade['unrealized_pnl_pct']:+.1f}%)</span>",
+                            unsafe_allow_html=True
+                        )
+                        st.write(f"**Type:** {trade['swing_type']}")
+                    
+                    with col4:
+                        # Manual close button
+                        if st.button(f"Close Trade", key=f"close_{trade['id']}"):
+                            tracker.manual_close_trade(trade['id'])
+                            st.success(f"Closed {trade['ticker']}")
+                            st.rerun()
+                        
+                        # Delete button
+                        if st.button(f"🗑️ Delete", key=f"delete_{trade['id']}"):
+                            storage.delete_trade(trade['id'])
+                            st.warning(f"Deleted {trade['ticker']}")
+                            st.rerun()
+        else:
+            st.info("No active paper trades. Add trades from SmallCap Momentum page!")
+        
+        # PENDING trades section
+        if open_summary.get('pending_count', 0) > 0:
+            st.markdown("---")
+            st.subheader("⏳ Pending Trades (Ertesi Gün Onayı Bekleniyor)")
+            st.caption("Bu sinyaller ertesi gün açılışta otomatik onaylanacak. Gap >5%↑ veya >3%↓ ise reddedilir.")
+            
+            for trade in open_summary['pending_trades']:
+                signal_price = trade.get('signal_price') or trade['entry_price']
+                st.warning(
+                    f"**{trade['ticker']}** | Sinyal: ${signal_price:.2f} | "
+                    f"Type {trade['swing_type']} | "
+                    f"🔄 Update Prices ile onaylanacak"
+                )
+        
+        # Show confirm results if any
+        confirm_results = open_summary.get('confirm_results', [])
+        for cr in confirm_results:
+            if cr.get('confirm_status') == 'confirmed':
+                st.success(
+                    f"✅ {cr['ticker']} onaylandı: Open ${cr.get('entry_price', 0):.2f} "
+                    f"(gap {cr.get('gap_pct', 0):+.1f}%)"
+                )
+            elif cr.get('confirm_status') == 'rejected':
+                st.error(
+                    f"❌ {cr['ticker']} reddedildi: {cr.get('reject_reason', 'Gap filtresi')}"
+                )
+        
+        st.markdown("---")
+        
+        # Manual add trade form
+        with st.expander("➕ Manually Add Trade"):
+            with st.form("add_trade_form"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    ticker = st.text_input("Ticker", placeholder="AAPL")
+                    entry_price = st.number_input("Entry Price", min_value=0.01, value=10.0)
+                    stop_loss = st.number_input("Stop Loss", min_value=0.01, value=9.0)
+                
+                with col2:
+                    entry_date = st.date_input("Entry Date")
+                    target = st.number_input("Target", min_value=0.01, value=13.0)
+                    swing_type = st.selectbox("Swing Type", ["A", "B", "C", "S"])
+                
+                if st.form_submit_button("Add Trade"):
+                    trade = {
+                        'ticker': ticker.upper(),
+                        'entry_date': entry_date.strftime('%Y-%m-%d'),
+                        'entry_price': entry_price,
+                        'stop_loss': stop_loss,
+                        'target': target,
+                        'swing_type': swing_type,
+                        'quality_score': 0,
+                        'position_size': 100,
+                        'max_hold_days': 7
+                    }
+                    trade_id = storage.add_trade(trade)
+                    if trade_id > 0:
+                        st.success(f"Added {ticker} (ID: {trade_id})")
+                        st.rerun()
+                    else:
+                        st.error("Failed to add trade")
+    
+    # ============================================================
+    # TAB 2: CLOSED TRADES
+    # ============================================================
+    with tab2:
+        st.subheader("Closed Trade History")
+        
+        closed_trades = storage.get_closed_trades(limit=50)
+        
+        if closed_trades:
+            # Build display data
+            display_data = []
+            for t in closed_trades:
+                pnl_pct = t.get('realized_pnl_pct', 0) or 0
+                display_data.append({
+                    'Ticker': t['ticker'],
+                    'Type': t.get('swing_type', '-'),
+                    'Entry': f"${t['entry_price']:.2f}",
+                    'Exit': f"${t.get('exit_price', 0):.2f}",
+                    'P/L %': f"{pnl_pct:+.1f}%",
+                    'P/L $': f"${t.get('realized_pnl', 0):+.2f}",
+                    'Status': t['status'],
+                    'Entry Date': t['entry_date'],
+                    'Exit Date': t.get('exit_date', '-')
+                })
+            
+            df = pd.DataFrame(display_data)
+            st.dataframe(df, use_container_width=True, height=400)
+            
+            # Color legend
+            st.markdown("""
+            **Exit Types:**
+            - 🔴 **STOPPED**: Hit stop loss
+            - 🔒 **TRAILED**: Trailing stop triggered (profit protected)
+            - 🎯 **TARGET**: Hit target price  
+            - ⏰ **TIMEOUT**: Max hold days exceeded
+            - ✋ **MANUAL**: Manually closed
+            - ❌ **REJECTED**: Gap filter rejected (not entered)
+            """)
+        else:
+            st.info("No closed trades yet.")
+    
+    # ============================================================
+    # TAB 3: PERFORMANCE
+    # ============================================================
+    with tab3:
+        st.subheader("Performance Summary")
+        
+        summary = reporter.get_performance_summary()
+        
+        if summary['closed_trades'] > 0:
+            # Key metrics
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Total Trades", summary['closed_trades'])
+            with col2:
+                st.metric("Win Rate", f"{summary['win_rate']:.1f}%")
+            with col3:
+                st.metric("Total P/L", f"${summary['total_pnl']:+.2f}")
+            with col4:
+                pf = summary['profit_factor']
+                pf_str = f"{pf:.2f}" if pf < 100 else "∞"
+                st.metric("Profit Factor", pf_str)
+            
+            st.markdown("---")
+            
+            # Win/Loss breakdown
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("### Win/Loss Breakdown")
+                st.write(f"**Wins:** {summary['wins']}")
+                st.write(f"**Losses:** {summary['losses']}")
+                st.write(f"**Avg Win:** ${summary['avg_win']:.2f}")
+                st.write(f"**Avg Loss:** ${summary['avg_loss']:.2f}")
+                st.write(f"**Avg Hold Days:** {summary['avg_hold_days']:.1f}")
+            
+            with col2:
+                st.markdown("### Best/Worst Trades")
+                if summary['best_trade']:
+                    bt = summary['best_trade']
+                    st.success(f"🏆 Best: {bt['ticker']} ({bt['pnl_pct']:+.1f}%)")
+                if summary['worst_trade']:
+                    wt = summary['worst_trade']
+                    st.error(f"📉 Worst: {wt['ticker']} ({wt['pnl_pct']:+.1f}%)")
+            
+            st.markdown("---")
+            
+            # By Exit Type
+            st.markdown("### Performance by Exit Type")
+            exit_data = []
+            for status, data in summary['by_exit_type'].items():
+                exit_data.append({
+                    'Exit Type': status,
+                    'Count': data['count'],
+                    'Avg P/L %': f"{data['avg_pnl_pct']:+.1f}%",
+                    'Total P/L': f"${data['total_pnl']:+.2f}"
+                })
+            if exit_data:
+                st.dataframe(pd.DataFrame(exit_data), use_container_width=True)
+            
+            # By Swing Type
+            st.markdown("### Performance by Swing Type")
+            type_data = []
+            for swing_type, data in summary['by_swing_type'].items():
+                type_data.append({
+                    'Swing Type': f"Type {swing_type}",
+                    'Count': data['count'],
+                    'Win Rate': f"{data['win_rate']:.0f}%",
+                    'Avg P/L %': f"{data['avg_pnl_pct']:+.1f}%",
+                    'Total P/L': f"${data['total_pnl']:+.2f}"
+                })
+            if type_data:
+                st.dataframe(pd.DataFrame(type_data), use_container_width=True)
+        else:
+            st.info("No closed trades yet. Performance stats will appear after you close some trades.")
+
+
+def dashboard_daily_summary():
+    """
+    Daily summary widget for sidebar.
+    Shows open trades, P/L, and scan activity.
+    Always visible regardless of current page.
+    """
+    try:
+        paper_storage = PaperTradeStorage()
+        paper_tracker = PaperTradeTracker(paper_storage)
+        
+        # Update and get open trades
+        open_trades = paper_tracker.update_all_open_trades()
+        closed_trades = paper_storage.get_closed_trades(limit=100)
+        
+        # ── OPEN TRADES ──
+        st.sidebar.markdown("### 📋 Günlük Özet")
+        
+        if open_trades:
+            st.sidebar.success(f"📌 **{len(open_trades)} açık trade**")
+            
+            for trade in open_trades:
+                ticker = trade['ticker']
+                entry = trade['entry_price']
+                current = trade.get('current_price', entry)
+                stop = trade['stop_loss']
+                target = trade['target']
+                pnl_pct = trade.get('unrealized_pnl_pct', 0)
+                days = trade.get('days_held', 0)
+                max_days = trade.get('max_hold_days', 7)
+                
+                # P/L emoji
+                if pnl_pct >= 10:
+                    pnl_icon = "🔥"
+                elif pnl_pct >= 0:
+                    pnl_icon = "🟢"
+                else:
+                    pnl_icon = "🔴"
+                
+                # Distance to stop and target
+                stop_dist = ((current - stop) / current * 100) if current > 0 else 0
+                target_dist = ((target - current) / current * 100) if current > 0 else 0
+                
+                # Proximity warning
+                if stop_dist < 3:
+                    proximity = "⚠️ Stop'a çok yakın!"
+                elif target_dist < 5:
+                    proximity = "🎯 Hedefe yakın!"
+                elif days >= max_days - 1:
+                    proximity = "⏰ Timeout yakın!"
+                else:
+                    proximity = ""
+                
+                st.sidebar.markdown(
+                    f"{pnl_icon} **{ticker}** {pnl_pct:+.1f}% "
+                    f"({days}/{max_days}g)"
+                )
+                if proximity:
+                    st.sidebar.caption(f"  {proximity}")
+        else:
+            st.sidebar.info("📭 Açık trade yok")
+        
+        # ── GENEL İSTATİSTİK ──
+        total_closed = len(closed_trades)
+        if total_closed > 0:
+            wins = sum(1 for t in closed_trades if (t.get('realized_pnl', 0) or 0) >= 0)
+            total_pnl = sum((t.get('realized_pnl', 0) or 0) for t in closed_trades)
+            win_rate = (wins / total_closed * 100) if total_closed > 0 else 0
+            
+            pnl_color = "🟢" if total_pnl >= 0 else "🔴"
+            st.sidebar.markdown(
+                f"📊 {total_closed} kapalı | "
+                f"WR: {win_rate:.0f}% | "
+                f"{pnl_color} ${total_pnl:+.0f}"
+            )
+        
+        # ── SCAN AKTİVİTESİ ──
+        scan_history = st.session_state.get('scan_history', [])
+        
+        # Count scans in last 7 days
+        from datetime import timedelta
+        week_ago = datetime.now() - timedelta(days=7)
+        recent_scans = [s for s in scan_history 
+                       if datetime.fromisoformat(s['timestamp']) > week_ago]
+        
+        if recent_scans:
+            last_scan = max(recent_scans, key=lambda x: x['timestamp'])
+            last_dt = datetime.fromisoformat(last_scan['timestamp'])
+            hours_ago = (datetime.now() - last_dt).total_seconds() / 3600
+            
+            if hours_ago < 1:
+                time_str = f"{int(hours_ago * 60)}dk önce"
+            elif hours_ago < 24:
+                time_str = f"{int(hours_ago)}sa önce"
+            else:
+                time_str = f"{int(hours_ago / 24)}g önce"
+            
+            st.sidebar.caption(
+                f"🔍 Son scan: {time_str} | "
+                f"7 günde {len(recent_scans)} scan"
+            )
+        else:
+            st.sidebar.warning("🔍 Son 7 günde scan yapılmadı!")
+        
+    except Exception as e:
+        st.sidebar.caption(f"⚠️ Özet yüklenemedi")
+
+
+def smallcap_backtest_page(components):
+    """SmallCap Walk-Forward Backtest page."""
+    st.title("📊 SmallCap Walk-Forward Backtest")
+    st.markdown("*Geçmiş verilerle SmallCap sinyal kalitesini test edin*")
+    
+    # Parameters
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        period = st.selectbox(
+            "Test Periyodu",
+            ["1 Ay", "2 Ay", "3 Ay", "6 Ay"],
+            index=2
+        )
+        period_days = {"1 Ay": 30, "2 Ay": 60, "3 Ay": 90, "6 Ay": 180}[period]
+    with col2:
+        max_concurrent = st.number_input("Maks Eş Zamanlı Trade", min_value=1, max_value=10, value=3)
+    with col3:
+        initial_capital = st.number_input("Başlangıç Sermaye ($)", min_value=1000, value=10000, step=1000)
+    
+    # Ticker source
+    ticker_source = st.radio(
+        "Hisse Kaynağı",
+        ["🔍 Finviz Tarama (Gerçek Small-Cap)", "📝 Manuel Listele"],
+        horizontal=True
+    )
+    
+    custom_tickers = []
+    if ticker_source == "📝 Manuel Listele":
+        ticker_input = st.text_input("Tickerları virgülle girin", "AEHR,AXTI,VELO,FSLY,NMRA,NVCR,SGRY")
+        custom_tickers = [t.strip().upper() for t in ticker_input.split(",") if t.strip()]
+    
+    if st.button("🚀 Backtest Başlat", type="primary"):
+        from swing_trader.small_cap.smallcap_backtest import SmallCapBacktester
+        
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=period_days)
+        
+        backtester = SmallCapBacktester(components['config'])
+        
+        # Get tickers
+        if custom_tickers:
+            tickers = custom_tickers
+        else:
+            with st.spinner("Finviz'den hisse listesi alınıyor..."):
+                try:
+                    from swing_trader.small_cap.engine import SmallCapEngine
+                    engine = SmallCapEngine(components['config'])
+                    tickers = engine.get_small_cap_universe(use_finviz=True, max_tickers=50)
+                except Exception:
+                    tickers = []
+            
+            if not tickers:
+                st.warning("Hisse bulunamadı. Manuel liste kullanın.")
+                return
+        
+        st.info(f"📊 {len(tickers)} hisse | {start_date.strftime('%Y-%m-%d')} → {end_date.strftime('%Y-%m-%d')} | Maks {max_concurrent} eş zamanlı trade")
+        
+        # Progress bar
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        def update_progress(pct, msg):
+            progress_bar.progress(min(pct, 100))
+            status_text.text(msg)
+        
+        # Run backtest
+        results = backtester.run_backtest(
+            tickers=tickers,
+            start_date=start_date.strftime('%Y-%m-%d'),
+            end_date=end_date.strftime('%Y-%m-%d'),
+            initial_capital=initial_capital,
+            max_concurrent=max_concurrent,
+            progress_callback=update_progress
+        )
+        
+        progress_bar.progress(100)
+        status_text.text("✅ Backtest tamamlandı!")
+        
+        metrics = results['metrics']
+        trades = results['trades']
+        
+        if metrics['total_trades'] == 0:
+            st.warning("⚠️ Bu dönemde hiç sinyal üretilmedi. Daha uzun periyot veya daha fazla hisse deneyin.")
+            return
+        
+        # Store results in session for persistence
+        st.session_state['backtest_results'] = results
+        
+        st.success(f"✅ **{metrics['total_trades']} trade** tamamlandı!")
+        
+        # ── KEY METRICS ──
+        st.markdown("---")
+        st.subheader("📈 Temel Metrikler")
+        
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Toplam Trade", metrics['total_trades'])
+        
+        wr = metrics['win_rate']
+        wr_color = "normal" if wr >= 0.5 else "inverse"
+        col2.metric("Win Rate", f"{wr:.0%}", delta=f"{metrics['winning_trades']}W / {metrics['losing_trades']}L")
+        
+        col3.metric("Profit Factor", f"{metrics['profit_factor']:.2f}", 
+                    delta="İyi" if metrics['profit_factor'] > 1.5 else "Zayıf")
+        
+        col4.metric("Toplam P/L", f"${metrics['total_pnl_dollar']:+,.0f}",
+                    delta=f"{metrics['total_return']:+.1%}")
+        
+        col5.metric("Max Drawdown", f"{metrics['max_drawdown']:.1f}%")
+        
+        # ── AVG WIN/LOSS ──
+        st.markdown("---")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown("**💰 Kazanç Analizi**")
+            st.write(f"Ort. Kazanç: **+{metrics['avg_win_pct']:.1f}%** (${metrics['avg_win_dollar']:+.0f})")
+            st.write(f"Ort. Kayıp: **{metrics['avg_loss_pct']:.1f}%** (${metrics['avg_loss_dollar']:+.0f})")
+            rr = abs(metrics['avg_win_pct'] / metrics['avg_loss_pct']) if metrics['avg_loss_pct'] != 0 else 0
+            st.write(f"Risk/Reward: **{rr:.1f}:1**")
+        
+        with col2:
+            st.markdown("**⏱️ Süre Analizi**")
+            st.write(f"Ort. Tutma Süresi: **{metrics['avg_hold_days']:.1f} gün**")
+            st.write(f"Başlangıç: ${metrics['initial_capital']:,.0f}")
+            st.write(f"Bitiş: ${metrics['final_capital']:,.0f}")
+        
+        with col3:
+            st.markdown("**📊 Swing Tipi Dağılımı**")
+            type_stats = metrics.get('type_stats', {})
+            for stype, stats in type_stats.items():
+                total_t = stats['wins'] + stats['losses']
+                wr_t = stats['wins'] / total_t if total_t > 0 else 0
+                st.write(f"**Tip {stype}**: {total_t} trade, WR: {wr_t:.0%}, P/L: {stats['total_pnl']:+.1f}%")
+        
+        # ── EXIT ANALYSIS ──
+        st.markdown("---")
+        st.subheader("🚪 Çıkış Analizi")
+        exit_stats = metrics.get('exit_stats', {})
+        
+        exit_labels = {
+            'STOPPED': '🛑 Stop Loss',
+            'TARGET': '🎯 Target Hit',
+            'TIMEOUT': '⏰ Timeout',
+            'FORCED': '🔚 Backtest Sonu'
+        }
+        
+        exit_cols = st.columns(len(exit_stats))
+        for i, (reason, stats) in enumerate(exit_stats.items()):
+            with exit_cols[i] if i < len(exit_cols) else st.columns(1)[0]:
+                label = exit_labels.get(reason, reason)
+                st.metric(label, stats['count'], delta=f"Ort: {stats['avg_pnl']:+.1f}%")
+        
+        # ── EQUITY CURVE ──
+        equity_curve = results.get('equity_curve', [])
+        if equity_curve:
+            st.markdown("---")
+            st.subheader("📈 Equity Curve (Portföy Değeri)")
+            
+            eq_df = pd.DataFrame(equity_curve)
+            eq_df['date'] = pd.to_datetime(eq_df['date'])
+            
+            import plotly.graph_objects as go
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=eq_df['date'],
+                y=eq_df['portfolio_value'],
+                name='Portföy Değeri',
+                line=dict(color='#2196F3', width=2),
+                fill='tozeroy',
+                fillcolor='rgba(33,150,243,0.1)'
+            ))
+            fig.add_hline(y=initial_capital, line_dash="dash", line_color="gray",
+                         annotation_text="Başlangıç Sermaye")
+            fig.update_layout(
+                yaxis_title='Portföy Değeri ($)',
+                xaxis_title='Tarih',
+                height=400,
+                template='plotly_white'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # ── TRADE LOG ──
+        if trades:
+            st.markdown("---")
+            st.subheader("📝 Trade Geçmişi")
+            
+            log_data = []
+            for t in trades:
+                log_data.append({
+                    'Hisse': t['ticker'],
+                    'Tip': t.get('swing_type', '-'),
+                    'Giriş': f"${t['entry_price']:.2f}",
+                    'Çıkış': f"${t['exit_price']:.2f}",
+                    'P/L %': f"{t['pnl_pct']:+.1f}%",
+                    'P/L $': f"${t['pnl_dollar']:+.0f}",
+                    'Giriş Tarihi': t['entry_date'],
+                    'Çıkış Tarihi': t.get('exit_date', '-'),
+                    'Süre (gün)': t.get('days_held', '-'),
+                    'Çıkış Nedeni': t.get('exit_reason', '-'),
+                    'Skor': t.get('quality_score', 0)
+                })
+            
+            log_df = pd.DataFrame(log_data)
+            st.dataframe(log_df, use_container_width=True, height=400)
+
 
 def main():
     """Main dashboard application."""
@@ -1388,8 +2339,12 @@ def main():
     
     page = st.sidebar.radio(
         "Navigation",
-        ["🔍 Scan Stocks (Large Cap)", "🚀 SmallCap Momentum", "📝 Manual Lookup", "📉 Backtest", "⚙️ Settings"]
+        ["🔍 Scan Stocks (Large Cap)", "🚀 SmallCap Momentum", "📝 Manual Lookup", "📊 Paper Trades", "📉 Backtest (LargeCap)", "📊 Backtest (SmallCap)", "⚙️ Settings"]
     )
+    
+    # ── DAILY SUMMARY (Always visible) ──
+    st.sidebar.markdown("---")
+    dashboard_daily_summary()
     
     st.sidebar.markdown("---")
     st.sidebar.markdown("### System Info")
@@ -1405,11 +2360,14 @@ def main():
         small_cap_page(components)
     elif page == "📝 Manual Lookup":
         manual_lookup_page(components)
-    elif page == "📉 Backtest":
+    elif page == "📊 Paper Trades":
+        paper_trades_page(components)
+    elif page == "📉 Backtest (LargeCap)":
         backtest_page(components)
+    elif page == "📊 Backtest (SmallCap)":
+        smallcap_backtest_page(components)
     elif page == "⚙️ Settings":
         settings_page(components)
 
 if __name__ == "__main__":
     main()
-
