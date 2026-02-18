@@ -183,7 +183,7 @@ class SignalScorer:
             # Extract key fields
             data = []
             for signal in signals:
-                data.append({
+                row = {
                     'ticker': signal.get('ticker', ''),
                     'date': signal.get('date', ''),
                     'score': signal.get('score', 0),
@@ -201,8 +201,21 @@ class SignalScorer:
                     'expected_hold_min': signal.get('expected_hold_min', 5),
                     'expected_hold_max': signal.get('expected_hold_max', 15),
                     'expiration_date': signal.get('expiration_date', ''),
-                    'max_hold_date': signal.get('max_hold_date', '')
-                })
+                    'max_hold_date': signal.get('max_hold_date', ''),
+                    # SmallCap-specific fields
+                    'swing_type': signal.get('swing_type', ''),
+                    'quality_score': signal.get('quality_score', 0),
+                    'atr_percent': signal.get('atr_percent', 0),
+                    'float_shares': signal.get('float_shares', 0),
+                    'short_percent': signal.get('short_percent', 0),
+                    'sector_rs_score': signal.get('sector_rs_score', 0),
+                    'has_catalyst': signal.get('has_catalyst', False),
+                    'catalyst_emoji': signal.get('catalyst_emoji', ''),
+                    'type_reason': signal.get('type_reason', ''),
+                    'narrative_headline': signal.get('narrative_headline', ''),
+                    'narrative_text': signal.get('narrative_text', ''),
+                }
+                data.append(row)
             
             df = pd.DataFrame(data)
             

@@ -461,6 +461,7 @@ class SmallCapEngine:
             
             # Swing type labels
             type_labels = {
+                'S': 'Short Squeeze',
                 'A': 'Continuation',
                 'B': 'Momentum', 
                 'C': 'Early Stage'
@@ -534,6 +535,43 @@ class SmallCapEngine:
                 'company_name': stock_info.get('shortName', ticker),
                 'sector': stock_info.get('sector', 'Unknown')
             }
+            
+            # ============================================================
+            # RISK MANAGEMENT: Calculate stop_loss, target, position size
+            # Must happen BEFORE narrative generation so it gets real values
+            # ============================================================
+            try:
+                risk_signal = self.risk.add_risk_management(
+                    signal.copy(), df, portfolio_value=10000
+                )
+                signal['stop_loss'] = risk_signal.get('stop_loss', 0)
+                signal['target_1'] = risk_signal.get('target_1', 0)
+                signal['target_2'] = risk_signal.get('target_2', 0)
+                signal['target_1_pct'] = risk_signal.get('target_1_pct', 0)
+                signal['target_2_pct'] = risk_signal.get('target_2_pct', 0)
+                signal['stop_loss_pct'] = risk_signal.get('stop_loss_pct', 0)
+                signal['risk_reward'] = risk_signal.get('risk_reward', 0)
+                signal['risk_reward_t2'] = risk_signal.get('risk_reward_t2', 0)
+                signal['position_size'] = risk_signal.get('position_size', 0)
+                signal['risk_amount'] = risk_signal.get('risk_amount', 0)
+                signal['expected_hold_min'] = risk_signal.get('expected_hold_min', hold_days[0])
+                signal['expected_hold_max'] = risk_signal.get('expected_hold_max', hold_days[1])
+                signal['max_hold_date'] = risk_signal.get('max_hold_date', '')
+                signal['expiration_date'] = risk_signal.get('expiration_date', '')
+                signal['volatility_warning'] = risk_signal.get('volatility_warning', False)
+            except Exception as e:
+                logger.warning(f"Could not add risk management for {ticker}: {e}")
+                # Fallback: calculate stop/target manually with type-specific targets
+                atr_val = self.risk.calculate_atr(df)
+                signal['stop_loss'] = round(entry_price - (1.5 * atr_val), 2) if atr_val else round(entry_price * 0.93, 2)
+                t1_pct, t2_pct = self.risk.TYPE_TARGETS.get(swing_type, (0.25, 0.40))
+                signal['target_1'] = round(entry_price * (1 + t1_pct), 2)
+                signal['target_2'] = round(entry_price * (1 + t2_pct), 2)
+                signal['target_1_pct'] = round(t1_pct * 100, 1)
+                signal['target_2_pct'] = round(t2_pct * 100, 1)
+                signal['position_size'] = 0
+                signal['expected_hold_min'] = hold_days[0]
+                signal['expected_hold_max'] = hold_days[1]
             
             # Enhanced logging with type
             type_emoji = "🐢" if swing_type == 'A' else "🚀"

@@ -6,6 +6,7 @@ Senior Trader v2.1 Feature
 import logging
 from typing import Dict, Optional
 import yfinance as yf
+import pandas as pd
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
@@ -103,14 +104,26 @@ class CatalystDetector:
             try:
                 insider_txns = stock.insider_transactions
                 if insider_txns is not None and len(insider_txns) > 0:
-                    # Filter last 30 days
-                    cutoff = datetime.now() - timedelta(days=30)
+                    # FIX v2.3: Actually enforce date filter (was defined but never used)
+                    cutoff = datetime.now() - timedelta(days=90)  # 90 days (was 30, expanded for SEC filing delays)
                     
                     # Calculate net purchases
                     net_value = 0
                     buy_count = 0
                     
                     for _, row in insider_txns.iterrows():
+                        # DATE FILTER — skip old transactions
+                        try:
+                            txn_date = pd.to_datetime(
+                                row.get('Start Date', row.get('Date', None)),
+                                errors='coerce'
+                            )
+                            if txn_date is not None and not pd.isna(txn_date):
+                                if txn_date.to_pydatetime().replace(tzinfo=None) < cutoff:
+                                    continue  # Too old, skip
+                        except Exception:
+                            pass  # If date parsing fails, include the transaction (safe fallback)
+                        
                         # Check transaction type
                         txn_type = str(row.get('Transaction', '')).lower()
                         value = row.get('Value', 0) or 0

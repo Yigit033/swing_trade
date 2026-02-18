@@ -412,7 +412,7 @@ class SmallCapSignals:
         
         # ALWAYS trigger if we have minimum thresholds
         # Let the quality score determine ranking
-        min_vol_ok = volume_surge >= 1.0    # At least average volume
+        min_vol_ok = volume_surge >= 1.3    # v2.3: At least 30% above average (was 1.0x)
         min_atr_ok = atr_pct >= 0.02        # At least 2% volatility
         
         # ALWAYS store values for display (even if not triggered)

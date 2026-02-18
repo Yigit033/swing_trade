@@ -65,40 +65,31 @@ class SmallCapScoring:
     def score_volume_explosion(self, volume_surge: float, rvol: float = None) -> float:
         """
         Score volume explosion (0-30 points).
-        OPTIMIZED tiered scoring based on market microstructure.
+        
+        FIX v2.3: Single-metric scoring only.
+        Previous bug: RVOL = volume_surge (same function), causing double-count.
+        Now uses unified tiered scoring based on volume_surge alone.
         """
-        if rvol is None:
-            rvol = volume_surge
-        
-        # Volume surge scoring - OPTIMIZED thresholds
-        if volume_surge >= 5.0:
-            surge_score = 20  # Parabolic, institutional
+        # Unified volume scoring — NO double-count
+        # Uses volume_surge as the single metric (0-30 range)
+        if volume_surge >= 6.0:
+            return 30  # Extreme institutional / parabolic
+        elif volume_surge >= 5.0:
+            return 26  # Parabolic
         elif volume_surge >= 4.0:
-            surge_score = 17  # Very strong, viral
+            return 22  # Very strong, viral interest
         elif volume_surge >= 3.0:
-            surge_score = 14  # Strong, significant
+            return 18  # Strong, significant
         elif volume_surge >= 2.5:
-            surge_score = 10  # Moderate, building
+            return 14  # Moderate, building
         elif volume_surge >= 2.0:
-            surge_score = 7   # Early surge, watchlist
+            return 10  # Early surge, watchlist worthy
         elif volume_surge >= 1.5:
-            surge_score = 5   # Minimum qualification
+            return 6   # Minimum qualification
+        elif volume_surge >= 1.3:
+            return 3   # Slight above average
         else:
-            surge_score = 0   # Below threshold
-        
-        # RVOL bonus (intraday relative volume)
-        if rvol >= 5.0:
-            rvol_bonus = 10   # Extreme intraday
-        elif rvol >= 4.0:
-            rvol_bonus = 8    # Very high
-        elif rvol >= 3.0:
-            rvol_bonus = 6    # High
-        elif rvol >= 2.0:
-            rvol_bonus = 3    # Moderate
-        else:
-            rvol_bonus = 0
-        
-        return min(surge_score + rvol_bonus, 30)
+            return 0   # Below threshold
     
     def score_volatility_expansion(self, atr_percent: float) -> float:
         """

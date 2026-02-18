@@ -1611,6 +1611,63 @@ def small_cap_page(components):
                 st.error(f"Error during scan: {e}")
                 logging.exception("SmallCap scan error")
     
+    # ============================================================
+    # 📖 TECHNICAL GLOSSARY (Always visible, above results)
+    # ============================================================
+    with st.expander("📖 **Teknik Terimler Sözlüğü** — Terimlerin ne anlama geldiğini öğren", expanded=False):
+        col_left, col_right = st.columns(2)
+        
+        with col_left:
+            st.markdown("""
+#### 📊 Temel Göstergeler
+
+| Terim | Açıklama |
+|-------|----------|
+| **RSI** | *Relative Strength Index* — 0-100 arası momentum ölçer. **< 30** aşırı satım (ucuz), **> 70** aşırı alım (pahalı). Swing için **40-65** ideal giriş bölgesi. |
+| **ATR** | *Average True Range* — Hissenin günlük ortalama hareket aralığı (dolar). Stop-loss hesabında kullanılır. |
+| **ATR%** | ATR'nin fiyata oranı. **%5+** yüksek oynaklık demek — daha fazla kâr potansiyeli ama daha fazla risk. |
+| **Volume Surge** | Günlük işlem hacminin 20 günlük ortalamaya oranı. **2x+** güçlü ilgi, **4x+** çok güçlü. |
+| **MACD** | *Moving Average Convergence Divergence* — Trend yönünü ve momentum gücünü gösterir. Sinyal çizgisini yukarı keserse **alım sinyali**. |
+| **MA20** | 20 günlük hareketli ortalama. Fiyat MA20'nin üstündeyse **kısa vadeli trend yukarı**. |
+            """)
+            
+            st.markdown("""
+#### 🎯 Risk & Hedefler
+
+| Terim | Açıklama |
+|-------|----------|
+| **Stop Loss** | Zarar kes seviyesi. Fiyat buraya düşerse **hemen sat**. Genelde 1-1.5 ATR altında, Type'a göre max %8-12. |
+| **T1 (Hedef 1)** | İlk kâr alma noktası. Pozisyonun yarısını burada sat. Type'a göre +%18 ile +%30 arası. |
+| **T2 (Hedef 2)** | İkinci hedef. Kalan pozisyonu burada sat veya trail stop ile devam et. +%30 ile +%60 arası. |
+| **R/R Oranı** | *Risk/Reward Ratio* — Riske ettiğin her $1 için kazanma potansiyeli. **1:3+** iyi, **1:2** minimum. |
+| **Trailing Stop** | Fiyat yükseldikçe stop seviyesini de yukarı çeken dinamik zarar kes. Kârı korur. |
+            """)
+        
+        with col_right:
+            st.markdown("""
+#### 🏢 Hisse Bilgileri
+
+| Terim | Açıklama |
+|-------|----------|
+| **Float** | Piyasada serbestçe alınıp satılabilen hisse sayısı. **< 20M** sıkı float = daha keskin hareketler. |
+| **SI%** | *Short Interest* — Açığa satılmış hisselerin float'a oranı. **> 20%** squeeze (sıkışma) potansiyeli. |
+| **Days to Cover** | Açığa satılan hisselerin ortalama hacimle kaç günde kapatılacağı. **> 5** = squeeze riski. |
+| **RS** | *Relative Strength* — Hissenin sektörüne göre performansı. **+15+** sektör lideri. |
+| **Catalyst** | Fiyatı tetikleyecek olay: kazanç raporu, FDA onayı, anlaşma haberi vb. |
+| **Quality** | Toplam kalite skoru (0-100+). Tüm metriklerin birleşimi. **70+** güçlü, **55-70** orta. |
+            """)
+            
+            st.markdown("""
+#### 🏷️ Swing Tipleri
+
+| Tip | İsim | Süre | Açıklama |
+|-----|------|------|----------|
+| 🔥 **S** | Squeeze | 1-4 gün | Short sıkışması. SI ≥ %20, çok riskli ama çok kârlı. |
+| ⭐ **C** | Erken Aşama | 3-8 gün | **En iyi R/R.** RSI düşük, hareket yeni başlıyor. Pullback girişi mümkün. |
+| 🚀 **B** | Momentum | 2-6 gün | Hisse zaten +%30-70 yükselmiş. Sadece catalyst + yüksek volume ile gir. |
+| 🐢 **A** | Devam | 5-14 gün | Trend devamı. En güvenli ama en yavaş. Higher lows yapısı önemli. |
+            """)
+    
     # Display results
     st.divider()
     
@@ -1625,13 +1682,20 @@ def small_cap_page(components):
         
         # Create DataFrame for display
         display_data = []
+        type_emojis = {'S': '🔥', 'C': '⭐', 'B': '🚀', 'A': '🐢'}
+        type_labels_tr = {'S': 'Squeeze', 'C': 'Erken', 'B': 'Momentum', 'A': 'Devam'}
         for s in signals:
+            swing_type = s.get('swing_type', 'A')
+            hold_min = s.get('expected_hold_min', s.get('hold_days_min', 2))
+            hold_max = s.get('expected_hold_max', s.get('hold_days_max', 5))
             display_data.append({
                 'Ticker': s['ticker'],
+                'Tip': f"{type_emojis.get(swing_type, '📊')} {swing_type}",
                 'Quality': f"{s['quality_score']:.0f}",
                 'Entry': f"${s['entry_price']:.2f}",
-                'Stop': f"${s['stop_loss']:.2f}",
-                'Target (3R)': f"${s['target_1']:.2f}",
+                'Stop': f"${s.get('stop_loss', 0):.2f} ({s.get('stop_loss_pct', 0):.0f}%)",
+                'T1': f"${s.get('target_1', 0):.2f} (+{s.get('target_1_pct', 0):.0f}%)",
+                'T2': f"${s.get('target_2', 0):.2f} (+{s.get('target_2_pct', 0):.0f}%)",
                 'Vol Surge': f"{s['volume_surge']:.1f}x",
                 'ATR%': f"{s['atr_percent']:.1f}%",
                 'Float': f"{s['float_millions']:.0f}M",
@@ -1639,9 +1703,10 @@ def small_cap_page(components):
                 'SI%': f"{s.get('short_percent', 0):.1f}%" if s.get('short_percent', 0) > 0 else '-',
                 'RS': f"+{s.get('sector_rs_score', 0):.0f}" if s.get('sector_rs_score', 0) > 0 else f"{s.get('sector_rs_score', 0):.0f}",
                 'Cat': '🔥' if s.get('total_catalyst_bonus', 0) >= 10 else ('✨' if s.get('total_catalyst_bonus', 0) >= 5 else '-'),
-                'Hold': f"{s['expected_hold_min']}-{s['expected_hold_max']}d",
+                'Hold': f"{hold_min}-{hold_max}d",
                 '⚠️': '🔴' if s.get('volatility_warning') else '🟢'
             })
+
         
         df_display = pd.DataFrame(display_data)
         st.dataframe(df_display, use_container_width=True, height=400)
@@ -1651,10 +1716,12 @@ def small_cap_page(components):
             st.markdown("""
             | Column | Meaning |
             |--------|---------|
-            | **Quality** | Momentum quality score (0-150) |
+            | **Tip** | Swing tipi: 🔥 S=Squeeze, ⭐ C=Erken Aşama, 🚀 B=Momentum, 🐢 A=Devam |
+            | **Quality** | Momentum quality score (0-135) |
             | **Entry** | Current close price (enter here) |
-            | **Stop** | Stop loss (1-1.5 ATR) |
-            | **Target (3R)** | Minimum 3:1 reward target |
+            | **Stop** | Stop loss — type-specific cap: C=%8, A/B=%10, S=%12 |
+            | **T1** | 1. hedef: pozisyonun yarısını sat. Type'a göre +%18 ile +%30 |
+            | **T2** | 2. hedef: kalanı sat veya trail. Type'a göre +%30 ile +%60 |
             | **Vol Surge** | Volume vs 20-day avg |
             | **ATR%** | Volatility (ATR/Price) |
             | **Float** | Shares floating (smaller = more explosive) |
