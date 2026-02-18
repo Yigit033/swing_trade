@@ -46,6 +46,7 @@ class PaperTradeReporter:
             'closed_trades': len(closed_trades),
             'wins': 0,
             'losses': 0,
+            'breakeven': 0,
             'win_rate': 0.0,
             'total_pnl': 0.0,
             'avg_win': 0.0,
@@ -70,9 +71,11 @@ class PaperTradeReporter:
             pnl = trade.get('realized_pnl', 0) or 0
             pnl_pct = trade.get('realized_pnl_pct', 0) or 0
             
-            if pnl >= 0:
+            if pnl > 0:
                 wins.append(pnl)
                 summary['wins'] += 1
+            elif pnl == 0:
+                summary['breakeven'] += 1
             else:
                 losses.append(abs(pnl))
                 summary['losses'] += 1
@@ -153,6 +156,21 @@ class PaperTradeReporter:
             pcts = data['pnl_pcts']
             data['avg_pnl_pct'] = sum(pcts) / len(pcts) if pcts else 0
             del data['pnl_pcts']  # Clean up
+        
+        # Build equity curve (cumulative P/L over time)
+        equity_curve = []
+        sorted_trades = sorted(closed_trades, key=lambda x: x.get('exit_date', ''))
+        cumulative_pnl = 0.0
+        for trade in sorted_trades:
+            pnl = trade.get('realized_pnl', 0) or 0
+            cumulative_pnl += pnl
+            equity_curve.append({
+                'date': trade.get('exit_date', ''),
+                'ticker': trade['ticker'],
+                'pnl': pnl,
+                'cumulative_pnl': round(cumulative_pnl, 2)
+            })
+        summary['equity_curve'] = equity_curve
         
         return summary
     

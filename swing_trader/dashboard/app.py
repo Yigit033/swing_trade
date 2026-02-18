@@ -1990,30 +1990,55 @@ def paper_trades_page(components: dict):
             df = pd.DataFrame(display_data)
             st.dataframe(df, use_container_width=True, height=400)
             
-            # Delete individual closed trades
+            # ── Delete Section ──
             st.markdown("---")
-            st.markdown("**🗑️ Geçmiş Trade Silme**")
+            st.markdown("### 🗑️ Trade Silme")
             
-            delete_options = {f"{t['ticker']} | {t['entry_date']} → {t.get('exit_date', '-')} | {t['status']}": t['id'] for t in closed_trades}
+            # Build options for multiselect
+            trade_labels = [
+                f"{t['ticker']} | {t['entry_date']} → {t.get('exit_date', '-')} | {t['status']} | ${(t.get('realized_pnl', 0) or 0):+.2f}"
+                for t in closed_trades
+            ]
+            trade_id_map = {label: t['id'] for label, t in zip(trade_labels, closed_trades)}
             
-            selected_trade = st.selectbox(
-                "Silinecek trade'i seç:",
-                options=[""] + list(delete_options.keys()),
-                key="delete_closed_select"
+            selected_trades = st.multiselect(
+                "Silinecek trade'leri seç (birden fazla seçebilirsin):",
+                options=trade_labels,
+                key="delete_closed_multi"
             )
             
-            if selected_trade and selected_trade != "":
-                col_del1, col_del2 = st.columns([1, 3])
-                with col_del1:
-                    if st.button("🗑️ Sil", key="confirm_delete_closed", type="primary"):
-                        trade_id = delete_options[selected_trade]
-                        storage.delete_trade(trade_id)
-                        st.success(f"✅ {selected_trade.split(' |')[0]} silindi!")
+            col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 2])
+            
+            with col_btn1:
+                if selected_trades:
+                    if st.button(f"🗑️ Seçilenleri Sil ({len(selected_trades)})", key="del_selected", type="primary"):
+                        for label in selected_trades:
+                            storage.delete_trade(trade_id_map[label])
+                        st.success(f"✅ {len(selected_trades)} trade silindi!")
                         st.rerun()
-                with col_del2:
-                    st.caption("⚠️ Bu işlem geri alınamaz — performans istatistiklerini etkiler.")
+            
+            with col_btn2:
+                if st.button("💣 Tüm Geçmişi Sil", key="del_all_closed"):
+                    st.session_state['confirm_delete_all'] = True
+            
+            with col_btn3:
+                if st.session_state.get('confirm_delete_all'):
+                    st.warning(f"⚠️ {len(closed_trades)} trade silinecek. Bu işlem geri alınamaz!")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("✅ Evet, hepsini sil", key="confirm_yes", type="primary"):
+                            for t in closed_trades:
+                                storage.delete_trade(t['id'])
+                            st.session_state['confirm_delete_all'] = False
+                            st.success(f"✅ {len(closed_trades)} trade silindi!")
+                            st.rerun()
+                    with c2:
+                        if st.button("❌ İptal", key="confirm_no"):
+                            st.session_state['confirm_delete_all'] = False
+                            st.rerun()
             
             # Color legend
+            st.markdown("---")
             st.markdown("""
             **Exit Types:**
             - 🔴 **STOPPED**: Hit stop loss
@@ -2035,41 +2060,93 @@ def paper_trades_page(components: dict):
         summary = reporter.get_performance_summary()
         
         if summary['closed_trades'] > 0:
-            # Key metrics
+            # Key metrics with color coding
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
                 st.metric("Total Trades", summary['closed_trades'])
             with col2:
-                st.metric("Win Rate", f"{summary['win_rate']:.1f}%")
+                wr = summary['win_rate']
+                wr_delta = "iyi" if wr >= 50 else "düşük"
+                st.metric("Win Rate", f"{wr:.1f}%", delta=wr_delta, delta_color="normal" if wr >= 50 else "inverse")
             with col3:
-                st.metric("Total P/L", f"${summary['total_pnl']:+.2f}")
+                tp = summary['total_pnl']
+                st.metric("Total P/L", f"${tp:+.2f}", delta=f"${tp:+.2f}", delta_color="normal")
             with col4:
                 pf = summary['profit_factor']
                 pf_str = f"{pf:.2f}" if pf < 100 else "∞"
-                st.metric("Profit Factor", pf_str)
+                pf_delta = "iyi" if pf >= 1.5 else "düşük"
+                st.metric("Profit Factor", pf_str, delta=pf_delta, delta_color="normal" if pf >= 1.5 else "inverse")
             
             st.markdown("---")
+            
+            # ── EQUITY CURVE ──
+            equity_data = summary.get('equity_curve', [])
+            if len(equity_data) >= 2:
+                st.markdown("### 📈 Equity Curve (Kümülatif Kâr/Zarar)")
+                
+                eq_df = pd.DataFrame(equity_data)
+                eq_df['label'] = eq_df['date'] + ' | ' + eq_df['ticker']
+                
+                # Color based on positive/negative
+                chart_df = pd.DataFrame({
+                    'Trade': eq_df['label'],
+                    'Cumulative P/L ($)': eq_df['cumulative_pnl']
+                }).set_index('Trade')
+                
+                st.line_chart(chart_df, height=300)
+                
+                # Show trade-by-trade breakdown under chart
+                with st.expander("Trade Detayları"):
+                    detail_df = pd.DataFrame({
+                        'Tarih': eq_df['date'],
+                        'Ticker': eq_df['ticker'],
+                        'P/L': eq_df['pnl'].apply(lambda x: f"${x:+.2f}"),
+                        'Kümülatif': eq_df['cumulative_pnl'].apply(lambda x: f"${x:+.2f}")
+                    })
+                    st.dataframe(detail_df, use_container_width=True, hide_index=True)
+                
+                st.markdown("---")
             
             # Win/Loss breakdown
             col1, col2 = st.columns(2)
             
             with col1:
                 st.markdown("### Win/Loss Breakdown")
-                st.write(f"**Wins:** {summary['wins']}")
-                st.write(f"**Losses:** {summary['losses']}")
+                st.write(f"🟢 **Wins:** {summary['wins']}")
+                st.write(f"🔴 **Losses:** {summary['losses']}")
+                if summary.get('breakeven', 0) > 0:
+                    st.write(f"⚪ **Breakeven:** {summary['breakeven']}")
                 st.write(f"**Avg Win:** ${summary['avg_win']:.2f}")
                 st.write(f"**Avg Loss:** ${summary['avg_loss']:.2f}")
                 st.write(f"**Avg Hold Days:** {summary['avg_hold_days']:.1f}")
+                
+                # Expectancy (avg $ per trade)
+                if summary['closed_trades'] > 0:
+                    expectancy = summary['total_pnl'] / summary['closed_trades']
+                    exp_color = "🟢" if expectancy >= 0 else "🔴"
+                    st.write(f"{exp_color} **Trade Başına Beklenti:** ${expectancy:+.2f}")
             
             with col2:
                 st.markdown("### Best/Worst Trades")
                 if summary['best_trade']:
                     bt = summary['best_trade']
-                    st.success(f"🏆 Best: {bt['ticker']} ({bt['pnl_pct']:+.1f}%)")
+                    st.success(f"🏆 Best: {bt['ticker']} ({bt['pnl_pct']:+.1f}%) | ${bt['pnl']:+.2f}")
                 if summary['worst_trade']:
                     wt = summary['worst_trade']
-                    st.error(f"📉 Worst: {wt['ticker']} ({wt['pnl_pct']:+.1f}%)")
+                    st.error(f"📉 Worst: {wt['ticker']} ({wt['pnl_pct']:+.1f}%) | ${wt['pnl']:+.2f}")
+                
+                # Key insight
+                st.markdown("---")
+                st.markdown("### 💡 Değerlendirme")
+                wr = summary['win_rate']
+                pf = summary['profit_factor']
+                if wr >= 50 and pf >= 1.5:
+                    st.success("✅ Sistem kârlı çalışıyor. Devam et!")
+                elif wr >= 40 and pf >= 1.0:
+                    st.warning("⚠️ Sistem margin'de. Type seçimini gözden geçir.")
+                else:
+                    st.error("🛑 Sistem zarar ediyor. Strateji revizyonu gerekiyor.")
             
             st.markdown("---")
             
