@@ -1883,6 +1883,7 @@ def paper_trades_page(components: dict):
                             unsafe_allow_html=True
                         )
                         st.write(f"**Type:** {trade['swing_type']}")
+                        st.write(f"**Giriş Tarihi:** {trade.get('entry_date', '-')}")
                     
                     with col4:
                         # Manual close button
@@ -1988,6 +1989,29 @@ def paper_trades_page(components: dict):
             
             df = pd.DataFrame(display_data)
             st.dataframe(df, use_container_width=True, height=400)
+            
+            # Delete individual closed trades
+            st.markdown("---")
+            st.markdown("**🗑️ Geçmiş Trade Silme**")
+            
+            delete_options = {f"{t['ticker']} | {t['entry_date']} → {t.get('exit_date', '-')} | {t['status']}": t['id'] for t in closed_trades}
+            
+            selected_trade = st.selectbox(
+                "Silinecek trade'i seç:",
+                options=[""] + list(delete_options.keys()),
+                key="delete_closed_select"
+            )
+            
+            if selected_trade and selected_trade != "":
+                col_del1, col_del2 = st.columns([1, 3])
+                with col_del1:
+                    if st.button("🗑️ Sil", key="confirm_delete_closed", type="primary"):
+                        trade_id = delete_options[selected_trade]
+                        storage.delete_trade(trade_id)
+                        st.success(f"✅ {selected_trade.split(' |')[0]} silindi!")
+                        st.rerun()
+                with col_del2:
+                    st.caption("⚠️ Bu işlem geri alınamaz — performans istatistiklerini etkiler.")
             
             # Color legend
             st.markdown("""
