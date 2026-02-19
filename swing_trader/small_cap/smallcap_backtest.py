@@ -262,23 +262,31 @@ class SmallCapBacktester:
             entry_price = today_open
             signal['entry_price'] = round(entry_price, 2)
             
-            # Recalculate ATR-based stop from entry
+            # Recalculate ATR-based stop from entry (v2.3: type-specific cap)
             df_window = pending['df_window']
+            swing_type = signal.get('swing_type', 'A')
             atr = self.risk.calculate_atr(df_window)
             stop_loss = entry_price - (self.risk.STOP_ATR_MULTIPLIER * atr)
-            max_stop = entry_price * (1 - self.risk.MAX_STOP_PERCENT)
+            max_stop_pct = self.risk.MAX_STOP_BY_TYPE.get(swing_type, self.risk.MAX_STOP_PERCENT)
+            max_stop = entry_price * (1 - max_stop_pct)
             stop_loss = max(stop_loss, max_stop)
             signal['stop_loss'] = round(stop_loss, 2)
             
-            # ── ADIM 3: ATR-based dynamic target (3R from actual entry) ──
+            # ── ADIM 3: Type-specific T1/T2 targets (v2.3) ──
+            t1_pct, t2_pct = self.risk.TYPE_TARGETS.get(swing_type, (0.25, 0.40))
+            target_1 = entry_price * (1 + t1_pct)
+            target_2 = entry_price * (1 + t2_pct)
+            # Safety floor: T1 must be at least 2R
             risk_amount = entry_price - stop_loss
-            target = entry_price + (risk_amount * self.risk.MIN_RR_RATIO)
-            signal['target_1'] = round(target, 2)
+            if risk_amount > 0 and (target_1 - entry_price) < (2 * risk_amount):
+                target_1 = entry_price + (2 * risk_amount)
+            signal['target_1'] = round(target_1, 2)
+            signal['target_2'] = round(target_2, 2)
             
             # Determine stop method label
             atr_stop_val = entry_price - (self.risk.STOP_ATR_MULTIPLIER * atr)
             if stop_loss > atr_stop_val:
-                signal['stop_method'] = f"Max Stop ({self.risk.MAX_STOP_PERCENT*100:.0f}%)"
+                signal['stop_method'] = f"Max Stop ({max_stop_pct*100:.0f}%)"
             else:
                 atr_pct = ((entry_price - stop_loss) / entry_price) * 100
                 signal['stop_method'] = f"ATR Stop ({atr_pct:.1f}%)"
