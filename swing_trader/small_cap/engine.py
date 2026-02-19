@@ -19,6 +19,7 @@ from .universe import SmallCapUniverse
 from .sector_rs import SectorRS, get_sector_rs_bonus
 from .catalysts import CatalystDetector, get_catalyst_bonus
 from .narrative import generate_signal_narrative
+from .technical_levels import calculate_technical_levels
 
 logger = logging.getLogger(__name__)
 
@@ -582,6 +583,16 @@ class SmallCapEngine:
             )
             
             # Generate narrative analysis (Cuma Çevik style)
+            # Calculate technical levels for professional narrative
+            try:
+                tech_levels = calculate_technical_levels(
+                    df, signal['entry_price'], signal.get('volume_surge', 1.0)
+                )
+                signal['technical_levels'] = tech_levels
+            except Exception as e:
+                logger.debug(f"Could not calculate technical levels for {ticker}: {e}")
+                signal['technical_levels'] = None
+            
             try:
                 narrative = generate_signal_narrative(signal, language='tr')
                 signal['narrative'] = narrative
