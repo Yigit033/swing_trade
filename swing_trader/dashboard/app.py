@@ -1127,6 +1127,14 @@ def analyze_smallcap_ticker(ticker, df, info, engine, portfolio_value):
     if result.get('swing_ready'):
         try:
             from swing_trader.small_cap.narrative import generate_signal_narrative
+            from swing_trader.small_cap.technical_levels import calculate_technical_levels
+            
+            # Calculate technical levels from OHLCV data
+            tech_levels = None
+            try:
+                tech_levels = calculate_technical_levels(df, today_close, volume_surge)
+            except Exception:
+                pass
             
             # Build full signal dict for narrative
             narrative_signal = {
@@ -1134,6 +1142,7 @@ def analyze_smallcap_ticker(ticker, df, info, engine, portfolio_value):
                 'entry_price': today_close,
                 'stop_loss': result.get('stop_loss', 0),
                 'target_1': result.get('target_1', 0),
+                'target_2': signal.get('target_2', 0),
                 'quality_score': result.get('quality_score', 0),
                 'swing_type': result.get('swing_type', 'A'),
                 'volume_surge': result.get('volume_surge', 1.0),
@@ -1141,13 +1150,17 @@ def analyze_smallcap_ticker(ticker, df, info, engine, portfolio_value):
                 'rsi': result.get('rsi', 50),
                 'five_day_return': result.get('five_day_return', 0),
                 'float_millions': result.get('float_shares', 0) / 1_000_000 if result.get('float_shares') else 0,
-                'short_percent': 0,  # Would need separate fetch
+                'short_percent': 0,
                 'sector_rs_score': 0,
                 'is_sector_leader': False,
                 'is_squeeze_candidate': False,
                 'expected_hold_min': result.get('hold_days', (2, 5))[0],
                 'expected_hold_max': result.get('hold_days', (2, 5))[1],
-                'type_reason': result.get('type_reason', '')
+                'type_reason': result.get('type_reason', ''),
+                'technical_levels': tech_levels,
+                'macd_bullish': result.get('macd_bullish', False),
+                'rsi_divergence': result.get('rsi_divergence', False),
+                'higher_lows': result.get('higher_lows', False)
             }
             
             narrative = generate_signal_narrative(narrative_signal, language='tr')
@@ -1886,6 +1899,22 @@ def paper_trades_page(components: dict):
                         st.write(f"**Giriş Tarihi:** {trade.get('entry_date', '-')}")
                     
                     with col4:
+                        # Hold days extension
+                        hold_col1, hold_col2 = st.columns(2)
+                        with hold_col1:
+                            if st.button(f"⏱️ +3 Gün", key=f"extend_{trade['id']}"):
+                                new_max = trade['max_hold_days'] + 3
+                                storage.update_trade(trade['id'], {'max_hold_days': new_max})
+                                st.success(f"⏱️ {trade['ticker']} → {new_max} gün")
+                                st.rerun()
+                        with hold_col2:
+                            if trade['max_hold_days'] > trade['days_held'] + 1:
+                                if st.button(f"⏱️ -3 Gün", key=f"shorten_{trade['id']}"):
+                                    new_max = max(trade['days_held'] + 1, trade['max_hold_days'] - 3)
+                                    storage.update_trade(trade['id'], {'max_hold_days': new_max})
+                                    st.info(f"⏱️ {trade['ticker']} → {new_max} gün")
+                                    st.rerun()
+                        
                         # Manual close button
                         if st.button(f"Close Trade", key=f"close_{trade['id']}"):
                             tracker.manual_close_trade(trade['id'])
