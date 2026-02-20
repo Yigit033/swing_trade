@@ -341,23 +341,75 @@ class SmallCapSignals:
             return result
     
     def check_breakout(self, df: pd.DataFrame) -> Tuple[bool, str]:
-        """Check if Close > Previous day High (momentum breakout)."""
-        if df is None or len(df) < 2:
+        """
+        Professional breakout detection — multi-criteria check.
+        
+        Criteria:
+        1. Close > 5-bar rolling high (not just 1 prev bar)
+        2. Close in upper 40% of today's range (close strength)
+        3. Volume on breakout bar >= 1.2x average (volume confirmation)
+        4. Minimum 0.3% above breakout level (noise filter)
+        """
+        if df is None or len(df) < 7:
             return False, "Insufficient data"
         
         try:
-            current_close = df['Close'].iloc[-1]
-            prev_high = df['High'].iloc[-2]
+            current_close = float(df['Close'].iloc[-1])
+            current_high = float(df['High'].iloc[-1])
+            current_low = float(df['Low'].iloc[-1])
+            current_vol = float(df['Volume'].iloc[-1])
             
-            if current_close > prev_high:
-                pct_above = (current_close - prev_high) / prev_high * 100
-                return True, f"Breakout +{pct_above:.1f}% above prev high"
-            else:
-                return False, f"No breakout (Close {current_close:.2f} <= Prev High {prev_high:.2f})"
-                
+            # 1. BREAKOUT LEVEL: 5-bar rolling high (excluding today)
+            lookback_highs = df['High'].iloc[-6:-1]  # 5 bars before today
+            breakout_level = float(lookback_highs.max())
+            
+            # Check basic price breakout
+            if current_close <= breakout_level:
+                return False, (
+                    f"No breakout (Close {current_close:.2f} <= "
+                    f"5-Bar High {breakout_level:.2f})"
+                )
+            
+            # 2. MINIMUM % ABOVE BREAKOUT LEVEL (noise filter)
+            pct_above = (current_close - breakout_level) / breakout_level * 100
+            if pct_above < 0.3:
+                return False, (
+                    f"Breakout too small (+{pct_above:.2f}% < 0.3% min, "
+                    f"Close {current_close:.2f} vs Level {breakout_level:.2f})"
+                )
+            
+            # 3. CLOSE STRENGTH (upper 40% of range)
+            day_range = current_high - current_low
+            close_position = 0.5
+            if day_range > 0:
+                close_position = (current_close - current_low) / day_range
+                if close_position < 0.40:
+                    return False, (
+                        f"Weak close ({close_position:.0%} of range, need 40%+). "
+                        f"Close {current_close:.2f}, Range {current_low:.2f}-{current_high:.2f}"
+                    )
+            
+            # 4. VOLUME CONFIRMATION
+            vol_window = df['Volume'].iloc[-21:-1] if len(df) >= 21 else df['Volume'].iloc[:-1]
+            avg_vol_20 = float(vol_window.mean())
+            vol_ratio = current_vol / avg_vol_20 if avg_vol_20 > 0 else 0
+            
+            if vol_ratio < 1.2:
+                return False, (
+                    f"Low volume breakout ({vol_ratio:.1f}x avg, need 1.2x+). "
+                    f"Close {current_close:.2f} > Level {breakout_level:.2f} (+{pct_above:.1f}%)"
+                )
+            
+            # ALL PASSED - VALID BREAKOUT
+            return True, (
+                f"Breakout +{pct_above:.1f}% above 5-bar high ${breakout_level:.2f} | "
+                f"Close strength {close_position:.0%} | Vol {vol_ratio:.1f}x"
+            )
+            
         except Exception as e:
             logger.error(f"Error checking breakout: {e}")
             return False, str(e)
+    
     
     def check_volume_surge(self, volume_surge: float) -> Tuple[bool, str]:
         """Check if volume surge meets threshold."""
