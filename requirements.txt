@@ -28,3 +28,13 @@ tqdm>=4.65.0
 
 # Logging
 colorlog>=6.7.0
+
+# Machine Learning (AI Signal Predictor)
+xgboost>=2.0.0            # Ana ML modeli (gradient boosting)
+scikit-learn>=1.3.0       # Pipeline, metrics, cross-validation
+shap>=0.44.0              # Model açıklanabilirliği (explainability)
+joblib>=1.3.0             # Model serileştirme (.pkl kayıt/yükleme)
+
+# Jupyter (eğitim notebook'u için)
+jupyter>=1.0.0
+notebook>=7.0.0

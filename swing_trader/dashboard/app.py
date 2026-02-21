@@ -1301,6 +1301,31 @@ def display_ticker_result(result):
         if pos_size:
             st.caption(f"📊 Suggested Position: {pos_size} shares")
         
+        # ── AI Sinyal Kalite Tahmini (opsiyonel — model yoksa gizlenir) ──
+        # Bu blok tamamen izole: model yüklü değilse hiçbir şey göstermez.
+        # swing_trader/ml/trainer.py ile modeli eğittikten sonra burada görünür.
+        try:
+            from swing_trader.ml.predictor import SignalPredictor
+            _ai_predictor = SignalPredictor()
+            if _ai_predictor.is_ready:
+                _ai_signal = {
+                    'entry_price': result.get('entry_price', 0),
+                    'stop_loss':   result.get('stop_loss', 0),
+                    'target':      result.get('target_1', 0),
+                    'atr':         result.get('atr', 0),
+                    'quality_score': result.get('quality_score', 0),
+                    'swing_type':  result.get('swing_type', 'A'),
+                    'max_hold_days': result.get('hold_days', (2, 7))[1] if isinstance(result.get('hold_days'), tuple) else 7,
+                    'entry_date':  datetime.now().strftime('%Y-%m-%d'),
+                }
+                _pred = _ai_predictor.predict(_ai_signal)
+                if _pred:
+                    _win_pct = int(_pred['win_probability'] * 100)
+                    _conf = _pred['confidence']
+                    st.info(f"🤖 **AI Tahmin:** Kazanma ihtimali **%{_win_pct}** — {_conf}")
+        except Exception:
+            pass  # Model yoksa veya hata olursa sessizce geç
+        
         # Narrative Analysis (Cuma Çevik Style)
         narrative_text = result.get('narrative_text', '')
         if narrative_text:
@@ -1854,33 +1879,33 @@ def paper_trades_page(components: dict):
             trades_list = open_summary['trades']
             
             # Calculate weighted average P/L percentage
-            total_cost = sum(t['entry_price'] * t.get('position_size', 1) for t in trades_list if t.get('entry_price', 0) > 0)
-            total_pnl_pct = (total_unrealized / total_cost * 100) if total_cost > 0 else 0
+            pnl_pcts = [t.get('unrealized_pnl_pct', 0) for t in trades_list]
+            avg_pnl_pct = sum(pnl_pcts) / len(pnl_pcts) if pnl_pcts else 0
             
-            # Individual percentages for display
+            # Individual counts
             winning = sum(1 for t in trades_list if t.get('unrealized_pnl', 0) > 0)
             losing = sum(1 for t in trades_list if t.get('unrealized_pnl', 0) < 0)
             breakeven = sum(1 for t in trades_list if t.get('unrealized_pnl', 0) == 0)
             
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
+            m1, m2, m3, m4 = st.columns(4)
+            with m1:
                 st.metric("Açık Pozisyon", open_summary['count'])
-            with col2:
-                pnl_delta = "kârda" if total_pnl_pct >= 0 else "zararda"
+            with m2:
                 st.metric(
-                    "Toplam P/L (%)",
-                    f"{total_pnl_pct:+.2f}%",
-                    delta=pnl_delta,
-                    delta_color="normal" if total_pnl_pct >= 0 else "inverse"
+                    "Ort. P/L",
+                    f"{avg_pnl_pct:+.2f}%",
+                    delta="kârda" if avg_pnl_pct >= 0 else "zararda",
+                    delta_color="normal" if avg_pnl_pct >= 0 else "inverse"
                 )
-            with col3:
+            with m3:
+                total_pnl_pct_sum = sum(pnl_pcts)
                 st.metric(
-                    "Toplam P/L ($)",
-                    f"${total_unrealized:+.2f}",
+                    "Toplam P/L",
+                    f"{total_pnl_pct_sum:+.2f}%",
                     delta=f"${total_unrealized:+.2f}",
-                    delta_color="normal"
+                    delta_color="normal" if total_unrealized >= 0 else "inverse"
                 )
-            with col4:
+            with m4:
                 st.metric("W / L / B", f"{winning} / {losing} / {breakeven}")
             
             st.markdown("---")
@@ -1923,45 +1948,62 @@ def paper_trades_page(components: dict):
                 else:
                     hold_emoji = "📅"
                 
+                # Type labels
+                type_labels = {'A': '🔥Momentum', 'B': '💎Breakout', 'C': '🌱Early', 'S': '🩳Squeeze'}
+                type_label = type_labels.get(swing_type, swing_type)
+                
                 with st.expander(
-                    f"{pnl_emoji} **{ticker}** | ${current:.2f} | "
-                    f"{pnl_pct:+.1f}% | {hold_emoji} Day {days_held}/{max_hold}",
+                    f"{pnl_emoji} **{ticker}** | {pnl_pct:+.1f}% | "
+                    f"${current:.2f} | {type_label} | "
+                    f"{hold_emoji} {days_held}/{max_hold}g",
                     expanded=True
                 ):
-                    # ── ROW 1: Trade info ──
-                    info_col1, info_col2, info_col3 = st.columns(3)
+                    # ── ROW 1: Key metrics with st.metric ──
+                    mc1, mc2, mc3, mc4 = st.columns(4)
                     
-                    with info_col1:
-                        st.markdown(f"**📍 Entry:** ${entry:.2f}")
-                        st.markdown(f"**💰 Current:** ${current:.2f}")
-                        pos_size = trade.get('position_size', 100)
-                        inv_value = pos_size * entry
-                        st.markdown(f"**📊 Pozisyon:** {pos_size} hisse (${inv_value:,.0f})")
-                        st.markdown(f"**📅 Giriş:** {trade.get('entry_date', '-')}")
-                    
-                    with info_col2:
-                        st.markdown(f"**🎯 Target:** ${target:.2f} (+{((target/entry)-1)*100:.1f}%)")
-                        pnl_color = "green" if pnl >= 0 else "red"
-                        st.markdown(
-                            f"**P/L:** <span style='color:{pnl_color}; font-size:1.1em; font-weight:bold'>"
-                            f"${pnl:+.2f} ({pnl_pct:+.1f}%)</span>",
-                            unsafe_allow_html=True
+                    with mc1:
+                        price_change = current - entry
+                        st.metric(
+                            "Fiyat",
+                            f"${current:.2f}",
+                            delta=f"{pnl_pct:+.1f}%",
+                            delta_color="normal" if pnl_pct >= 0 else "inverse"
                         )
-                        st.markdown(f"**Type:** {swing_type}")
                     
-                    with info_col3:
-                        # Hold days progress bar
-                        st.markdown(f"**Hold:** Day {days_held} / {max_hold}")
-                        st.progress(min(hold_pct, 1.0))
-                        
-                        # Distance to target and stop
+                    with mc2:
                         dist_to_target = ((target / current) - 1) * 100 if current > 0 else 0
+                        st.metric(
+                            "🎯 Hedef",
+                            f"${target:.2f}",
+                            delta=f"{dist_to_target:+.1f}% kaldı"
+                        )
+                    
+                    with mc3:
                         active_stop = trailing if trail_moved else stop
                         dist_to_stop = ((active_stop / current) - 1) * 100 if current > 0 else 0
-                        st.markdown(
-                            f"🎯 Hedefe: **{dist_to_target:+.1f}%** | "
-                            f"🛑 Stop'a: **{dist_to_stop:+.1f}%**"
+                        stop_label = "🔒 Trailing" if trail_moved else "🛑 Stop"
+                        st.metric(
+                            stop_label,
+                            f"${active_stop:.2f}",
+                            delta=f"{dist_to_stop:+.1f}%",
+                            delta_color="inverse" if dist_to_stop < -5 else "normal"
                         )
+                    
+                    with mc4:
+                        st.metric("⏱️ Hold", f"{days_held} / {max_hold} gün")
+                        st.progress(min(hold_pct, 1.0))
+                    
+                    # ── Risk/Reward mini bar ──
+                    risk_from_entry = ((entry - active_stop) / entry) * 100 if entry > 0 else 0
+                    reward_from_entry = ((target - entry) / entry) * 100 if entry > 0 else 0
+                    rr = reward_from_entry / risk_from_entry if risk_from_entry > 0 else 0
+                    
+                    st.caption(
+                        f"📍 Giriş: ${entry:.2f} | "
+                        f"📅 {trade.get('entry_date', '-')} | "
+                        f"R/R: 1:{rr:.1f} | "
+                        f"Risk: {risk_from_entry:.1f}% → Reward: {reward_from_entry:.1f}%"
+                    )
                     
                     st.markdown("---")
                     
