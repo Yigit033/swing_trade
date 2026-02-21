@@ -1934,6 +1934,9 @@ def paper_trades_page(components: dict):
                     with info_col1:
                         st.markdown(f"**📍 Entry:** ${entry:.2f}")
                         st.markdown(f"**💰 Current:** ${current:.2f}")
+                        pos_size = trade.get('position_size', 100)
+                        inv_value = pos_size * entry
+                        st.markdown(f"**📊 Pozisyon:** {pos_size} hisse (${inv_value:,.0f})")
                         st.markdown(f"**📅 Giriş:** {trade.get('entry_date', '-')}")
                     
                     with info_col2:
@@ -1962,8 +1965,8 @@ def paper_trades_page(components: dict):
                     
                     st.markdown("---")
                     
-                    # ── ROW 2: Stop Loss Control + Actions ──
-                    stop_col, action_col = st.columns([3, 2])
+                    # ── ROW 2: Stop + Target + Actions ──
+                    stop_col, target_col, action_col = st.columns(3)
                     
                     with stop_col:
                         st.markdown("**🛑 Stop Loss Yönetimi**")
@@ -1978,11 +1981,11 @@ def paper_trades_page(components: dict):
                         
                         # Dynamic stop loss input
                         current_stop = trailing if trail_moved else stop
-                        min_stop = round(current * 0.50, 2)  # Can't set stop below 50% of current
-                        max_stop = round(current * 0.995, 2)  # Can't set stop above current price
+                        min_stop = round(current * 0.50, 2)
+                        max_stop = round(current * 0.995, 2)
                         
                         new_stop = st.number_input(
-                            f"Stop seviyesini değiştir (${min_stop:.2f} - ${max_stop:.2f})",
+                            f"Stop (${min_stop:.2f} - ${max_stop:.2f})",
                             min_value=min_stop,
                             max_value=max_stop,
                             value=round(current_stop, 2),
@@ -1994,16 +1997,46 @@ def paper_trades_page(components: dict):
                         if abs(new_stop - current_stop) > 0.01:
                             stop_pct_from_current = ((new_stop / current) - 1) * 100
                             if new_stop > current_stop:
-                                st.info(f"⬆️ Stop yukarı çekilecek: ${current_stop:.2f} → ${new_stop:.2f} ({stop_pct_from_current:+.1f}%)")
+                                st.info(f"⬆️ ${current_stop:.2f} → ${new_stop:.2f} ({stop_pct_from_current:+.1f}%)")
                             else:
-                                st.warning(f"⬇️ Stop aşağı indirilecek: ${current_stop:.2f} → ${new_stop:.2f} ({stop_pct_from_current:+.1f}%)")
+                                st.warning(f"⬇️ ${current_stop:.2f} → ${new_stop:.2f} ({stop_pct_from_current:+.1f}%)")
                             
-                            if st.button("✅ Stop'u Güncelle", key=f"update_stop_{trade_id}"):
+                            if st.button("✅ Stop Güncelle", key=f"update_stop_{trade_id}"):
                                 storage.update_trade(trade_id, {
                                     'stop_loss': new_stop,
                                     'trailing_stop': new_stop
                                 })
                                 st.success(f"✅ {ticker} stop → ${new_stop:.2f}")
+                                st.rerun()
+                    
+                    with target_col:
+                        st.markdown("**🎯 Hedef Yönetimi**")
+                        
+                        # Dynamic target input
+                        min_target = round(current * 1.005, 2)  # At least 0.5% above current
+                        max_target = round(current * 3.0, 2)    # Max 3x current price
+                        
+                        new_target = st.number_input(
+                            f"Target (${min_target:.2f} - ${max_target:.2f})",
+                            min_value=min_target,
+                            max_value=max_target,
+                            value=round(target, 2),
+                            step=0.10,
+                            key=f"target_input_{trade_id}",
+                            format="%.2f"
+                        )
+                        
+                        if abs(new_target - target) > 0.01:
+                            target_pct_from_entry = ((new_target / entry) - 1) * 100
+                            old_pct = ((target / entry) - 1) * 100
+                            if new_target > target:
+                                st.info(f"⬆️ Hedef yükseltiliyor: ${target:.2f} → ${new_target:.2f} (+{target_pct_from_entry:.1f}%)")
+                            else:
+                                st.warning(f"⬇️ Hedef düşürülüyor: ${target:.2f} → ${new_target:.2f} (+{target_pct_from_entry:.1f}%)")
+                            
+                            if st.button("✅ Hedef Güncelle", key=f"update_target_{trade_id}"):
+                                storage.update_trade(trade_id, {'target': new_target})
+                                st.success(f"✅ {ticker} hedef → ${new_target:.2f}")
                                 st.rerun()
                     
                     with action_col:
@@ -2072,18 +2105,32 @@ def paper_trades_page(components: dict):
         # Manual add trade form
         with st.expander("➕ Manually Add Trade"):
             with st.form("add_trade_form"):
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 with col1:
                     ticker = st.text_input("Ticker", placeholder="AAPL")
-                    entry_price = st.number_input("Entry Price", min_value=0.01, value=10.0)
-                    stop_loss = st.number_input("Stop Loss", min_value=0.01, value=9.0)
+                    entry_price = st.number_input("Entry Price ($)", min_value=0.01, value=10.0, format="%.2f")
+                    stop_loss = st.number_input("Stop Loss ($)", min_value=0.01, value=9.0, format="%.2f")
                 
                 with col2:
                     entry_date = st.date_input("Entry Date")
-                    target = st.number_input("Target", min_value=0.01, value=13.0)
+                    target = st.number_input("Target ($)", min_value=0.01, value=13.0, format="%.2f")
                     swing_type = st.selectbox("Swing Type", ["A", "B", "C", "S"])
                 
-                if st.form_submit_button("Add Trade"):
+                with col3:
+                    investment_amount = st.number_input(
+                        "Yatırım Tutarı ($)", 
+                        min_value=100.0, max_value=100000.0, 
+                        value=1000.0, step=100.0,
+                        help="Bu hisseye ne kadarlık yatırım yapmak istiyorsun?"
+                    )
+                    max_hold_days = st.number_input("Max Hold (gün)", min_value=1, max_value=30, value=7)
+                    
+                    # Preview shares
+                    shares = int(investment_amount / entry_price) if entry_price > 0 else 0
+                    st.caption(f"📊 {shares} hisse × ${entry_price:.2f} = ${shares * entry_price:.2f}")
+                
+                if st.form_submit_button("➕ Trade Ekle", type="primary"):
+                    calc_shares = int(investment_amount / entry_price) if entry_price > 0 else 100
                     trade = {
                         'ticker': ticker.upper(),
                         'entry_date': entry_date.strftime('%Y-%m-%d'),
@@ -2092,15 +2139,15 @@ def paper_trades_page(components: dict):
                         'target': target,
                         'swing_type': swing_type,
                         'quality_score': 0,
-                        'position_size': 100,
-                        'max_hold_days': 7
+                        'position_size': calc_shares,
+                        'max_hold_days': max_hold_days
                     }
                     trade_id = storage.add_trade(trade)
                     if trade_id > 0:
-                        st.success(f"Added {ticker} (ID: {trade_id})")
+                        st.success(f"✅ {ticker.upper()} eklendi! ({calc_shares} hisse × ${entry_price:.2f} = ${calc_shares * entry_price:.2f})")
                         st.rerun()
                     else:
-                        st.error("Failed to add trade")
+                        st.error("⚠️ Trade eklenemedi")
     
     # ============================================================
     # TAB 2: CLOSED TRADES
@@ -2195,129 +2242,260 @@ def paper_trades_page(components: dict):
     # TAB 3: PERFORMANCE
     # ============================================================
     with tab3:
-        st.subheader("Performance Summary")
+        st.subheader("📊 Performance Dashboard")
         
         summary = reporter.get_performance_summary()
         
         if summary['closed_trades'] > 0:
-            # Key metrics with color coding
-            col1, col2, col3, col4 = st.columns(4)
+            # ── TOP METRICS ROW ──
+            m1, m2, m3, m4, m5 = st.columns(5)
             
-            with col1:
-                st.metric("Total Trades", summary['closed_trades'])
-            with col2:
+            with m1:
+                st.metric("Toplam Trade", summary['closed_trades'])
+            
+            with m2:
                 wr = summary['win_rate']
-                wr_delta = "iyi" if wr >= 50 else "düşük"
-                st.metric("Win Rate", f"{wr:.1f}%", delta=wr_delta, delta_color="normal" if wr >= 50 else "inverse")
-            with col3:
-                tp = summary['total_pnl']
-                st.metric("Total P/L", f"${tp:+.2f}", delta=f"${tp:+.2f}", delta_color="normal")
-            with col4:
+                st.metric(
+                    "Win Rate", f"{wr:.1f}%",
+                    delta="iyi" if wr >= 50 else "düşük",
+                    delta_color="normal" if wr >= 50 else "inverse"
+                )
+            
+            with m3:
                 pf = summary['profit_factor']
                 pf_str = f"{pf:.2f}" if pf < 100 else "∞"
-                pf_delta = "iyi" if pf >= 1.5 else "düşük"
-                st.metric("Profit Factor", pf_str, delta=pf_delta, delta_color="normal" if pf >= 1.5 else "inverse")
+                st.metric(
+                    "Profit Factor", pf_str,
+                    delta="iyi" if pf >= 1.5 else "düşük",
+                    delta_color="normal" if pf >= 1.5 else "inverse"
+                )
+            
+            with m4:
+                # Average P/L % per trade
+                closed_trades_data = storage.get_closed_trades(limit=1000)
+                pnl_pcts = [t.get('realized_pnl_pct', 0) or 0 for t in closed_trades_data]
+                avg_pnl_pct = sum(pnl_pcts) / len(pnl_pcts) if pnl_pcts else 0
+                st.metric(
+                    "Ort. P/L %", f"{avg_pnl_pct:+.2f}%",
+                    delta=f"{avg_pnl_pct:+.2f}%",
+                    delta_color="normal"
+                )
+            
+            with m5:
+                st.metric("Ort. Hold", f"{summary['avg_hold_days']:.1f} gün")
+            
+            st.markdown("---")
+            
+            # ── WIN / LOSS VISUAL SUMMARY ──
+            wins_count = summary['wins']
+            losses_count = summary['losses']
+            be_count = summary.get('breakeven', 0)
+            total = wins_count + losses_count + be_count
+            
+            col_wl1, col_wl2 = st.columns([2, 3])
+            
+            with col_wl1:
+                st.markdown("### 📊 Win / Loss Dağılımı")
+                
+                if total > 0:
+                    win_pct = wins_count / total
+                    loss_pct = losses_count / total
+                    
+                    st.markdown(
+                        f"🟢 **{wins_count} Win** ({win_pct:.0%}) | "
+                        f"🔴 **{losses_count} Loss** ({loss_pct:.0%}) | "
+                        f"⚪ **{be_count} B/E**"
+                    )
+                    st.progress(win_pct)
+                
+                st.markdown("")  # spacer
+                
+                # Avg win vs avg loss (% based)
+                win_pcts = [p for p in pnl_pcts if p > 0]
+                loss_pcts = [p for p in pnl_pcts if p < 0]
+                avg_win_pct = sum(win_pcts) / len(win_pcts) if win_pcts else 0
+                avg_loss_pct = sum(loss_pcts) / len(loss_pcts) if loss_pcts else 0
+                
+                rwc1, rwc2 = st.columns(2)
+                with rwc1:
+                    st.metric("Ort. Win %", f"+{avg_win_pct:.2f}%")
+                    st.metric("Ort. Win $", f"${summary['avg_win']:.2f}")
+                with rwc2:
+                    st.metric("Ort. Loss %", f"{avg_loss_pct:.2f}%")
+                    st.metric("Ort. Loss $", f"${summary['avg_loss']:.2f}")
+                
+                # Risk/Reward ratio
+                if abs(avg_loss_pct) > 0:
+                    rr_ratio = abs(avg_win_pct / avg_loss_pct)
+                    rr_color = "🟢" if rr_ratio >= 1.5 else "🟡" if rr_ratio >= 1.0 else "🔴"
+                    st.markdown(f"{rr_color} **Risk/Reward:** 1:{rr_ratio:.2f}")
+                
+                # Expectancy
+                if total > 0:
+                    expectancy_pct = avg_pnl_pct
+                    exp_emoji = "🟢" if expectancy_pct > 0 else "🔴"
+                    st.markdown(f"{exp_emoji} **Trade Başına Beklenti:** {expectancy_pct:+.2f}% (${summary['total_pnl']/total:+.2f})")
+            
+            with col_wl2:
+                st.markdown("### 🏆 Best / Worst Trades")
+                
+                if summary['best_trade']:
+                    bt = summary['best_trade']
+                    st.success(
+                        f"🏆 **En İyi:** {bt['ticker']} | "
+                        f"{bt['pnl_pct']:+.1f}% | ${bt['pnl']:+.2f} | {bt.get('date', '-')}"
+                    )
+                if summary['worst_trade']:
+                    wt = summary['worst_trade']
+                    st.error(
+                        f"📉 **En Kötü:** {wt['ticker']} | "
+                        f"{wt['pnl_pct']:+.1f}% | ${wt['pnl']:+.2f} | {wt.get('date', '-')}"
+                    )
+                
+                st.markdown("---")
+                
+                # System evaluation
+                st.markdown("### 💡 Sistem Değerlendirmesi")
+                wr = summary['win_rate']
+                pf = summary['profit_factor']
+                
+                # Score system
+                score = 0
+                feedback_items = []
+                
+                if wr >= 55:
+                    score += 3
+                    feedback_items.append("✅ Win rate güçlü")
+                elif wr >= 45:
+                    score += 2
+                    feedback_items.append("⚠️ Win rate orta")
+                else:
+                    score += 0
+                    feedback_items.append("🛑 Win rate düşük")
+                
+                if pf >= 2.0:
+                    score += 3
+                    feedback_items.append("✅ Profit factor mükemmel")
+                elif pf >= 1.5:
+                    score += 2
+                    feedback_items.append("✅ Profit factor iyi")
+                elif pf >= 1.0:
+                    score += 1
+                    feedback_items.append("⚠️ Profit factor marginal")
+                else:
+                    feedback_items.append("🛑 Profit factor < 1 (zarar)")
+                
+                if avg_pnl_pct > 2:
+                    score += 2
+                    feedback_items.append("✅ Ort. kâr/trade yüksek")
+                elif avg_pnl_pct > 0:
+                    score += 1
+                    feedback_items.append("⚠️ Ort. kâr/trade düşük")
+                else:
+                    feedback_items.append("🛑 Ort. trade zararda")
+                
+                for item in feedback_items:
+                    st.markdown(f"- {item}")
+                
+                if score >= 6:
+                    st.success("🎯 **Sonuç:** Sistem kârlı çalışıyor. Devam!")
+                elif score >= 3:
+                    st.warning("⚠️ **Sonuç:** İyileştirme gerekiyor. Type seçim ve stop stratejisini gözden geçir.")
+                else:
+                    st.error("🛑 **Sonuç:** Strateji revizyonu gerekiyor.")
             
             st.markdown("---")
             
             # ── EQUITY CURVE ──
             equity_data = summary.get('equity_curve', [])
             if len(equity_data) >= 2:
-                st.markdown("### 📈 Equity Curve (Kümülatif Kâr/Zarar)")
+                st.markdown("### 📈 Equity Curve")
                 
                 eq_df = pd.DataFrame(equity_data)
                 eq_df['label'] = eq_df['date'] + ' | ' + eq_df['ticker']
                 
-                # Color based on positive/negative
-                chart_df = pd.DataFrame({
-                    'Trade': eq_df['label'],
-                    'Cumulative P/L ($)': eq_df['cumulative_pnl']
-                }).set_index('Trade')
+                # Show both $ and % cumulative
+                eq_tab1, eq_tab2 = st.tabs(["💰 Kümülatif P/L ($)", "📊 Kümülatif P/L (%)"])
                 
-                st.line_chart(chart_df, height=300)
+                with eq_tab1:
+                    chart_df = pd.DataFrame({
+                        'Trade': eq_df['label'],
+                        'Kümülatif P/L ($)': eq_df['cumulative_pnl']
+                    }).set_index('Trade')
+                    st.line_chart(chart_df, height=300)
                 
-                # Show trade-by-trade breakdown under chart
-                with st.expander("Trade Detayları"):
+                with eq_tab2:
+                    # Calculate cumulative % from individual trade %s
+                    cum_pct = []
+                    running = 0
+                    for _, row in eq_df.iterrows():
+                        pnl_val = row.get('pnl', 0)
+                        entry_val = row.get('entry_price', 1)
+                        trade_pct = (pnl_val / entry_val * 100) if entry_val > 0 else 0
+                        running += trade_pct
+                        cum_pct.append(running)
+                    
+                    chart_pct_df = pd.DataFrame({
+                        'Trade': eq_df['label'],
+                        'Kümülatif P/L (%)': cum_pct
+                    }).set_index('Trade')
+                    st.line_chart(chart_pct_df, height=300)
+                
+                # Trade-by-trade detail
+                with st.expander("📋 Trade Detayları"):
                     detail_df = pd.DataFrame({
                         'Tarih': eq_df['date'],
                         'Ticker': eq_df['ticker'],
-                        'P/L': eq_df['pnl'].apply(lambda x: f"${x:+.2f}"),
-                        'Kümülatif': eq_df['cumulative_pnl'].apply(lambda x: f"${x:+.2f}")
+                        'P/L $': eq_df['pnl'].apply(lambda x: f"${x:+.2f}"),
+                        'P/L %': [f"{p:+.2f}%" for p in ([0] * len(eq_df) if not cum_pct else [cum_pct[0]] + [cum_pct[i] - cum_pct[i-1] for i in range(1, len(cum_pct))])],
+                        'Kümülatif $': eq_df['cumulative_pnl'].apply(lambda x: f"${x:+.2f}"),
+                        'Kümülatif %': [f"{p:+.2f}%" for p in cum_pct]
                     })
                     st.dataframe(detail_df, use_container_width=True, hide_index=True)
                 
                 st.markdown("---")
             
-            # Win/Loss breakdown
-            col1, col2 = st.columns(2)
+            # ── PERFORMANCE BY EXIT TYPE ──
+            col_exit, col_type = st.columns(2)
             
-            with col1:
-                st.markdown("### Win/Loss Breakdown")
-                st.write(f"🟢 **Wins:** {summary['wins']}")
-                st.write(f"🔴 **Losses:** {summary['losses']}")
-                if summary.get('breakeven', 0) > 0:
-                    st.write(f"⚪ **Breakeven:** {summary['breakeven']}")
-                st.write(f"**Avg Win:** ${summary['avg_win']:.2f}")
-                st.write(f"**Avg Loss:** ${summary['avg_loss']:.2f}")
-                st.write(f"**Avg Hold Days:** {summary['avg_hold_days']:.1f}")
-                
-                # Expectancy (avg $ per trade)
-                if summary['closed_trades'] > 0:
-                    expectancy = summary['total_pnl'] / summary['closed_trades']
-                    exp_color = "🟢" if expectancy >= 0 else "🔴"
-                    st.write(f"{exp_color} **Trade Başına Beklenti:** ${expectancy:+.2f}")
+            with col_exit:
+                st.markdown("### 🚪 Exit Type Bazında")
+                exit_data = []
+                exit_emojis = {
+                    'STOPPED': '🔴', 'TRAILED': '🔒', 'TARGET': '🎯',
+                    'TIMEOUT': '⏰', 'MANUAL': '✋', 'REJECTED': '❌'
+                }
+                for status, data in summary['by_exit_type'].items():
+                    emoji = exit_emojis.get(status, '📊')
+                    exit_data.append({
+                        'Tür': f"{emoji} {status}",
+                        'Adet': data['count'],
+                        'Ort. %': f"{data['avg_pnl_pct']:+.1f}%",
+                        'Toplam $': f"${data['total_pnl']:+.2f}"
+                    })
+                if exit_data:
+                    st.dataframe(pd.DataFrame(exit_data), use_container_width=True, hide_index=True)
             
-            with col2:
-                st.markdown("### Best/Worst Trades")
-                if summary['best_trade']:
-                    bt = summary['best_trade']
-                    st.success(f"🏆 Best: {bt['ticker']} ({bt['pnl_pct']:+.1f}%) | ${bt['pnl']:+.2f}")
-                if summary['worst_trade']:
-                    wt = summary['worst_trade']
-                    st.error(f"📉 Worst: {wt['ticker']} ({wt['pnl_pct']:+.1f}%) | ${wt['pnl']:+.2f}")
-                
-                # Key insight
-                st.markdown("---")
-                st.markdown("### 💡 Değerlendirme")
-                wr = summary['win_rate']
-                pf = summary['profit_factor']
-                if wr >= 50 and pf >= 1.5:
-                    st.success("✅ Sistem kârlı çalışıyor. Devam et!")
-                elif wr >= 40 and pf >= 1.0:
-                    st.warning("⚠️ Sistem margin'de. Type seçimini gözden geçir.")
-                else:
-                    st.error("🛑 Sistem zarar ediyor. Strateji revizyonu gerekiyor.")
-            
-            st.markdown("---")
-            
-            # By Exit Type
-            st.markdown("### Performance by Exit Type")
-            exit_data = []
-            for status, data in summary['by_exit_type'].items():
-                exit_data.append({
-                    'Exit Type': status,
-                    'Count': data['count'],
-                    'Avg P/L %': f"{data['avg_pnl_pct']:+.1f}%",
-                    'Total P/L': f"${data['total_pnl']:+.2f}"
-                })
-            if exit_data:
-                st.dataframe(pd.DataFrame(exit_data), use_container_width=True)
-            
-            # By Swing Type
-            st.markdown("### Performance by Swing Type")
-            type_data = []
-            for swing_type, data in summary['by_swing_type'].items():
-                type_data.append({
-                    'Swing Type': f"Type {swing_type}",
-                    'Count': data['count'],
-                    'Win Rate': f"{data['win_rate']:.0f}%",
-                    'Avg P/L %': f"{data['avg_pnl_pct']:+.1f}%",
-                    'Total P/L': f"${data['total_pnl']:+.2f}"
-                })
-            if type_data:
-                st.dataframe(pd.DataFrame(type_data), use_container_width=True)
+            with col_type:
+                st.markdown("### 🏷️ Swing Type Bazında")
+                type_data = []
+                type_descs = {
+                    'A': '🔥 Momentum', 'B': '💎 Breakout', 
+                    'C': '🌱 Early', 'S': '🩳 Squeeze'
+                }
+                for swing_type, data in summary['by_swing_type'].items():
+                    desc = type_descs.get(swing_type, f'📊 Type {swing_type}')
+                    type_data.append({
+                        'Tür': desc,
+                        'Adet': data['count'],
+                        'Win Rate': f"{data['win_rate']:.0f}%",
+                        'Ort. %': f"{data['avg_pnl_pct']:+.1f}%",
+                        'Toplam $': f"${data['total_pnl']:+.2f}"
+                    })
+                if type_data:
+                    st.dataframe(pd.DataFrame(type_data), use_container_width=True, hide_index=True)
         else:
-            st.info("No closed trades yet. Performance stats will appear after you close some trades.")
+            st.info("📊 Henüz kapatılmış trade yok. İlk trade'leri kapattıktan sonra performans istatistikleri burada görünecek.")
 
 
 def dashboard_daily_summary():

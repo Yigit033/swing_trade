@@ -220,6 +220,7 @@ class PaperTradeReporter:
                 'max_hold_days': trade.get('max_hold_days', 7),
                 'swing_type': trade.get('swing_type', 'A'),
                 'signal_price': trade.get('signal_price'),
+                'position_size': trade.get('position_size', 100),
                 'status': trade.get('status', 'OPEN')
             }
             
