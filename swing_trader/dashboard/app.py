@@ -1849,82 +1849,193 @@ def paper_trades_page(components: dict):
         open_summary = reporter.get_open_trades_summary()
         
         if open_summary['count'] > 0:
-            # Summary metrics
-            col1, col2 = st.columns(2)
+            # ── SUMMARY METRICS (with percentage-based total) ──
+            total_unrealized = open_summary['total_unrealized_pnl']
+            trades_list = open_summary['trades']
+            
+            # Calculate weighted average P/L percentage
+            total_cost = sum(t['entry_price'] * t.get('position_size', 1) for t in trades_list if t.get('entry_price', 0) > 0)
+            total_pnl_pct = (total_unrealized / total_cost * 100) if total_cost > 0 else 0
+            
+            # Individual percentages for display
+            winning = sum(1 for t in trades_list if t.get('unrealized_pnl', 0) > 0)
+            losing = sum(1 for t in trades_list if t.get('unrealized_pnl', 0) < 0)
+            breakeven = sum(1 for t in trades_list if t.get('unrealized_pnl', 0) == 0)
+            
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Open Positions", open_summary['count'])
+                st.metric("Açık Pozisyon", open_summary['count'])
             with col2:
-                unrealized = open_summary['total_unrealized_pnl']
+                pnl_delta = "kârda" if total_pnl_pct >= 0 else "zararda"
                 st.metric(
-                    "Total Unrealized P/L",
-                    f"${unrealized:+.2f}",
-                    delta=f"${unrealized:+.2f}"
+                    "Toplam P/L (%)",
+                    f"{total_pnl_pct:+.2f}%",
+                    delta=pnl_delta,
+                    delta_color="normal" if total_pnl_pct >= 0 else "inverse"
                 )
+            with col3:
+                st.metric(
+                    "Toplam P/L ($)",
+                    f"${total_unrealized:+.2f}",
+                    delta=f"${total_unrealized:+.2f}",
+                    delta_color="normal"
+                )
+            with col4:
+                st.metric("W / L / B", f"{winning} / {losing} / {breakeven}")
             
             st.markdown("---")
             
-            # Display active trades
-            for trade in open_summary['trades']:
-                trailing = trade.get('trailing_stop', trade['stop_loss'])
-                trail_moved = trailing > trade.get('initial_stop', trade['stop_loss'])
-                trail_label = f" (🔒 Trailing: ${trailing:.2f})" if trail_moved else ""
+            # ── ACTIVE TRADE CARDS ──
+            for trade in trades_list:
+                ticker = trade['ticker']
+                trade_id = trade['id']
+                entry = trade['entry_price']
+                current = trade['current_price']
+                stop = trade['stop_loss']
+                target = trade['target']
+                trailing = trade.get('trailing_stop', stop)
+                initial_stop = trade.get('initial_stop', stop)
+                trail_moved = trailing > initial_stop
+                pnl = trade.get('unrealized_pnl', 0)
+                pnl_pct = trade.get('unrealized_pnl_pct', 0)
+                days_held = trade.get('days_held', 0)
+                max_hold = trade.get('max_hold_days', 7)
+                swing_type = trade.get('swing_type', 'A')
+                
+                # Color based on P/L
+                if pnl_pct > 5:
+                    pnl_emoji = "🟢"
+                elif pnl_pct > 0:
+                    pnl_emoji = "🟩"
+                elif pnl_pct == 0:
+                    pnl_emoji = "⚪"
+                elif pnl_pct > -3:
+                    pnl_emoji = "🟧"
+                else:
+                    pnl_emoji = "🔴"
+                
+                # Hold days warning
+                hold_pct = days_held / max_hold if max_hold > 0 else 0
+                if hold_pct >= 0.85:
+                    hold_emoji = "⏰"
+                elif hold_pct >= 0.6:
+                    hold_emoji = "⏱️"
+                else:
+                    hold_emoji = "📅"
                 
                 with st.expander(
-                    f"**{trade['ticker']}** | ${trade['current_price']:.2f} | "
-                    f"{trade['unrealized_pnl_pct']:+.1f}% | Day {trade['days_held']}/{trade['max_hold_days']}"
-                    f"{trail_label}",
+                    f"{pnl_emoji} **{ticker}** | ${current:.2f} | "
+                    f"{pnl_pct:+.1f}% | {hold_emoji} Day {days_held}/{max_hold}",
                     expanded=True
                 ):
-                    col1, col2, col3, col4 = st.columns(4)
+                    # ── ROW 1: Trade info ──
+                    info_col1, info_col2, info_col3 = st.columns(3)
                     
-                    with col1:
-                        st.write(f"**Entry:** ${trade['entry_price']:.2f}")
-                        stop_display = f"${trade['stop_loss']:.2f}"
-                        if trail_moved:
-                            stop_display = f"~~${trade['stop_loss']:.2f}~~ → **${trailing:.2f}** 🔒"
-                        st.markdown(f"**Stop:** {stop_display}", unsafe_allow_html=True)
+                    with info_col1:
+                        st.markdown(f"**📍 Entry:** ${entry:.2f}")
+                        st.markdown(f"**💰 Current:** ${current:.2f}")
+                        st.markdown(f"**📅 Giriş:** {trade.get('entry_date', '-')}")
                     
-                    with col2:
-                        st.write(f"**Current:** ${trade['current_price']:.2f}")
-                        st.write(f"**Target:** ${trade['target']:.2f}")
-                    
-                    with col3:
-                        pnl_color = "green" if trade['unrealized_pnl'] >= 0 else "red"
+                    with info_col2:
+                        st.markdown(f"**🎯 Target:** ${target:.2f} (+{((target/entry)-1)*100:.1f}%)")
+                        pnl_color = "green" if pnl >= 0 else "red"
                         st.markdown(
-                            f"**P/L:** <span style='color:{pnl_color}'>${trade['unrealized_pnl']:+.2f} "
-                            f"({trade['unrealized_pnl_pct']:+.1f}%)</span>",
+                            f"**P/L:** <span style='color:{pnl_color}; font-size:1.1em; font-weight:bold'>"
+                            f"${pnl:+.2f} ({pnl_pct:+.1f}%)</span>",
                             unsafe_allow_html=True
                         )
-                        st.write(f"**Type:** {trade['swing_type']}")
-                        st.write(f"**Giriş Tarihi:** {trade.get('entry_date', '-')}")
+                        st.markdown(f"**Type:** {swing_type}")
                     
-                    with col4:
+                    with info_col3:
+                        # Hold days progress bar
+                        st.markdown(f"**Hold:** Day {days_held} / {max_hold}")
+                        st.progress(min(hold_pct, 1.0))
+                        
+                        # Distance to target and stop
+                        dist_to_target = ((target / current) - 1) * 100 if current > 0 else 0
+                        active_stop = trailing if trail_moved else stop
+                        dist_to_stop = ((active_stop / current) - 1) * 100 if current > 0 else 0
+                        st.markdown(
+                            f"🎯 Hedefe: **{dist_to_target:+.1f}%** | "
+                            f"🛑 Stop'a: **{dist_to_stop:+.1f}%**"
+                        )
+                    
+                    st.markdown("---")
+                    
+                    # ── ROW 2: Stop Loss Control + Actions ──
+                    stop_col, action_col = st.columns([3, 2])
+                    
+                    with stop_col:
+                        st.markdown("**🛑 Stop Loss Yönetimi**")
+                        
+                        # Show current stop info
+                        if trail_moved:
+                            st.markdown(
+                                f"Orijinal: ~~${initial_stop:.2f}~~ → "
+                                f"Trailing: **${trailing:.2f}** 🔒",
+                                unsafe_allow_html=True
+                            )
+                        
+                        # Dynamic stop loss input
+                        current_stop = trailing if trail_moved else stop
+                        min_stop = round(current * 0.50, 2)  # Can't set stop below 50% of current
+                        max_stop = round(current * 0.995, 2)  # Can't set stop above current price
+                        
+                        new_stop = st.number_input(
+                            f"Stop seviyesini değiştir (${min_stop:.2f} - ${max_stop:.2f})",
+                            min_value=min_stop,
+                            max_value=max_stop,
+                            value=round(current_stop, 2),
+                            step=0.05,
+                            key=f"stop_input_{trade_id}",
+                            format="%.2f"
+                        )
+                        
+                        if abs(new_stop - current_stop) > 0.01:
+                            stop_pct_from_current = ((new_stop / current) - 1) * 100
+                            if new_stop > current_stop:
+                                st.info(f"⬆️ Stop yukarı çekilecek: ${current_stop:.2f} → ${new_stop:.2f} ({stop_pct_from_current:+.1f}%)")
+                            else:
+                                st.warning(f"⬇️ Stop aşağı indirilecek: ${current_stop:.2f} → ${new_stop:.2f} ({stop_pct_from_current:+.1f}%)")
+                            
+                            if st.button("✅ Stop'u Güncelle", key=f"update_stop_{trade_id}"):
+                                storage.update_trade(trade_id, {
+                                    'stop_loss': new_stop,
+                                    'trailing_stop': new_stop
+                                })
+                                st.success(f"✅ {ticker} stop → ${new_stop:.2f}")
+                                st.rerun()
+                    
+                    with action_col:
+                        st.markdown("**⚙️ Aksiyonlar**")
+                        
                         # Hold days extension
                         hold_col1, hold_col2 = st.columns(2)
                         with hold_col1:
-                            if st.button(f"⏱️ +3 Gün", key=f"extend_{trade['id']}"):
-                                new_max = trade['max_hold_days'] + 3
-                                storage.update_trade(trade['id'], {'max_hold_days': new_max})
-                                st.success(f"⏱️ {trade['ticker']} → {new_max} gün")
+                            if st.button("⏱️ +3 Gün", key=f"extend_{trade_id}"):
+                                new_max = max_hold + 3
+                                storage.update_trade(trade_id, {'max_hold_days': new_max})
+                                st.success(f"⏱️ {ticker} → {new_max} gün")
                                 st.rerun()
                         with hold_col2:
-                            if trade['max_hold_days'] > trade['days_held'] + 1:
-                                if st.button(f"⏱️ -3 Gün", key=f"shorten_{trade['id']}"):
-                                    new_max = max(trade['days_held'] + 1, trade['max_hold_days'] - 3)
-                                    storage.update_trade(trade['id'], {'max_hold_days': new_max})
-                                    st.info(f"⏱️ {trade['ticker']} → {new_max} gün")
+                            if max_hold > days_held + 1:
+                                if st.button("⏱️ -3 Gün", key=f"shorten_{trade_id}"):
+                                    new_max = max(days_held + 1, max_hold - 3)
+                                    storage.update_trade(trade_id, {'max_hold_days': new_max})
+                                    st.info(f"⏱️ {ticker} → {new_max} gün")
                                     st.rerun()
                         
-                        # Manual close button
-                        if st.button(f"Close Trade", key=f"close_{trade['id']}"):
-                            tracker.manual_close_trade(trade['id'])
-                            st.success(f"Closed {trade['ticker']}")
+                        st.markdown("")  # spacer
+                        
+                        # Close and delete
+                        if st.button("🔒 Close Trade", key=f"close_{trade_id}", type="primary"):
+                            tracker.manual_close_trade(trade_id)
+                            st.success(f"Closed {ticker}")
                             st.rerun()
                         
-                        # Delete button
-                        if st.button(f"🗑️ Delete", key=f"delete_{trade['id']}"):
-                            storage.delete_trade(trade['id'])
-                            st.warning(f"Deleted {trade['ticker']}")
+                        if st.button("🗑️ Sil", key=f"delete_{trade_id}"):
+                            storage.delete_trade(trade_id)
+                            st.warning(f"Deleted {ticker}")
                             st.rerun()
         else:
             st.info("No active paper trades. Add trades from SmallCap Momentum page!")
