@@ -2541,9 +2541,99 @@ def paper_trades_page(components: dict):
         else:
             st.info("📊 Henüz kapatılmış trade yok. İlk trade'leri kapattıktan sonra performans istatistikleri burada görünecek.")
 
+        # ── AI Haftalık Rapor Bölümü ──────────────────────────────
+        st.markdown("---")
+        st.markdown("## 🤖 AI Haftalık Performans Analizi")
+
+        ai_col1, ai_col2 = st.columns([2, 1])
+        with ai_col1:
+            st.markdown(
+                "Geçmiş trade verilerini analiz ederek strateji öngörüleri ve "
+                "iyileştirme önerileri sunar. **Hesaplamalar deterministik sistemde yapılır**, "
+                "LLM sadece sonuçları yorumlar."
+            )
+        with ai_col2:
+            import os
+            has_llm = bool(
+                os.getenv("OPENAI_API_KEY", "").startswith("sk-") or
+                os.getenv("GEMINI_API_KEY", "") not in ("", "your_gemini_api_key_here")
+            )
+            if has_llm:
+                st.success("🟢 LLM bağlı — AI analiz aktif")
+            else:
+                st.warning("🟡 API key yok — istatistik rapor modu")
+
+        # Session state ile raporu tut (sayfa yenilenmesinde kaybolmasın)
+        if "weekly_report_result" not in st.session_state:
+            st.session_state.weekly_report_result = None
+
+        btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 3])
+        with btn_col1:
+            generate_clicked = st.button(
+                "📝 Rapor Oluştur", type="primary", key="gen_weekly_report"
+            )
+        with btn_col2:
+            refresh_clicked = st.button(
+                "🔄 Yenile", key="refresh_weekly_report",
+                help="Önbelleği temizle ve yeniden oluştur"
+            )
+        with btn_col3:
+            st.caption("⏱ Günde bir kez oluşturulur, önbellekten hızlıca yüklenir")
+
+        if generate_clicked or refresh_clicked:
+            with st.spinner("Analiz yapılıyor... ⏳"):
+                try:
+                    from swing_trader.genai.reporter import WeeklyReporter
+                    reporter = WeeklyReporter(storage, days=7)
+                    if refresh_clicked:
+                        reporter.clear_cache()
+                    result = reporter.generate(force_refresh=refresh_clicked)
+                    st.session_state.weekly_report_result = result
+                except Exception as e:
+                    st.session_state.weekly_report_result = {
+                        "success": False, "error": str(e), "context": {}
+                    }
+
+        # Raporu göster
+        result = st.session_state.weekly_report_result
+        if result:
+            if result.get("success") and result.get("report"):
+                # Meta bilgi
+                meta_parts = []
+                if result.get("from_cache"):
+                    meta_parts.append("📦 Önbellekten")
+                if result.get("llm_available"):
+                    meta_parts.append("🤖 GPT/Gemini analizi")
+                else:
+                    meta_parts.append("📊 İstatistik raporu (API key ekleyince AI analiz gelir)")
+                if result.get("generated_at"):
+                    meta_parts.append(f"📅 {result['generated_at']}")
+                st.caption(" | ".join(meta_parts))
+
+                # Raporun kendisi
+                st.markdown(result["report"])
+
+                # Ham istatistikleri gizlenebilir bölümde göster
+                ctx = result.get("context", {})
+                with st.expander("📊 Ham İstatistikler (Deterministik Katman)"):
+                    weekly_s = ctx.get("weekly_summary", {})
+                    all_s    = ctx.get("all_time_summary", {})
+                    hc1, hc2 = st.columns(2)
+                    with hc1:
+                        st.markdown("**Bu Dönem**")
+                        st.json(weekly_s)
+                    with hc2:
+                        st.markdown("**Tüm Zamanlar**")
+                        st.json(all_s)
+            else:
+                st.error(f"❌ Rapor oluşturulamadı: {result.get('error', 'Bilinmeyen hata')}")
+        else:
+            st.info("👆 Rapor oluşturmak için butona bas")
+
     # ============================================================
     # TAB 4: AI MODEL
     # ============================================================
+
     with tab4:
         st.markdown("## 🤖 AI Signal Quality Predictor")
         st.markdown(
