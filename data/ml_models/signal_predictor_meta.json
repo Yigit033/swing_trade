@@ -1,0 +1,22 @@
+{
+  "trained_at": "2026-02-22T03:06:49.866075",
+  "model_path": "c:\\swing_trade\\data\\ml_models\\signal_predictor.pkl",
+  "accuracy": 0.6667,
+  "roc_auc": 1.0,
+  "f1": 0.8,
+  "cv_roc_auc_mean": 0.8,
+  "cv_roc_auc_std": 0.2449,
+  "confusion_matrix": [
+    [
+      0,
+      1
+    ],
+    [
+      0,
+      2
+    ]
+  ],
+  "train_size": 12,
+  "test_size": 3,
+  "total_trades": 15
+}

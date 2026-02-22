@@ -1853,7 +1853,9 @@ def paper_trades_page(components: dict):
     reporter = PaperTradeReporter(storage)
     
     # Tabs
-    tab1, tab2, tab3 = st.tabs(["📈 Active Trades", "📜 Closed Trades", "📊 Performance"])
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📈 Active Trades", "📜 Closed Trades", "📊 Performance", "🤖 AI Model"
+    ])
     
     # ============================================================
     # TAB 1: ACTIVE TRADES
@@ -2538,6 +2540,254 @@ def paper_trades_page(components: dict):
                     st.dataframe(pd.DataFrame(type_data), use_container_width=True, hide_index=True)
         else:
             st.info("📊 Henüz kapatılmış trade yok. İlk trade'leri kapattıktan sonra performans istatistikleri burada görünecek.")
+
+    # ============================================================
+    # TAB 4: AI MODEL
+    # ============================================================
+    with tab4:
+        st.markdown("## 🤖 AI Signal Quality Predictor")
+        st.markdown(
+            "Bu sekme, geçmiş paper trade sonuçlarından öğrenerek "
+            "yeni sinyallerin kazanma ihtimalini tahmin eden XGBoost modelini yönetir."
+        )
+
+        # ── Model Durumu ──────────────────────────────────────────
+        from pathlib import Path
+        import json
+
+        META_PATH = Path("data/ml_models/signal_predictor_meta.json")
+        MODEL_PATH = Path("data/ml_models/signal_predictor.pkl")
+
+        st.markdown("### 📋 Model Durumu")
+
+        if MODEL_PATH.exists() and META_PATH.exists():
+            with open(META_PATH) as f:
+                meta = json.load(f)
+
+            # Renkli durum göstergesi
+            st.success("✅ Model eğitilmiş ve hazır")
+
+            # Metrik kartları
+            ms1, ms2, ms3, ms4 = st.columns(4)
+            with ms1:
+                st.metric("Accuracy", f"{meta.get('accuracy', 0):.1%}")
+            with ms2:
+                auc = meta.get('roc_auc', 0)
+                auc_label = "🟢 İyi" if auc >= 0.70 else "🟡 Makul" if auc >= 0.55 else "🔴 Zayıf"
+                st.metric("ROC-AUC", f"{auc:.3f}", delta=auc_label)
+            with ms3:
+                st.metric("F1 Score", f"{meta.get('f1', 0):.3f}")
+            with ms4:
+                st.metric("Eğitim Verisi", f"{meta.get('total_trades', 0)} trade")
+
+            # CV bilgisi
+            cv_mean = meta.get('cv_roc_auc_mean', 0)
+            cv_std = meta.get('cv_roc_auc_std', 0)
+            st.caption(
+                f"📅 Son eğitim: {meta.get('trained_at', '?')[:19]} | "
+                f"5-Fold CV ROC-AUC: {cv_mean:.3f} ± {cv_std:.3f} | "
+                f"Train: {meta.get('train_size', '?')} / Test: {meta.get('test_size', '?')}"
+            )
+
+            # Küçük veri uyarısı
+            if meta.get('total_trades', 0) < 30:
+                st.warning(
+                    "⚠️ **Az veri:** Şu an model sentetik + gerçek karışık veriyle eğitildi. "
+                    "Gerçek paper trade geçmişi arttıkça model daha güvenilir olacak. "
+                    "30+ gerçek trade'den sonra yeniden eğitmeyi unutma."
+                )
+        else:
+            st.error("❌ Model henüz eğitilmedi")
+            st.info("Aşağıdaki butonu tıkla — sistem otomatik eğitecek.")
+
+        st.markdown("---")
+
+        # ── Model Eğitim Butonu ──────────────────────────────────
+        st.markdown("### 🏋️ Modeli Eğit / Güncelle")
+        st.markdown(
+            "Yeni paper trade'ler kapatıldıkça buradan modeli güncelleyebilirsin. "
+            "Eğitim birkaç saniye sürer."
+        )
+
+        # Demo trade sayısını göster
+        demo_count = len([t for t in storage.get_closed_trades(limit=9999)
+                         if '[DEMO]' in (t.get('notes') or '')])
+        real_count = len([t for t in storage.get_closed_trades(limit=9999)
+                         if '[DEMO]' not in (t.get('notes') or '')
+                         and t.get('status') not in ('REJECTED',)])
+        st.caption(f"📊 Mevcut veri: {real_count} gerçek trade + {demo_count} demo trade")
+
+        train_col, info_col = st.columns([1, 3])
+        with train_col:
+            if st.button("🚀 Modeli Eğit", type="primary", key="train_ml_btn"):
+                with st.spinner("Model eğitiliyor... (XGBoost + 5-Fold CV)"):
+                    try:
+                        from swing_trader.ml.trainer import SignalTrainer
+                        trainer = SignalTrainer()
+                        result = trainer.run()
+
+                        if result.get('success'):
+                            st.success(
+                                f"✅ Eğitim tamamlandı!\n\n"
+                                f"Accuracy: {result['accuracy']:.1%} | "
+                                f"ROC-AUC: {result['roc_auc']:.3f} | "
+                                f"F1: {result['f1']:.3f}"
+                            )
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Eğitim başarısız: {result.get('error', 'Bilinmeyen hata')}")
+                    except Exception as e:
+                        st.error(f"❌ Hata: {e}")
+
+        with info_col:
+            st.info(
+                "**Ne zaman yeniden eğitmeli?**\n"
+                "- Her 10 yeni trade kapandığında\n"
+                "- Strateji değişikliklerinden sonra\n"
+                "- Model skoru düştüğünde"
+            )
+
+        st.markdown("---")
+
+        # ── Feature Importance ──────────────────────────────────
+        st.markdown("### 📊 Feature Importance")
+        st.markdown("Model hangi özelliklere ne kadar önem veriyor?")
+
+        if MODEL_PATH.exists():
+            try:
+                import joblib
+                import plotly.graph_objects as go
+                from swing_trader.ml.features import FEATURE_COLUMNS
+
+                model = joblib.load(MODEL_PATH)
+                importances = model.feature_importances_
+
+                # Ada göre sırala (büyükten küçüğe)
+                sorted_pairs = sorted(
+                    zip(FEATURE_COLUMNS, importances),
+                    key=lambda x: x[1]  # küçükten büyüğe (plotly yukarı çizer)
+                )
+                feat_names = [p[0] for p in sorted_pairs]
+                feat_vals  = [p[1] for p in sorted_pairs]
+
+                # Türkçe etiketler
+                label_map = {
+                    "risk_pct":           "Risk % (entry→stop)",
+                    "reward_pct":         "Reward % (entry→target)",
+                    "risk_reward_ratio":  "R/R Oranı",
+                    "atr_pct":            "Volatilite (ATR%)",
+                    "quality_score":      "Kalite Skoru",
+                    "swing_type_enc":     "Swing Tipi (A/B/C/S)",
+                    "max_hold_days":      "Max Hold Süresi",
+                    "day_of_week":        "Giriş Günü",
+                    "month":              "Giriş Ayı",
+                }
+                feat_labels = [label_map.get(n, n) for n in feat_names]
+
+                fig = go.Figure(go.Bar(
+                    x=feat_vals,
+                    y=feat_labels,
+                    orientation='h',
+                    marker_color=[
+                        f"rgba(99, 202, 183, {0.4 + v * 3})" for v in feat_vals
+                    ],
+                    text=[f"{v:.3f}" for v in feat_vals],
+                    textposition='outside'
+                ))
+                fig.update_layout(
+                    title="XGBoost Feature Importance",
+                    xaxis_title="Önem Skoru",
+                    height=380,
+                    margin=dict(l=10, r=30, t=40, b=10),
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(size=12)
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Açıklama kutusu
+                top_feature = label_map.get(FEATURE_COLUMNS[int(importances.argmax())], "?")
+                st.caption(
+                    f"💡 **En önemli özellik:** {top_feature} — "
+                    f"Model, tahmin yaparken en çok bu özelliğe bakıyor."
+                )
+
+            except Exception as e:
+                st.warning(f"Feature importance yüklenemedi: {e}")
+        else:
+            st.info("Model eğitildikten sonra feature importance burada görünecek.")
+
+        st.markdown("---")
+
+        # ── Canlı Sinyal Testi ──────────────────────────────────
+        st.markdown("### 🔬 Canlı Sinyal Testi")
+        st.markdown("Bir sinyal gir, AI kazanma ihtimalini tahmin etsin:")
+
+        tc1, tc2, tc3 = st.columns(3)
+        with tc1:
+            test_entry  = st.number_input("Entry Price ($)", value=10.0, step=0.1, key="test_entry")
+            test_stop   = st.number_input("Stop Loss ($)",   value=9.0,  step=0.1, key="test_stop")
+            test_target = st.number_input("Target ($)",      value=13.0, step=0.1, key="test_target")
+        with tc2:
+            test_atr     = st.number_input("ATR",           value=0.5,  step=0.05, key="test_atr")
+            test_quality = st.slider("Kalite Skoru",        min_value=0, max_value=10, value=7, key="test_quality")
+            test_type    = st.selectbox("Swing Tipi",       ["A", "B", "C", "S"], key="test_type")
+        with tc3:
+            test_hold    = st.slider("Max Hold (gün)",      min_value=3, max_value=20, value=7, key="test_hold")
+
+        if st.button("🤖 Tahmin Al", type="primary", key="predict_btn"):
+            if MODEL_PATH.exists():
+                try:
+                    from swing_trader.ml.predictor import SignalPredictor
+                    from datetime import datetime
+
+                    predictor = SignalPredictor()
+                    if predictor.is_ready:
+                        test_signal = {
+                            'entry_price':   test_entry,
+                            'stop_loss':     test_stop,
+                            'target':        test_target,
+                            'atr':           test_atr,
+                            'quality_score': test_quality,
+                            'swing_type':    test_type,
+                            'max_hold_days': test_hold,
+                            'entry_date':    datetime.now().strftime('%Y-%m-%d'),
+                        }
+                        pred = predictor.predict(test_signal)
+                        if pred:
+                            win_pct  = int(pred['win_probability'] * 100)
+                            loss_pct = 100 - win_pct
+                            conf     = pred['confidence']
+
+                            # Risk/Reward hızlı hesap
+                            risk   = (test_entry - test_stop) / test_entry * 100
+                            reward = (test_target - test_entry) / test_entry * 100
+                            rr     = reward / risk if risk > 0 else 0
+
+                            pr1, pr2 = st.columns(2)
+                            with pr1:
+                                if win_pct >= 60:
+                                    st.success(f"🤖 **AI Tahmin:** Kazanma: **%{win_pct}** — {conf}")
+                                elif win_pct >= 45:
+                                    st.warning(f"🤖 **AI Tahmin:** Kazanma: **%{win_pct}** — {conf}")
+                                else:
+                                    st.error(f"🤖 **AI Tahmin:** Kazanma: **%{win_pct}** — {conf}")
+
+                                st.caption(
+                                    f"Risk: {risk:.1f}% | Reward: {reward:.1f}% | R/R: 1:{rr:.1f}"
+                                )
+
+                            with pr2:
+                                # Feature önem sırası
+                                st.markdown("**En etkili özellikler:**")
+                                for feat in pred.get('top_features', [])[:3]:
+                                    bar = "█" * int(feat['importance'] * 50)
+                                    st.caption(f"{feat['feature']}: {bar} ({feat['importance']:.3f})")
+                except Exception as e:
+                    st.error(f"Tahmin hatası: {e}")
+            else:
+                st.warning("Önce modeli eğit!")
+
 
 
 def dashboard_daily_summary():
