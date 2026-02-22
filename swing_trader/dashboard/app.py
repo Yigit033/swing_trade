@@ -2641,7 +2641,43 @@ def paper_trades_page(components: dict):
             "yeni sinyallerin kazanma ihtimalini tahmin eden XGBoost modelini yönetir."
         )
 
-        # ── Model Durumu ──────────────────────────────────────────
+        # ── Milestone Banner: Gerçek Trade Sayacı ─────────────────
+        # DEMO ve REJECTED tradeler hariç, gerçek kapanan trade sayısını izle.
+        # Belirli eşiklerde kullanıcıya yeniden eğitim hatırlatması yap.
+        _real_trades = [
+            t for t in storage.get_closed_trades(limit=9999)
+            if "[DEMO]" not in (t.get("notes") or "")
+            and t.get("status") not in ("REJECTED", "PENDING")
+        ]
+        _real_count = len(_real_trades)
+        _MILESTONE = 15   # Minimum eğitim eşiği
+
+        if _real_count == 0:
+            st.info(
+                "📭 Henüz kapatılmış gerçek trade yok. "
+                "Paper trade'leri kapat ve model eğitimine başla."
+            )
+        elif _real_count < _MILESTONE:
+            _remaining = _MILESTONE - _real_count
+            st.warning(
+                f"⏳ **{_real_count}/{_MILESTONE} gerçek trade** — "
+                f"Modeli güvenilir şekilde eğitmek için **{_remaining} trade daha** kapat."
+            )
+            st.progress(_real_count / _MILESTONE)
+        elif _real_count >= 30:
+            st.success(
+                f"🏆 **{_real_count} gerçek trade!** Model güçlü bir veri tabanına sahip. "
+                "Hâlâ en az 2 haftada bir yeniden eğitmeyi unutma."
+            )
+        else:
+            # 15–29 arası: milestone geçildi, yeniden eğitim öner
+            st.success(
+                f"🎉 **{_real_count} gerçek trade ulaştı!** "
+                "Modeli yeniden eğitmek için harika bir an. "
+                "Aşağıdaki **🚀 Modeli Eğit** butonunu kullan."
+            )
+
+
         from pathlib import Path
         import json
 
