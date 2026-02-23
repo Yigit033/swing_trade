@@ -1325,8 +1325,33 @@ def display_ticker_result(result):
                     st.info(f"🤖 **AI Tahmin:** Kazanma ihtimali **%{_win_pct}** — {_conf}")
         except Exception:
             pass  # Model yoksa veya hata olursa sessizce geç
-        
-        # Narrative Analysis (Cuma Çevik Style)
+
+        # ── AI Sinyal Brifingi (GenAI — LLM yorumu) ──────────────────
+        # XGBoost kazanma ihtimalini sayısal verdi; LLM bunu Türkçe yorumlar.
+        # LLM bağlı değilse deterministik özet gösterir.
+        try:
+            from swing_trader.genai.signal_briefer import SignalBriefer
+            _briefer = SignalBriefer()
+            _brief_signal = {
+                "ticker":        ticker,
+                "entry_price":   result.get("entry_price", 0),
+                "stop_loss":     result.get("stop_loss", 0),
+                "target_1":      result.get("target_1", 0),
+                "atr":           result.get("atr", 0),
+                "quality_score": result.get("quality_score", 0),
+                "swing_type":    result.get("swing_type", "A"),
+            }
+            _brief = _briefer.brief(_brief_signal)
+            if _brief.get("success") and _brief.get("text"):
+                _icon = "🤖" if not _brief.get("fallback") else "📊"
+                with st.expander(f"{_icon} AI Kurulum Değerlendirmesi", expanded=True):
+                    st.markdown(_brief["text"])
+                    if _brief.get("fallback"):
+                        st.caption("API key ekleyince GPT/Gemini ile daha derin analiz gelir.")
+        except Exception:
+            pass  # GenAI yoksa veya hata olursa sessizce geç
+
+
         narrative_text = result.get('narrative_text', '')
         if narrative_text:
             with st.expander("📝 Detaylı Analiz (Cuma Çevik Tarzı)", expanded=True):
