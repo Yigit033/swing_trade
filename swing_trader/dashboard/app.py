@@ -2630,6 +2630,55 @@ def paper_trades_page(components: dict):
         else:
             st.info("👆 Rapor oluşturmak için butona bas")
 
+        # ── Strateji Soru-Cevap (RAG-lite) ───────────────────────
+        st.markdown("---")
+        st.markdown("## 💬 Strateji Danışmanı")
+        st.markdown(
+            "Trade geçmişine dayanarak strateji sorularını cevaplar. "
+            "**'Neden kaybettik?', 'Hangi tip daha iyi?'** gibi sorular sor."
+        )
+
+        with st.expander("💬 Soruyu Sor", expanded=False):
+            if "chat_history" not in st.session_state:
+                st.session_state.chat_history = []
+
+            chat_q = st.text_input(
+                "Sorunuzu yazın:",
+                placeholder="Örnek: Bu hafta neden kayıplarımız arttı?",
+                key="strategy_chat_input"
+            )
+            ask_btn = st.button("🤔 Sor", key="strategy_chat_btn", type="primary")
+
+            if ask_btn and chat_q.strip():
+                with st.spinner("Analiz yapılıyor..."):
+                    try:
+                        from swing_trader.genai.strategy_chat import StrategyChat
+                        chat_engine = StrategyChat(storage)
+                        chat_result = chat_engine.ask(chat_q)
+                        st.session_state.chat_history.append({
+                            "question": chat_q,
+                            "answer": chat_result.get("answer", "Cevap alınamadı"),
+                            "llm": chat_result.get("llm_available", False),
+                        })
+                    except Exception as e:
+                        st.session_state.chat_history.append({
+                            "question": chat_q,
+                            "answer": f"Hata: {e}",
+                            "llm": False,
+                        })
+
+            if st.button("🗑️ Sohbeti Temizle", key="clear_chat"):
+                st.session_state.chat_history = []
+
+            for item in reversed(st.session_state.chat_history):
+                st.markdown(f"**❓ {item['question']}**")
+                tag = "🤖 AI" if item["llm"] else "📊 İstatistik"
+                st.caption(tag)
+                st.markdown(item["answer"])
+                st.markdown("---")
+
+
+
     # ============================================================
     # TAB 4: AI MODEL
     # ============================================================
