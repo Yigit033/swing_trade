@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
     LayoutDashboard, Search, TrendingUp, Clock, BarChart3,
-    LineChart, MessageSquare, Zap,
+    LineChart, MessageSquare, Zap, FlaskConical,
 } from "lucide-react";
 
 const navItems = [
@@ -14,6 +14,7 @@ const navItems = [
     { href: "/pending", label: "Pending", icon: Clock },
     { href: "/performance", label: "Performance", icon: BarChart3 },
     { href: "/charts", label: "Charts", icon: LineChart },
+    { href: "/backtest", label: "Backtest", icon: FlaskConical },
     { href: "/chat", label: "AI Chat", icon: MessageSquare },
 ];
 

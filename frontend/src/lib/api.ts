@@ -119,3 +119,60 @@ export const chatWithAI = (message: string, history: unknown[] = []) =>
 
 export const getSignalBrief = (ticker: string, signal: Signal) =>
     api.post("/api/genai/signal-brief", { ticker, signal }).then((r) => r.data);
+
+// ---- Backtest types ----
+export interface BacktestMetrics {
+    total_trades: number;
+    winning_trades: number;
+    losing_trades: number;
+    win_rate: number;          // 0-1 float
+    profit_factor: number;
+    total_pnl_dollar: number;
+    total_return: number;      // decimal, e.g. 0.12 = 12%
+    max_drawdown: number;      // percent, e.g. -8.5
+    avg_win_pct: number;
+    avg_loss_pct: number;
+    avg_win_dollar: number;
+    avg_loss_dollar: number;
+    avg_hold_days: number;
+    initial_capital: number;
+    final_capital: number;
+    type_stats?: Record<string, { wins: number; losses: number; total_pnl: number }>;
+    exit_stats?: Record<string, { count: number; avg_pnl: number }>;
+}
+
+export interface BacktestTrade {
+    ticker: string;
+    swing_type?: string;
+    entry_price: number;
+    exit_price: number;
+    pnl_pct: number;
+    pnl_dollar: number;
+    exit_reason?: string;
+    entry_date?: string;
+    exit_date?: string;
+    hold_days?: number;
+}
+
+export interface BacktestResult {
+    period_days: number;
+    start_date: string;
+    end_date: string;
+    tickers_used: string[];
+    initial_capital: number;
+    metrics: BacktestMetrics;
+    equity_curve: { date: string; portfolio_value: number }[];
+    trades: BacktestTrade[];
+    error?: string;
+}
+
+// Backtest — 5-min timeout for long operations
+export const runBacktest = (params: {
+    period_days: number;
+    initial_capital: number;
+    max_concurrent: number;
+    tickers?: string[];
+}) =>
+    api.post<BacktestResult>("/api/backtest/smallcap", params, { timeout: 300000 })
+        .then((r) => r.data);
+

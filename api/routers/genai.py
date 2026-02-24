@@ -14,6 +14,9 @@ from api.deps import get_paper_storage
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# Closed statuses — matches storage.get_closed_trades() logic
+CLOSED_STATUSES = {"STOPPED", "TRAILED", "TARGET", "MANUAL", "WIN", "LOSS", "CLOSED", "REJECTED"}
+
 
 class ChatRequest(BaseModel):
     message: str
@@ -29,7 +32,7 @@ class SignalBriefRequest(BaseModel):
 async def strategy_chat(body: ChatRequest):
     """Free-form strategy chat using trade history as context."""
     storage = get_paper_storage()
-    trades = storage.get_trades() or []
+    trades = storage.get_all_trades() or []   # FIX: was storage.get_trades() (non-existent)
 
     try:
         from swing_trader.genai.strategy_chat import StrategyChat
@@ -38,8 +41,8 @@ async def strategy_chat(body: ChatRequest):
         return {"answer": answer}
     except Exception as e:
         logger.warning(f"GenAI chat error: {e}")
-        # Deterministic fallback
-        closed = [t for t in trades if t.get("status") in ("WIN", "LOSS", "CLOSED")]
+        # Deterministic fallback using correct closed-trades logic
+        closed = storage.get_closed_trades(limit=1000)
         wins   = [t for t in closed if (t.get("realized_pnl") or 0) > 0]
         wr     = round(len(wins) / len(closed) * 100, 1) if closed else 0
         return {
@@ -75,7 +78,7 @@ async def signal_brief(body: SignalBriefRequest):
 async def weekly_report():
     """Generate weekly performance report."""
     storage = get_paper_storage()
-    trades  = storage.get_trades() or []
+    trades  = storage.get_all_trades() or []   # FIX: was storage.get_trades() (non-existent)
     try:
         from swing_trader.paper_trading.reporter import PaperTradeReporter
         reporter = PaperTradeReporter()

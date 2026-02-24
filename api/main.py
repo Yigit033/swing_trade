@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import trades, pending, performance, lookup, scanner, genai
+from api.routers import trades, pending, performance, lookup, scanner, genai, backtest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
@@ -39,6 +39,7 @@ app.include_router(performance.router, prefix="/api/performance", tags=["perform
 app.include_router(lookup.router,      prefix="/api/lookup",      tags=["lookup"])
 app.include_router(scanner.router,     prefix="/api/scanner",     tags=["scanner"])
 app.include_router(genai.router,       prefix="/api/genai",       tags=["genai"])
+app.include_router(backtest.router,    prefix="/api/backtest",    tags=["backtest"])
 
 
 @app.get("/api/health")

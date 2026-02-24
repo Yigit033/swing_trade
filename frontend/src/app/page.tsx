@@ -142,7 +142,7 @@ export default function DashboardPage() {
               </thead>
               <tbody>
                 {perf.recent_closed.slice(0, 10).map(t => {
-                  const win = (t.realized_pnl || 0) >= 0;
+                  const win = (t.realized_pnl || 0) > 0;
                   return (
                     <tr key={t.id}>
                       <td><strong>{t.ticker}</strong></td>
@@ -155,8 +155,8 @@ export default function DashboardPage() {
                         {win ? "+" : ""}{t.realized_pnl_pct?.toFixed(2)}%
                       </td>
                       <td>
-                        <span className={`badge ${win ? "badge-green" : "badge-red"}`}>
-                          {win ? "WIN" : "LOSS"}
+                        <span className={`badge ${win ? "badge-green" : t.status === "REJECTED" ? "badge-red" : "badge-red"}`}>
+                          {t.status || (win ? "WIN" : "LOSS")}
                         </span>
                       </td>
                     </tr>
