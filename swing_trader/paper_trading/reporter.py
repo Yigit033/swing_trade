@@ -221,7 +221,9 @@ class PaperTradeReporter:
                 'swing_type': trade.get('swing_type', 'A'),
                 'signal_price': trade.get('signal_price'),
                 'position_size': trade.get('position_size', 100),
+                'quality_score': trade.get('quality_score', 0),
                 'status': trade.get('status', 'OPEN')
+
             }
             
             if trade.get('status') == 'PENDING':
