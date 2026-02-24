@@ -12,8 +12,9 @@ yfinance>=0.2.28
 finvizfinance>=0.14.0
 
 # Technical indicators
-# pandas-ta PyPI'da Python 3.11/Linux desteklemiyor — Git'ten kur
-pandas-ta @ git+https://github.com/twopirllc/pandas-ta.git@development
+# Exact version pin forces pip to install pre-release without --pre flag
+pandas-ta==0.3.14b0
+
 
 # Visualization
 plotly>=5.14.0
