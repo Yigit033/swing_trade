@@ -2159,7 +2159,7 @@ def paper_trades_page(components: dict):
 | ❌ **Gap-down Red** | Open **< -3%** → kötü haber, girmiyoruz |
 | ⏳ **Bekleniyor** | Henüz ertesi gün verisi yok (piyasa açılmadı) |
 
-*"🔄 Update Prices" butonu tüm bekleyenleri otomatik kontrol eder.*
+*Sayfa her yenilendiğinde de otomatik kontrol edilir — "🔄 Update Prices" butonu ayrıca açık trade fiyatlarını da günceller.*
                 """)
 
             # Her pending sinyal için kart
@@ -2177,11 +2177,22 @@ def paper_trades_page(components: dict):
                 reward_pct = abs(target - sig_price) / sig_price * 100 if sig_price else 0
                 rr         = reward_pct / risk_pct if risk_pct > 0 else 0
 
+                # Kalite badge (0-100+ skala, /10 değil)
+                if quality >= 75:
+                    q_badge = "🔥"
+                elif quality >= 55:
+                    q_badge = "✅"
+                elif quality > 0:
+                    q_badge = "⚠️"
+                else:
+                    q_badge = "—"  # Skor kaydedilmemiş
+
                 with st.container(border=True):
                     # Başlık satırı
                     h_col1, h_col2 = st.columns([3, 1])
                     with h_col1:
-                        st.markdown(f"### ⏳ {ticker} — Tip {stype} | Kalite {quality}/10")
+                        q_str = f"{q_badge} {quality:.0f}/100" if quality > 0 else "Skor yok"
+                        st.markdown(f"### ⏳ {ticker} — Tip {stype} | Kalite: {q_str}")
                         st.caption(f"Sinyal tarihi: {added_date} | Sinyal fiyatı: ${sig_price:.2f}")
                     with h_col2:
                         st.markdown("")
