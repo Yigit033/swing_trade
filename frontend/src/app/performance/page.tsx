@@ -136,13 +136,14 @@ export default function PerformancePage() {
                                 <tbody>
                                     {closed.map(t => {
                                         const pnl = t.realized_pnl || 0;
-                                        const win = pnl > 0 || t.status === "TARGET";
+                                        const win = pnl > 0;  // matches reporter: pnl > 0
                                         const statusColor =
                                             t.status === "TARGET" ? "badge-green" :
                                                 t.status === "STOPPED" ? "badge-red" :
                                                     t.status === "TRAILED" ? "badge-yellow" :
                                                         t.status === "MANUAL" ? "badge-blue" :
-                                                            win ? "badge-green" : "badge-red";
+                                                            t.status === "REJECTED" ? "badge-red" :
+                                                                win ? "badge-green" : "badge-red";
                                         return (
                                             <tr key={t.id}>
                                                 <td><strong>{t.ticker}</strong></td>

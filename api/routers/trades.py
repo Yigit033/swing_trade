@@ -12,7 +12,6 @@ POST /api/trades/update-prices - fetch latest prices for all open trades
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
 from api.deps import get_paper_storage, get_paper_tracker
 
 router = APIRouter()
@@ -104,20 +103,21 @@ def delete_trade(trade_id: int):
 
 @router.post("/{trade_id}/close")
 def close_trade(trade_id: int, body: CloseTradeIn):
-    tracker = get_paper_tracker()
-    exit_date = body.exit_date or datetime.now().strftime("%Y-%m-%d")
-    # Determine WIN or LOSS based on P&L
+    """Manually close a trade. Tracker sets status=MANUAL and calculates realized P&L."""
     storage = get_paper_storage()
     trade = storage.get_trade_by_id(trade_id)
     if not trade:
         raise HTTPException(status_code=404, detail="Trade not found")
-    pnl = body.exit_price - trade["entry_price"]
-    status = "WIN" if pnl >= 0 else "LOSS"
-    result = tracker.manual_close_trade(
+
+    tracker = get_paper_tracker()
+    ok = tracker.manual_close_trade(
         trade_id,
         exit_price=body.exit_price,
-        notes=body.notes or ("Manually closed" if not body.notes else body.notes),
+        notes=body.notes or "Manually closed",
     )
-    if not result:
-        raise HTTPException(status_code=404, detail="Could not close trade")
-    return {"message": "Trade closed", "trade": result}
+    if not ok:
+        raise HTTPException(status_code=500, detail="Could not close trade")
+
+    # Fetch the updated trade from storage after closing (tracker returns bool not dict)
+    updated = storage.get_trade_by_id(trade_id)
+    return {"message": "Trade closed", "trade": updated}

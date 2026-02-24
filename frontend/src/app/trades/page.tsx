@@ -6,7 +6,8 @@ import { RefreshCw, X, CheckSquare, TrendingUp, TrendingDown } from "lucide-reac
 
 type FilterStatus = "ALL" | "OPEN" | "CLOSED" | "PENDING";
 
-const CLOSED_STATUSES = new Set(["STOPPED", "TRAILED", "TARGET", "MANUAL", "WIN", "LOSS", "CLOSED"]);
+// Matches storage.get_closed_trades(): status NOT IN ('OPEN','PENDING')
+const CLOSED_STATUSES = new Set(["STOPPED", "TRAILED", "TARGET", "MANUAL", "WIN", "LOSS", "CLOSED", "REJECTED"]);
 
 function StatusBadge({ status }: { status: string }) {
     const map: Record<string, string> = {
@@ -81,7 +82,7 @@ export default function TradesPage() {
             : trades.filter(t => t.status === filter);
     const openCount = trades.filter(t => t.status === "OPEN").length;
     const closedCount = trades.filter(t => CLOSED_STATUSES.has(t.status)).length;
-    const winCount = trades.filter(t => ["TARGET", "WIN"].includes(t.status) || (t.realized_pnl ?? 0) > 0).length;
+    const winCount = trades.filter(t => (t.realized_pnl ?? 0) > 0).length;
 
     return (
         <div>
