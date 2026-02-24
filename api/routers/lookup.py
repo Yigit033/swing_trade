@@ -1,6 +1,9 @@
 """
-Manual ticker lookup router — step-by-step diagnostic analysis.
-POST /api/lookup  — analyze one or more tickers with FULL rejection reasons.
+Manual ticker lookup router.
+POST /api/lookup  — analyze tickers with full stage-by-stage diagnostic.
+
+Logic mirrors Streamlit's analyze_smallcap_ticker() from dashboard/app.py
+so the output is identical to the Streamlit version.
 """
 
 import logging
@@ -9,8 +12,9 @@ import yfinance as yf
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List
+
 from api.deps import get_smallcap_engine
-from api.utils import flatten_yf_df
+from api.utils import flatten_yf_df, sanitize_for_json
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -21,177 +25,147 @@ class LookupRequest(BaseModel):
     portfolio_value: float = 10000
 
 
-def _analyze_ticker(engine, ticker: str, df, info: dict) -> dict:
+def _analyze_smallcap_ticker(ticker: str, df, info: dict, engine, portfolio_value: float) -> dict:
     """
-    Run all 3 analysis stages manually so we can return diagnostic info at every step.
-    Mirrors exactly what scan_stock() does internally.
+    Exact port of Streamlit's analyze_smallcap_ticker() from dashboard/app.py.
+    Returns a result dict with the same keys so the frontend can display
+    the same stage-by-stage rejection detail.
     """
-    from datetime import datetime
-
-    # ── Date ──────────────────────────────────────────────────────────────────
-    try:
-        if 'Date' in df.columns:
-            signal_date_raw = df['Date'].iloc[-1]
-        else:
-            signal_date_raw = df.index[-1]
-        if hasattr(signal_date_raw, 'to_pydatetime'):
-            signal_date_dt = signal_date_raw.to_pydatetime().replace(tzinfo=None)
-        else:
-            signal_date_dt = datetime.strptime(str(signal_date_raw)[:10], '%Y-%m-%d')
-    except Exception:
-        signal_date_dt = datetime.now()
-
-    # ── Stock meta ─────────────────────────────────────────────────────────────
-    market_cap = (info.get('marketCap') or 0) / 1e9
-    sector = info.get('sector', 'Unknown')
-    company = info.get('longName') or info.get('shortName', ticker)
-    float_shares = (info.get('floatShares') or 0) / 1e6
-    current_price = float(df['Close'].iloc[-1]) if 'Close' in df.columns else 0
-    try:
-        rsi5d = ((float(df['Close'].iloc[-1]) / float(df['Close'].iloc[-6])) - 1) * 100
-    except Exception:
-        rsi5d = 0
-
-    # ── Calculate RSI ─────────────────────────────────────────────────────────
-    try:
-        import numpy as np
-        close = df['Close'].astype(float)
-        delta = close.diff()
-        gain = delta.clip(lower=0).rolling(14).mean()
-        loss = (-delta.clip(upper=0)).rolling(14).mean()
-        rs = gain / loss.replace(0, np.nan)
-        rsi_val = float((100 - (100 / (1 + rs))).iloc[-1])
-    except Exception:
-        rsi_val = 0
-
-    meta = {
+    result: dict = {
         "ticker":       ticker,
-        "company":      company,
-        "sector":       sector,
-        "market_cap_b": round(market_cap, 2),
-        "float_m":      round(float_shares, 1),
-        "current_price": round(current_price, 2),
-        "rsi":          round(rsi_val, 1),
-        "five_day_pct": round(rsi5d, 1),
+        "strategy":     "SmallCap",
+        "status":       "analyzed",
+        "company_name": info.get("longName") or info.get("shortName", ticker),
+        "sector":       info.get("sector", "Unknown"),
+        "market_cap":   info.get("marketCap", 0) or 0,
+        "float_shares": info.get("floatShares", 0) or 0,
     }
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # STAGE 1: Hard Filters
-    # ─────────────────────────────────────────────────────────────────────────
+    stock_info = {
+        "ticker":      ticker,
+        "marketCap":   result["market_cap"],
+        "floatShares": result["float_shares"],
+        "shortName":   result["company_name"],
+        "sector":      result["sector"],
+    }
+
+    # ── STEP 1: Hard Filters ─────────────────────────────────────────────────
     filter_passed, filter_results = engine.filters.apply_all_filters(
-        ticker, df, info, signal_date_dt
+        ticker, df, stock_info, datetime.now()
     )
-    filters_detail = filter_results.get('filters', {})
+    result["filter_passed"]  = filter_passed
+    result["filter_details"] = filter_results   # sanitized below
 
     if not filter_passed:
-        # Find which filter failed and why
-        failed_filter = None
-        failed_reason = "Unknown filter failure"
-        for fname, fdata in filters_detail.items():
-            if not fdata.get('passed', True):
-                failed_filter = fname
-                failed_reason = fdata.get('reason', 'Failed')
-                break
-        return {
-            **meta,
-            "result": "REJECTED",
-            "stage_failed": 1,
-            "stage_name": "Filters (Market Cap, Volume, ATR%, Float, Earnings)",
-            "failed_filter": failed_filter,
-            "failed_reason": failed_reason,
-            "filters": filters_detail,
-            "triggers": None,
-            "swing": None,
-            "signal": None,
-        }
+        result["swing_ready"]      = False
+        result["rejection_reason"] = "Failed universe filters"
+        result["rsi"]              = _safe_rsi(engine, df)
+        result["five_day_return"]  = _safe_5d(df)
+        return result
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # STAGE 2: Signal Triggers
-    # ─────────────────────────────────────────────────────────────────────────
+    # ── STEP 2: Signal Triggers ───────────────────────────────────────────────
     triggered, trigger_details = engine.signals.check_all_triggers(df)
-    triggers = trigger_details.get('triggers', trigger_details)
+    result["trigger_passed"]   = triggered
+    result["trigger_details"]  = trigger_details   # sanitized below
 
     if not triggered:
-        # Find failed trigger
-        failed_trigger = None
-        failed_reason = "No momentum triggers activated"
-        for tname, tdata in (triggers.items() if isinstance(triggers, dict) else {}.items()):
-            if isinstance(tdata, dict) and not tdata.get('passed', True):
-                failed_trigger = tname
-                failed_reason = tdata.get('reason', 'Not triggered')
-                break
-        return {
-            **meta,
-            "result": "REJECTED",
-            "stage_failed": 2,
-            "stage_name": "Signal Triggers (Volume Surge, Volatility, Breakout)",
-            "failed_filter": failed_trigger,
-            "failed_reason": failed_reason,
-            "filters": filters_detail,
-            "triggers": triggers,
-            "swing": None,
-            "signal": None,
-        }
+        vol_surge = trigger_details.get("volume_surge", 0)
+        atr_pct   = trigger_details.get("atr_percent", 0) * 100
+        result["swing_ready"]      = False
+        result["rejection_reason"] = (
+            f"No signal trigger | VolSurge: {vol_surge:.1f}x | ATR: {atr_pct:.1f}%"
+        )
+        result["rsi"]             = _safe_rsi(engine, df)
+        result["five_day_return"] = _safe_5d(df)
+        return result
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # STAGE 3: Swing Confirmation
-    # ─────────────────────────────────────────────────────────────────────────
-    boosters = engine.signals.check_boosters(df)
-    swing_ready = boosters.get('swing_ready', False)
-    swing_details = boosters.get('swing_details', {})
+    # ── STEP 3: Swing Confirmation ────────────────────────────────────────────
+    boosters     = engine.signals.check_boosters(df)
+    swing_ready  = boosters.get("swing_ready", False)
+    swing_details = boosters.get("swing_details", {})
+
+    result["swing_ready"]   = swing_ready
+    result["boosters"]      = boosters
+    result["swing_details"] = swing_details
 
     if not swing_ready:
-        five_d = swing_details.get('five_day_momentum', {})
-        ma20   = swing_details.get('above_ma20', {})
-        reasons = []
-        if not five_d.get('passed', True):
-            reasons.append(f"5-day momentum {five_d.get('return', 0)*100:.1f}% (needs > 0%)")
-        if not ma20.get('passed', True):
-            reasons.append(f"Price below MA20 (distance: {ma20.get('distance', 0)*100:.1f}%)")
-        return {
-            **meta,
-            "result": "REJECTED",
-            "stage_failed": 3,
-            "stage_name": "Swing Confirmation (5-Day Momentum, MA20, Higher Lows)",
-            "failed_filter": "swing_confirmation",
-            "failed_reason": "; ".join(reasons) or "Swing confirmation failed",
-            "filters": filters_detail,
-            "triggers": triggers,
-            "swing": {
-                "five_day": five_d,
-                "above_ma20": ma20,
-            },
-            "signal": None,
-        }
+        result["rejection_reason"] = "Failed swing confirmation"
+        result["rsi"]             = _safe_rsi(engine, df)
+        result["five_day_return"] = _safe_5d(df)
+        return result
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # All stages passed — build full signal
-    # ─────────────────────────────────────────────────────────────────────────
-    try:
-        signal = engine.scan_stock(ticker, df, stock_info=info)
-    except Exception as e:
-        signal = None
+    # ── STEP 4: Quality Score ─────────────────────────────────────────────────
+    volume_surge = trigger_details.get("volume_surge", 2.0)
+    atr_percent  = trigger_details.get("atr_percent", 0.06)
+    float_sh     = filter_results.get("float_shares", 0)
 
-    return {
-        **meta,
-        "result": "SIGNAL",
-        "stage_failed": None,
-        "stage_name": None,
-        "failed_filter": None,
-        "failed_reason": None,
-        "filters": filters_detail,
-        "triggers": triggers,
-        "swing": {
-            "five_day": swing_details.get('five_day_momentum', {}),
-            "above_ma20": swing_details.get('above_ma20', {}),
-        },
-        "signal": signal,
+    quality_score = engine.scoring.calculate_quality_score(
+        df, volume_surge, atr_percent, float_sh, boosters
+    )
+    result["quality_score"] = quality_score
+
+    # ── STEP 5: Swing Type ────────────────────────────────────────────────────
+    five_day_return = swing_details.get("five_day_momentum", {}).get("return", 0)
+    ma20_distance   = swing_details.get("above_ma20", {}).get("distance", 0)
+    rsi             = boosters.get("rsi", 50)
+    higher_lows     = boosters.get("higher_lows", False)
+
+    today_high   = float(df["High"].iloc[-1])
+    today_low    = float(df["Low"].iloc[-1])
+    today_close  = float(df["Close"].iloc[-1])
+    day_range    = today_high - today_low
+    close_position = (today_close - today_low) / day_range if day_range > 0 else 0.5
+
+    swing_type, hold_days, type_reason = engine._classify_swing_type(
+        five_day_return, rsi, volume_surge, higher_lows,
+        close_position=close_position, ma20_distance=ma20_distance,
+    )
+
+    result.update({
+        "swing_type":      swing_type,
+        "hold_days":       hold_days,
+        "type_reason":     type_reason,
+        "five_day_return": five_day_return,
+        "rsi":             rsi,
+        "volume_surge":    volume_surge,
+        "atr_percent":     atr_percent,
+        "entry_price":     today_close,
+    })
+
+    # ── STEP 6: Risk Management ───────────────────────────────────────────────
+    signal = {
+        "entry_price": today_close,
+        "atr_percent": atr_percent / 100 if atr_percent > 1 else atr_percent,
+        "date": datetime.now().strftime("%Y-%m-%d"),
     }
+    signal = engine.risk.add_risk_management(signal, df, portfolio_value)
+    result["stop_loss"]     = signal.get("stop_loss")
+    result["target_1"]      = signal.get("target_1")
+    result["target_2"]      = signal.get("target_2")
+    result["position_size"] = signal.get("position_size")
+
+    return result
+
+
+def _safe_rsi(engine, df) -> float:
+    try:
+        return float(engine.signals.calculate_rsi(df))
+    except Exception:
+        return 50.0
+
+
+def _safe_5d(df) -> float:
+    try:
+        if len(df) >= 6:
+            return float((df["Close"].iloc[-1] / df["Close"].iloc[-6] - 1) * 100)
+    except Exception:
+        pass
+    return 0.0
 
 
 @router.post("")
 def lookup_tickers(body: LookupRequest):
-    """Analyze specific tickers with full diagnostic breakdown."""
+    """Analyze tickers with full stage-by-stage diagnostic breakdown."""
     engine = get_smallcap_engine()
     results = []
 
@@ -202,8 +176,8 @@ def lookup_tickers(body: LookupRequest):
                               auto_adjust=True, progress=False)
             if raw is None or raw.empty or len(raw) < 20:
                 results.append({
-                    "ticker": ticker, "result": "ERROR",
-                    "failed_reason": "Yetersiz veri (20+ gün gerekli)",
+                    "ticker": ticker, "status": "error",
+                    "message": "Yetersiz veri (20+ gün gerekli)",
                 })
                 continue
 
@@ -215,12 +189,13 @@ def lookup_tickers(body: LookupRequest):
             except Exception:
                 pass
 
-            result = _analyze_ticker(engine, ticker, df, info)
-            results.append(result)
+            result = _analyze_smallcap_ticker(ticker, df, info, engine, body.portfolio_value)
+            # CRITICAL: convert all numpy types before JSON serialization
+            results.append(sanitize_for_json(result))
 
         except Exception as e:
-            logger.warning(f"Lookup failed for {ticker}: {e}")
-            results.append({"ticker": ticker, "result": "ERROR", "failed_reason": str(e)})
+            logger.warning(f"Lookup failed for {ticker}: {e}", exc_info=True)
+            results.append({"ticker": ticker, "status": "error", "message": str(e)})
 
-    signals = [r for r in results if r.get("result") == "SIGNAL"]
+    signals = [r for r in results if r.get("swing_ready")]
     return {"results": results, "count": len(signals)}
