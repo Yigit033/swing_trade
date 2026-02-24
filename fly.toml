@@ -1,4 +1,4 @@
-app = 'swing-trade-yigit'
+app = 'swing-trade'
 primary_region = 'ams'
 kill_signal = 'SIGINT'
 
