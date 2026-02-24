@@ -1,0 +1,32 @@
+# Docker için ignore listesi
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.env
+*.env
+
+# Yerel SQLite DB (PostgreSQL kullanacağız)
+data/*.db
+
+# Geliştirme araçları
+.git/
+.gitignore
+*.md
+!README.md
+logs/
+output/
+*.log
+
+# Test dosyaları
+*_test.py
+test_*.py
+tests/
+
+# IDE
+.vscode/
+.idea/
+*.swp

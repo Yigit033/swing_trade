@@ -1,0 +1,20 @@
+app = 'swing-trade-yigit'
+primary_region = 'ams'
+kill_signal = 'SIGINT'
+
+[build]
+
+[env]
+  PORT = "8501"
+
+[http_service]
+  internal_port = 8501
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256
