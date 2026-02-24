@@ -4,14 +4,24 @@ import { getTrades, closeTrade, deleteTrade, updatePrices } from "@/lib/api";
 import type { Trade } from "@/lib/api";
 import { RefreshCw, X, CheckSquare, TrendingUp, TrendingDown } from "lucide-react";
 
-type FilterStatus = "ALL" | "OPEN" | "WIN" | "LOSS" | "PENDING";
+type FilterStatus = "ALL" | "OPEN" | "CLOSED" | "PENDING";
+
+const CLOSED_STATUSES = new Set(["STOPPED", "TRAILED", "TARGET", "MANUAL", "WIN", "LOSS", "CLOSED"]);
 
 function StatusBadge({ status }: { status: string }) {
     const map: Record<string, string> = {
-        OPEN: "badge-blue", WIN: "badge-green", LOSS: "badge-red",
-        PENDING: "badge-yellow", CLOSED: "badge-purple",
+        OPEN: "badge-blue",
+        PENDING: "badge-yellow",
+        TARGET: "badge-green",
+        TRAILED: "badge-yellow",
+        STOPPED: "badge-red",
+        MANUAL: "badge-blue",
+        REJECTED: "badge-red",
+        WIN: "badge-green",
+        LOSS: "badge-red",
+        CLOSED: "badge-purple",
     };
-    return <span className={`badge ${map[status] || "badge-blue"}`}>{status}</span>;
+    return <span className={`badge ${map[status] || "badge-purple"}`}>{status}</span>;
 }
 
 export default function TradesPage() {
@@ -64,16 +74,21 @@ export default function TradesPage() {
         } catch { setMsg("Delete failed"); }
     };
 
-    const filtered = filter === "ALL" ? trades : trades.filter(t => t.status === filter);
+    const filtered = filter === "ALL"
+        ? trades
+        : filter === "CLOSED"
+            ? trades.filter(t => CLOSED_STATUSES.has(t.status))
+            : trades.filter(t => t.status === filter);
     const openCount = trades.filter(t => t.status === "OPEN").length;
-    const winCount = trades.filter(t => t.status === "WIN").length;
+    const closedCount = trades.filter(t => CLOSED_STATUSES.has(t.status)).length;
+    const winCount = trades.filter(t => ["TARGET", "WIN"].includes(t.status) || (t.realized_pnl ?? 0) > 0).length;
 
     return (
         <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
                 <div>
                     <h1 className="page-title gradient-text">Paper Trades</h1>
-                    <p className="page-subtitle">{trades.length} total · {openCount} open · {winCount} wins</p>
+                    <p className="page-subtitle">{trades.length} total · {openCount} open · {closedCount} closed · {winCount} wins</p>
                 </div>
                 <button className="btn-secondary" onClick={handleUpdatePrices} disabled={updatingPrices}>
                     {updatingPrices ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <RefreshCw size={14} />}
@@ -89,19 +104,24 @@ export default function TradesPage() {
 
             {/* Filter tabs */}
             <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
-                {(["ALL", "OPEN", "PENDING", "WIN", "LOSS"] as FilterStatus[]).map(s => (
-                    <button key={s} onClick={() => setFilter(s)}
-                        style={{
-                            padding: "6px 16px", borderRadius: 8, border: "1px solid",
-                            borderColor: filter === s ? "var(--accent)" : "var(--border)",
-                            background: filter === s ? "rgba(59,130,246,0.15)" : "transparent",
-                            color: filter === s ? "var(--accent)" : "var(--text-secondary)",
-                            cursor: "pointer", fontSize: "0.8rem", fontWeight: 600,
-                            transition: "all 0.15s",
-                        }}>
-                        {s} {s !== "ALL" && <span style={{ opacity: 0.6 }}>({trades.filter(t => t.status === s).length})</span>}
-                    </button>
-                ))}
+                {(["ALL", "OPEN", "PENDING", "CLOSED"] as FilterStatus[]).map(s => {
+                    const count = s === "ALL" ? trades.length
+                        : s === "CLOSED" ? closedCount
+                            : trades.filter(t => t.status === s).length;
+                    return (
+                        <button key={s} onClick={() => setFilter(s)}
+                            style={{
+                                padding: "6px 16px", borderRadius: 8, border: "1px solid",
+                                borderColor: filter === s ? "var(--accent)" : "var(--border)",
+                                background: filter === s ? "rgba(59,130,246,0.15)" : "transparent",
+                                color: filter === s ? "var(--accent)" : "var(--text-secondary)",
+                                cursor: "pointer", fontSize: "0.8rem", fontWeight: 600,
+                                transition: "all 0.15s",
+                            }}>
+                            {s} {s !== "ALL" && <span style={{ opacity: 0.6 }}>({count})</span>}
+                        </button>
+                    );
+                })}
             </div>
 
             <div className="glass-card" style={{ overflow: "hidden" }}>

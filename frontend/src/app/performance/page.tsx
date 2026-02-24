@@ -135,19 +135,26 @@ export default function PerformancePage() {
                                 </thead>
                                 <tbody>
                                     {closed.map(t => {
-                                        const win = (t.realized_pnl || 0) >= 0;
+                                        const pnl = t.realized_pnl || 0;
+                                        const win = pnl > 0 || t.status === "TARGET";
+                                        const statusColor =
+                                            t.status === "TARGET" ? "badge-green" :
+                                                t.status === "STOPPED" ? "badge-red" :
+                                                    t.status === "TRAILED" ? "badge-yellow" :
+                                                        t.status === "MANUAL" ? "badge-blue" :
+                                                            win ? "badge-green" : "badge-red";
                                         return (
                                             <tr key={t.id}>
                                                 <td><strong>{t.ticker}</strong></td>
                                                 <td>${t.entry_price?.toFixed(2)}</td>
                                                 <td>${t.exit_price?.toFixed(2) || "—"}</td>
-                                                <td style={{ color: win ? "var(--green)" : "var(--red)", fontWeight: 600 }}>
-                                                    {win ? "+" : ""}{t.realized_pnl?.toFixed(2)}$
+                                                <td style={{ color: pnl >= 0 ? "var(--green)" : "var(--red)", fontWeight: 600 }}>
+                                                    {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)}$
                                                 </td>
-                                                <td style={{ color: win ? "var(--green)" : "var(--red)" }}>
-                                                    {win ? "+" : ""}{t.realized_pnl_pct?.toFixed(2)}%
+                                                <td style={{ color: pnl >= 0 ? "var(--green)" : "var(--red)" }}>
+                                                    {pnl >= 0 ? "+" : ""}{t.realized_pnl_pct?.toFixed(2) ?? "—"}%
                                                 </td>
-                                                <td><span className={`badge ${win ? "badge-green" : "badge-red"}`}>{win ? "WIN" : "LOSS"}</span></td>
+                                                <td><span className={`badge ${statusColor}`}>{t.status}</span></td>
                                                 <td style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{t.exit_date}</td>
                                             </tr>
                                         );
