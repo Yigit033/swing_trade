@@ -10,12 +10,17 @@ import os
 import sqlite3
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
+
+# .env dosyasını otomatik yükle
+load_dotenv()
 
 SQLITE_PATH = Path(__file__).parent / "data" / "paper_trades.db"
 
 
 def migrate():
     database_url = os.environ.get("DATABASE_URL")
+
     if not database_url:
         print("HATA: DATABASE_URL env variable ayarlanmamış.")
         print("Örnek: set DATABASE_URL=postgresql://postgres:SIFRE@db.ID.supabase.co:5432/postgres")
