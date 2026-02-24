@@ -11,9 +11,7 @@ scipy>=1.10.0
 yfinance>=0.2.28
 finvizfinance>=0.14.0
 
-# Technical indicators
-# Exact version pin forces pip to install pre-release without --pre flag
-pandas-ta==0.3.14b0
+# Technical indicators (pure pandas/numpy — no external library needed)
 
 
 # Visualization

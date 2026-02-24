@@ -6,7 +6,6 @@ import logging
 from typing import Dict
 import pandas as pd
 import numpy as np
-import pandas_ta as ta
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +58,35 @@ def calculate_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int
         return pd.Series([np.nan] * len(close), index=close.index)
     
     try:
-        # Use pandas_ta for ADX calculation
-        adx_df = ta.adx(high=high, low=low, close=close, length=period)
-        if adx_df is not None and f'ADX_{period}' in adx_df.columns:
-            return adx_df[f'ADX_{period}']
-        else:
-            logger.warning("ADX calculation failed")
-            return pd.Series([np.nan] * len(close), index=close.index)
+        # Pure numpy/pandas ADX (Wilder's smoothing) — no external library
+        tr1 = high - low
+        tr2 = (high - close.shift(1)).abs()
+        tr3 = (low - close.shift(1)).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+        up   = high.diff()
+        down = -low.diff()
+        dm_p = up.where((up > down) & (up > 0), 0.0)
+        dm_n = down.where((down > up) & (down > 0), 0.0)
+
+        # Wilder smoothing (like EMA with alpha=1/period)
+        def wilder(s):
+            out = s.copy().astype(float)
+            out[:] = np.nan
+            out.iloc[period] = s.iloc[1:period + 1].sum()
+            for i in range(period + 1, len(s)):
+                out.iloc[i] = out.iloc[i - 1] - out.iloc[i - 1] / period + s.iloc[i]
+            return out
+
+        atr  = wilder(tr)
+        dmp  = wilder(dm_p)
+        dmn  = wilder(dm_n)
+
+        di_p = 100 * dmp / atr
+        di_n = 100 * dmn / atr
+        dx   = 100 * (di_p - di_n).abs() / (di_p + di_n)
+        adx  = wilder(dx)
+        return adx
     except Exception as e:
         logger.error(f"Error calculating ADX: {e}")
         return pd.Series([np.nan] * len(close), index=close.index)

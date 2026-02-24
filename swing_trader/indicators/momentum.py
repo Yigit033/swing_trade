@@ -6,7 +6,7 @@ import logging
 from typing import Dict, Tuple
 import pandas as pd
 import numpy as np
-import pandas_ta as ta
+
 
 logger = logging.getLogger(__name__)
 
