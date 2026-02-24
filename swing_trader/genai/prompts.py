@@ -149,11 +149,11 @@ def build_signal_briefing_prompt(signal: Dict) -> str:
     reward_pct = abs(target - entry) / entry * 100 if entry else 0
     rr_ratio   = reward_pct / risk_pct if risk_pct > 0 else 0
     atr_pct    = atr / entry * 100 if entry else 0
+    
 
     rr_label  = "guclu" if rr_ratio >= 3.0 else "orta" if rr_ratio >= 2.0 else "dusuk"
     atr_label = "yuksek volatilite" if atr_pct > 5 else "normal volatilite"
     q_label   = "yuksek kaliteli" if quality >= 8 else "orta kaliteli" if quality >= 6 else "dusuk kaliteli"
-
     return (
         f"Asagidaki swing trade sinyalini 2-3 cumleyle degerlendir:\n\n"
         f"HISSE: {ticker} | Tip: {stype} | Kalite: {quality}/10 ({q_label})\n\n"

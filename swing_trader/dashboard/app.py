@@ -2142,34 +2142,120 @@ def paper_trades_page(components: dict):
         else:
             st.info("No active paper trades. Add trades from SmallCap Momentum page!")
         
-        # PENDING trades section
+        # PENDING trades section — Modern Kart Arayüzü
         if open_summary.get('pending_count', 0) > 0:
             st.markdown("---")
-            st.subheader("⏳ Pending Trades (Ertesi Gün Onayı Bekleniyor)")
-            st.caption("Bu sinyaller ertesi gün açılışta otomatik onaylanacak. Gap >5%↑ veya >3%↓ ise reddedilir.")
-            
+
+            n_pending = open_summary['pending_count']
+            st.markdown(f"## ⏳ Bekleyen Sinyaller — {n_pending} onay bekleniyor")
+
+            # Kural kutusu
+            with st.expander("ℹ️ Onay Kuralları", expanded=False):
+                st.markdown("""
+| Durum | Kural |
+|---|---|
+| ✅ **Onaylandı** | Ertesi gün Open fiyatı sinyal fiyatından **≤ +5%** veya **≥ -3%** arasında |
+| ❌ **Gap-up Red** | Open **> +5%** → momentum bitti, girmiyoruz |
+| ❌ **Gap-down Red** | Open **< -3%** → kötü haber, girmiyoruz |
+| ⏳ **Bekleniyor** | Henüz ertesi gün verisi yok (piyasa açılmadı) |
+
+*"🔄 Update Prices" butonu tüm bekleyenleri otomatik kontrol eder.*
+                """)
+
+            # Her pending sinyal için kart
             for trade in open_summary['pending_trades']:
-                signal_price = trade.get('signal_price') or trade['entry_price']
-                st.warning(
-                    f"**{trade['ticker']}** | Sinyal: ${signal_price:.2f} | "
-                    f"Type {trade['swing_type']} | "
-                    f"🔄 Update Prices ile onaylanacak"
-                )
-        
-        # Show confirm results if any
+                trade_id   = trade['id']
+                ticker     = trade['ticker']
+                stype      = trade.get('swing_type', '?')
+                sig_price  = trade.get('signal_price') or trade['entry_price']
+                stop       = trade.get('stop_loss', 0)
+                target     = trade.get('target', 0)
+                added_date = trade.get('entry_date', '?')
+                quality    = trade.get('quality_score', 0)
+
+                risk_pct   = abs(sig_price - stop) / sig_price * 100 if sig_price else 0
+                reward_pct = abs(target - sig_price) / sig_price * 100 if sig_price else 0
+                rr         = reward_pct / risk_pct if risk_pct > 0 else 0
+
+                with st.container(border=True):
+                    # Başlık satırı
+                    h_col1, h_col2 = st.columns([3, 1])
+                    with h_col1:
+                        st.markdown(f"### ⏳ {ticker} — Tip {stype} | Kalite {quality}/10")
+                        st.caption(f"Sinyal tarihi: {added_date} | Sinyal fiyatı: ${sig_price:.2f}")
+                    with h_col2:
+                        st.markdown("")
+                        st.markdown(f"**R/R:** 1:{rr:.1f}")
+
+                    # Fiyat metrikleri
+                    m1, m2, m3, m4 = st.columns(4)
+                    with m1:
+                        st.metric("📍 Entry (Sinyal)", f"${sig_price:.2f}")
+                    with m2:
+                        st.metric("🛑 Stop Loss", f"${stop:.2f}",
+                                  delta=f"-{risk_pct:.1f}%", delta_color="inverse")
+                    with m3:
+                        st.metric("🎯 Target", f"${target:.2f}",
+                                  delta=f"+{reward_pct:.1f}%")
+                    with m4:
+                        st.metric("⚡ Gap Limiti", "+5% / -3%")
+
+                    # Eylem butonları
+                    b1, b2, b3 = st.columns([2, 2, 4])
+                    with b1:
+                        if st.button(f"✅ Şimdi Onayla", key=f"confirm_now_{trade_id}",
+                                     type="primary"):
+                            with st.spinner(f"{ticker} onaylanıyor..."):
+                                results = tracker.confirm_pending_trades()
+                            matched = next((r for r in results if r.get('id') == trade_id), None)
+                            if matched:
+                                if matched.get('confirm_status') == 'confirmed':
+                                    gp = matched.get('gap_pct', 0)
+                                    ep = matched.get('entry_price', 0)
+                                    st.success(f"✅ {ticker} onaylandı! Open: ${ep:.2f} (gap {gp:+.1f}%)")
+                                elif matched.get('confirm_status') == 'rejected':
+                                    st.error(f"❌ {ticker} reddedildi: {matched.get('reject_reason', 'Gap filtresi')}")
+                                elif matched.get('confirm_status') == 'waiting':
+                                    st.info(f"⏳ {ticker} için henüz ertesi gün verisi yok.")
+                            else:
+                                st.warning("Sonuç alınamadı, Update Prices'ı dene.")
+                            st.rerun()
+                    with b2:
+                        if st.button(f"❌ İptal Et", key=f"reject_manual_{trade_id}"):
+                            storage.close_trade(
+                                trade_id, sig_price, added_date,
+                                'REJECTED', 'Manuel iptal edildi'
+                            )
+                            st.warning(f"{ticker} iptal edildi.")
+                            st.rerun()
+                    with b3:
+                        st.caption("💡 'Şimdi Onayla' API'dan ertesi gün Open fiyatını çekip gap filtresini uygular.")
+
+        # Confirm result sonuçları (Update Prices sonrası)
         confirm_results = open_summary.get('confirm_results', [])
-        for cr in confirm_results:
-            if cr.get('confirm_status') == 'confirmed':
-                st.success(
-                    f"✅ {cr['ticker']} onaylandı: Open ${cr.get('entry_price', 0):.2f} "
-                    f"(gap {cr.get('gap_pct', 0):+.1f}%)"
-                )
-            elif cr.get('confirm_status') == 'rejected':
-                st.error(
-                    f"❌ {cr['ticker']} reddedildi: {cr.get('reject_reason', 'Gap filtresi')}"
-                )
-        
+        if confirm_results:
+            st.markdown("---")
+            st.markdown("### 📋 Son Onay Sonuçları")
+            for cr in confirm_results:
+                if cr.get('confirm_status') == 'confirmed':
+                    st.success(
+                        f"✅ **{cr['ticker']}** onaylandı — "
+                        f"Open ${cr.get('entry_price', 0):.2f} "
+                        f"(gap {cr.get('gap_pct', 0):+.1f}%)"
+                    )
+                elif cr.get('confirm_status') == 'rejected':
+                    st.error(
+                        f"❌ **{cr['ticker']}** reddedildi — "
+                        f"{cr.get('reject_reason', 'Gap filtresi')}"
+                    )
+                elif cr.get('confirm_status') == 'waiting':
+                    st.info(f"⏳ **{cr['ticker']}** bekleniyor — ertesi gün verisi henüz yok")
+
+
+
         st.markdown("---")
+
+
         
         # Manual add trade form
         with st.expander("➕ Manually Add Trade"):
