@@ -70,6 +70,9 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     initial_stop    REAL,
     atr             REAL,
     signal_price    REAL,
+    current_price   REAL,
+    unrealized_pnl  REAL,
+    unrealized_pnl_pct REAL,
     created_at      TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at      TEXT DEFAULT CURRENT_TIMESTAMP
 )
@@ -97,6 +100,9 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     initial_stop REAL,
     atr REAL,
     signal_price REAL,
+    current_price REAL,
+    unrealized_pnl REAL,
+    unrealized_pnl_pct REAL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 )
@@ -145,6 +151,9 @@ class PaperTradeStorage:
                     ('initial_stop', 'REAL'),
                     ('atr', 'REAL'),
                     ('signal_price', 'REAL'),
+                    ('current_price', 'REAL'),
+                    ('unrealized_pnl', 'REAL'),
+                    ('unrealized_pnl_pct', 'REAL'),
                 ]
                 import sqlite3 as _sq
                 for col_name, col_type in v3_columns:

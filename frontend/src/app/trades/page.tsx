@@ -41,6 +41,7 @@ export default function TradesPage() {
     const [editModal, setEditModal] = useState<Trade | null>(null);
     const [editStop, setEditStop] = useState("");
     const [editTarget, setEditTarget] = useState("");
+    const [editHoldDays, setEditHoldDays] = useState("");
     const [editNotes, setEditNotes] = useState("");
     const [editSaving, setEditSaving] = useState(false);
 
@@ -89,6 +90,7 @@ export default function TradesPage() {
         setEditModal(t);
         setEditStop(String(t.stop_loss ?? ""));
         setEditTarget(String(t.target ?? ""));
+        setEditHoldDays(String(t.max_hold_days ?? 7));
         setEditNotes(t.notes ?? "");
     };
 
@@ -96,16 +98,19 @@ export default function TradesPage() {
         if (!editModal) return;
         const stop = parseFloat(editStop);
         const target = parseFloat(editTarget);
+        const holdDays = parseInt(editHoldDays);
         if (isNaN(stop) || isNaN(target)) { setMsg("Geçersiz stop veya hedef fiyatı"); return; }
+        if (isNaN(holdDays) || holdDays < 1) { setMsg("Hold süresi en az 1 gün olmalı"); return; }
         setEditSaving(true);
         try {
             await updateTrade(editModal.id, {
                 stop_loss: stop,
                 trailing_stop: stop,   // sync trailing_stop too
                 target,
+                max_hold_days: holdDays,
                 notes: editNotes || editModal.notes,
             });
-            setMsg(`✅ ${editModal.ticker} güncellendi — Stop: $${stop.toFixed(2)}, Target: $${target.toFixed(2)}`);
+            setMsg(`✅ ${editModal.ticker} güncellendi — Stop: $${stop.toFixed(2)}, Target: $${target.toFixed(2)}, Hold: ${holdDays}g`);
             setEditModal(null);
             load();
         } catch { setMsg("❌ Güncelleme başarısız"); }
@@ -326,6 +331,24 @@ export default function TradesPage() {
                                 )}
                             </div>
                         </div>
+
+                        <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 5 }}>
+                            ⏱️ MAKS HOLD SÜRESİ (gün)
+                        </label>
+                        <input
+                            className="input"
+                            type="number"
+                            min="1"
+                            max="60"
+                            value={editHoldDays}
+                            onChange={e => setEditHoldDays(e.target.value)}
+                            style={{ marginBottom: 16 }}
+                        />
+                        {editModal.max_hold_days && (
+                            <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: -12, marginBottom: 12 }}>
+                                Mevcut: {editModal.max_hold_days} gün
+                            </div>
+                        )}
 
                         <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 5 }}>
                             NOT (opsiyonel)

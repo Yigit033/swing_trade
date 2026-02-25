@@ -263,15 +263,22 @@ class PaperTradeTracker:
             current_price = float(price_history['Close'].iloc[-1])
             pnl = (current_price - trade['entry_price']) * trade['position_size']
             pnl_pct = ((current_price / trade['entry_price']) - 1) * 100
-            
+
             trade['current_price'] = round(current_price, 2)
             trade['unrealized_pnl'] = round(pnl, 2)
             trade['unrealized_pnl_pct'] = round(pnl_pct, 2)
-            
+
+            # Persist to DB so GET /api/trades returns live values immediately
+            self.storage.update_trade(trade_id, {
+                'current_price': trade['current_price'],
+                'unrealized_pnl': trade['unrealized_pnl'],
+                'unrealized_pnl_pct': trade['unrealized_pnl_pct'],
+            })
+
             # Calculate days held
             entry_dt = datetime.strptime(entry_date, '%Y-%m-%d').date()
             trade['days_held'] = (datetime.now().date() - entry_dt).days
-        
+
         return trade
     
     def update_all_open_trades(self) -> List[Dict]:
