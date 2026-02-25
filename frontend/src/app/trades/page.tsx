@@ -1,8 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
-import { getTrades, closeTrade, deleteTrade, updatePrices } from "@/lib/api";
+import { getTrades, closeTrade, deleteTrade, updateTrade, updatePrices } from "@/lib/api";
 import type { Trade } from "@/lib/api";
-import { RefreshCw, X, CheckSquare, TrendingUp, TrendingDown } from "lucide-react";
+import { RefreshCw, X, CheckSquare, TrendingUp, TrendingDown, Edit2 } from "lucide-react";
 
 type FilterStatus = "ALL" | "OPEN" | "CLOSED" | "PENDING";
 
@@ -30,10 +30,20 @@ export default function TradesPage() {
     const [filter, setFilter] = useState<FilterStatus>("ALL");
     const [loading, setLoading] = useState(true);
     const [updatingPrices, setUpdatingPrices] = useState(false);
+
+    // Close modal
     const [closingId, setClosingId] = useState<number | null>(null);
     const [closeModal, setCloseModal] = useState<Trade | null>(null);
     const [exitPrice, setExitPrice] = useState("");
     const [exitNotes, setExitNotes] = useState("");
+
+    // Edit stop/target modal
+    const [editModal, setEditModal] = useState<Trade | null>(null);
+    const [editStop, setEditStop] = useState("");
+    const [editTarget, setEditTarget] = useState("");
+    const [editNotes, setEditNotes] = useState("");
+    const [editSaving, setEditSaving] = useState(false);
+
     const [msg, setMsg] = useState("");
 
     const load = () => {
@@ -73,6 +83,33 @@ export default function TradesPage() {
             setMsg(`Deleted ${ticker}`);
             load();
         } catch { setMsg("Delete failed"); }
+    };
+
+    const openEditModal = (t: Trade) => {
+        setEditModal(t);
+        setEditStop(String(t.stop_loss ?? ""));
+        setEditTarget(String(t.target ?? ""));
+        setEditNotes(t.notes ?? "");
+    };
+
+    const handleEdit = async () => {
+        if (!editModal) return;
+        const stop = parseFloat(editStop);
+        const target = parseFloat(editTarget);
+        if (isNaN(stop) || isNaN(target)) { setMsg("Geçersiz stop veya hedef fiyatı"); return; }
+        setEditSaving(true);
+        try {
+            await updateTrade(editModal.id, {
+                stop_loss: stop,
+                trailing_stop: stop,   // sync trailing_stop too
+                target,
+                notes: editNotes || editModal.notes,
+            });
+            setMsg(`✅ ${editModal.ticker} güncellendi — Stop: $${stop.toFixed(2)}, Target: $${target.toFixed(2)}`);
+            setEditModal(null);
+            load();
+        } catch { setMsg("❌ Güncelleme başarısız"); }
+        finally { setEditSaving(false); }
     };
 
     const filtered = filter === "ALL"
@@ -167,12 +204,27 @@ export default function TradesPage() {
                                                 {t.exit_date || t.entry_date}
                                             </td>
                                             <td>
-                                                <div style={{ display: "flex", gap: 6 }}>
+                                                <div style={{ display: "flex", gap: 5 }}>
                                                     {isOpen && (
-                                                        <button className="btn-secondary" style={{ padding: "4px 10px", fontSize: "0.75rem" }}
-                                                            onClick={() => { setCloseModal(t); setExitPrice(String(t.entry_price)); }}>
-                                                            <CheckSquare size={11} /> Close
-                                                        </button>
+                                                        <>
+                                                            {/* Edit stop/target */}
+                                                            <button
+                                                                className="btn-secondary"
+                                                                style={{ padding: "4px 9px", fontSize: "0.75rem" }}
+                                                                title="Stop/Target düzenle"
+                                                                onClick={() => openEditModal(t)}
+                                                            >
+                                                                <Edit2 size={11} />
+                                                            </button>
+                                                            {/* Close trade */}
+                                                            <button
+                                                                className="btn-secondary"
+                                                                style={{ padding: "4px 10px", fontSize: "0.75rem" }}
+                                                                onClick={() => { setCloseModal(t); setExitPrice(String(t.entry_price)); }}
+                                                            >
+                                                                <CheckSquare size={11} /> Close
+                                                            </button>
+                                                        </>
                                                     )}
                                                     <button className="btn-danger" onClick={() => handleDelete(t.id, t.ticker)}>
                                                         <X size={11} />
@@ -188,7 +240,7 @@ export default function TradesPage() {
                 )}
             </div>
 
-            {/* Close Trade Modal */}
+            {/* ── Close Trade Modal ── */}
             {closeModal && (
                 <div style={{
                     position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex",
@@ -217,6 +269,81 @@ export default function TradesPage() {
                                 Confirm Close
                             </button>
                             <button className="btn-secondary" onClick={() => setCloseModal(null)}>Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Edit Stop / Target Modal ── */}
+            {editModal && (
+                <div style={{
+                    position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex",
+                    alignItems: "center", justifyContent: "center", zIndex: 100, backdropFilter: "blur(4px)",
+                }}>
+                    <div className="glass-card" style={{ padding: 28, width: 380, maxWidth: "90vw" }}>
+                        <h3 style={{ margin: "0 0 6px", fontSize: "1.05rem" }}>
+                            ✏️ {editModal.ticker} — Fiyat Güncelle
+                        </h3>
+                        <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: 18 }}>
+                            Giriş: ${editModal.entry_price?.toFixed(2)} &nbsp;·&nbsp; Kalite: {editModal.quality_score?.toFixed(0)}
+                        </div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                            <div>
+                                <label style={{ fontSize: "0.75rem", color: "var(--red)", fontWeight: 700, display: "block", marginBottom: 5 }}>
+                                    🛑 YENİ STOP LOSS
+                                </label>
+                                <input
+                                    className="input"
+                                    type="number"
+                                    step="0.01"
+                                    value={editStop}
+                                    onChange={e => setEditStop(e.target.value)}
+                                    style={{ borderColor: "rgba(239,68,68,0.4)" }}
+                                />
+                                {editModal.stop_loss && (
+                                    <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: 3 }}>
+                                        Mevcut: ${editModal.stop_loss.toFixed(2)}
+                                    </div>
+                                )}
+                            </div>
+                            <div>
+                                <label style={{ fontSize: "0.75rem", color: "var(--green)", fontWeight: 700, display: "block", marginBottom: 5 }}>
+                                    🎯 YENİ HEDEF
+                                </label>
+                                <input
+                                    className="input"
+                                    type="number"
+                                    step="0.01"
+                                    value={editTarget}
+                                    onChange={e => setEditTarget(e.target.value)}
+                                    style={{ borderColor: "rgba(34,197,94,0.4)" }}
+                                />
+                                {editModal.target && (
+                                    <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: 3 }}>
+                                        Mevcut: ${editModal.target.toFixed(2)}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 5 }}>
+                            NOT (opsiyonel)
+                        </label>
+                        <input
+                            className="input"
+                            value={editNotes}
+                            onChange={e => setEditNotes(e.target.value)}
+                            style={{ marginBottom: 20 }}
+                            placeholder="Neden güncelliyorsunuz?"
+                        />
+
+                        <div style={{ display: "flex", gap: 10 }}>
+                            <button className="btn-primary" onClick={handleEdit} disabled={editSaving} style={{ flex: 1 }}>
+                                {editSaving ? <span className="spinner" style={{ width: 14, height: 14 }} /> : null}
+                                Kaydet
+                            </button>
+                            <button className="btn-secondary" onClick={() => setEditModal(null)}>İptal</button>
                         </div>
                     </div>
                 </div>

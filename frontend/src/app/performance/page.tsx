@@ -1,12 +1,12 @@
 "use client";
-import { useState, useEffect } from "react";
-import { getPerformance } from "@/lib/api";
+import { useState, useEffect, useCallback } from "react";
+import { getPerformance, deleteTrade } from "@/lib/api";
 import type { PerformanceSummary, Trade } from "@/lib/api";
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-    LineChart, Line, CartesianGrid, Cell,
+    LineChart, Line, CartesianGrid, Cell, ReferenceLine,
 } from "recharts";
-import { Award, TrendingUp, TrendingDown, Target } from "lucide-react";
+import { Award, TrendingUp, TrendingDown, Target, Trash2 } from "lucide-react";
 
 function MetricCard({ label, value, color = "#3b82f6", icon: Icon }: {
     label: string; value: string; color?: string; icon?: React.ElementType;
@@ -22,7 +22,22 @@ function MetricCard({ label, value, color = "#3b82f6", icon: Icon }: {
     );
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+const PnlTooltip = ({ active, payload, label }: any) => {
+    if (active && payload?.length) {
+        const v = payload[0].value;
+        return (
+            <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 14px", fontSize: "0.8rem" }}>
+                <div style={{ color: "var(--text-muted)", marginBottom: 4 }}>{label}</div>
+                <div style={{ color: v >= 0 ? "var(--green)" : "var(--red)", fontWeight: 700 }}>
+                    {v >= 0 ? "+" : ""}{v?.toFixed(2)}%
+                </div>
+            </div>
+        );
+    }
+    return null;
+};
+
+const CumTooltip = ({ active, payload, label }: any) => {
     if (active && payload?.length) {
         return (
             <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 14px", fontSize: "0.8rem" }}>
@@ -39,10 +54,29 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 export default function PerformancePage() {
     const [data, setData] = useState<{ summary: PerformanceSummary; open_trades: Trade[]; recent_closed: Trade[] } | null>(null);
     const [loading, setLoading] = useState(true);
+    const [deletingId, setDeletingId] = useState<number | null>(null);
+    const [msg, setMsg] = useState("");
 
-    useEffect(() => {
+    const load = useCallback(() => {
+        setLoading(true);
         getPerformance().then(setData).finally(() => setLoading(false));
     }, []);
+
+    useEffect(() => { load(); }, [load]);
+
+    const handleDelete = async (t: Trade) => {
+        if (!confirm(`"${t.ticker}" trade geçmişinden silinsin mi? Bu işlem geri alınamaz.`)) return;
+        setDeletingId(t.id);
+        try {
+            await deleteTrade(t.id);
+            setMsg(`✅ ${t.ticker} silindi`);
+            load();
+        } catch {
+            setMsg("❌ Silinemedi");
+        } finally {
+            setDeletingId(null);
+        }
+    };
 
     if (loading) return (
         <div style={{ textAlign: "center", padding: 80 }}><span className="spinner" style={{ width: 40, height: 40 }} /></div>
@@ -51,7 +85,7 @@ export default function PerformancePage() {
     const s = data?.summary;
     const closed = data?.recent_closed || [];
 
-    // Build cumulative PnL curve
+    // Build cumulative PnL curve ($ — makes sense for absolute equity)
     const sortedClosed = [...closed].sort((a, b) => (a.exit_date || "").localeCompare(b.exit_date || ""));
     let cumPnl = 0;
     const pnlCurve = sortedClosed.map(t => {
@@ -59,10 +93,10 @@ export default function PerformancePage() {
         return { date: t.exit_date?.slice(5) || "", pnl: cumPnl, trade: t.ticker };
     });
 
-    // Per-trade PnL bars
+    // Per-trade P&L % bars (user wants % not $)
     const tradeBars = closed.slice(0, 15).map(t => ({
         ticker: t.ticker,
-        pnl: t.realized_pnl || 0,
+        pnlPct: t.realized_pnl_pct || 0,
     }));
 
     const profitFactor = s && s.avg_loss < 0
@@ -73,6 +107,12 @@ export default function PerformancePage() {
         <div>
             <h1 className="page-title gradient-text">Performance Analytics</h1>
             <p className="page-subtitle">Historical trade analysis · closed positions</p>
+
+            {msg && (
+                <div style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 10, padding: "10px 16px", marginBottom: 16, fontSize: "0.875rem", color: "var(--accent)" }}>
+                    {msg}
+                </div>
+            )}
 
             {/* KPI grid */}
             <div className="metrics-grid" style={{ marginBottom: 28 }}>
@@ -99,44 +139,50 @@ export default function PerformancePage() {
                                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                                 <XAxis dataKey="date" tick={{ fill: "var(--text-muted)", fontSize: 11 }} />
                                 <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11 }} tickFormatter={v => `$${v}`} />
-                                <Tooltip content={<CustomTooltip />} />
+                                <Tooltip content={<CumTooltip />} />
+                                <ReferenceLine y={0} stroke="rgba(255,255,255,0.15)" />
                                 <Line type="monotone" dataKey="pnl" stroke="#3b82f6" strokeWidth={2} dot={false} />
                             </LineChart>
                         </ResponsiveContainer>
                     </div>
 
-                    {/* Per-trade bars */}
+                    {/* Per-trade P&L % bars */}
                     <div className="glass-card" style={{ padding: 22, marginBottom: 20 }}>
-                        <h3 style={{ margin: "0 0 20px", fontSize: "0.95rem", fontWeight: 700 }}>📊 Trade P&L (Last 15)</h3>
-                        <ResponsiveContainer width="100%" height={220}>
+                        <h3 style={{ margin: "0 0 20px", fontSize: "0.95rem", fontWeight: 700 }}>📊 Trade P&L % (Last 15)</h3>
+                        <ResponsiveContainer width="100%" height={200}>
                             <BarChart data={tradeBars}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                                 <XAxis dataKey="ticker" tick={{ fill: "var(--text-muted)", fontSize: 10 }} />
-                                <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11 }} tickFormatter={v => `$${v}`} />
-                                <Tooltip content={<CustomTooltip />} />
-                                <Bar dataKey="pnl" radius={[4, 4, 0, 0]}>
+                                <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11 }} tickFormatter={v => `${v}%`} />
+                                <Tooltip content={<PnlTooltip />} />
+                                <ReferenceLine y={0} stroke="rgba(255,255,255,0.2)" />
+                                <Bar dataKey="pnlPct" radius={[4, 4, 0, 0]} name="P&L %">
                                     {tradeBars.map((entry, i) => (
-                                        <Cell key={i} fill={entry.pnl >= 0 ? "#22c55e" : "#ef4444"} />
+                                        <Cell key={i} fill={entry.pnlPct >= 0 ? "#22c55e" : "#ef4444"} />
                                     ))}
                                 </Bar>
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
 
-                    {/* Detailed table */}
+                    {/* Closed Trade History with delete */}
                     <div className="glass-card" style={{ overflow: "hidden" }}>
-                        <div style={{ padding: "16px 22px", borderBottom: "1px solid var(--border)" }}>
+                        <div style={{ padding: "16px 22px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                             <h3 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 700 }}>📋 Closed Trade History</h3>
+                            <span className="badge badge-blue">{closed.length} trades</span>
                         </div>
                         <div style={{ overflowX: "auto" }}>
                             <table className="data-table">
                                 <thead>
-                                    <tr><th>Ticker</th><th>Entry</th><th>Exit</th><th>P&L</th><th>P&L %</th><th>Result</th><th>Close Date</th></tr>
+                                    <tr>
+                                        <th>Ticker</th><th>Entry</th><th>Exit</th><th>P&L</th><th>P&L %</th>
+                                        <th>Result</th><th>Close Date</th><th>Delete</th>
+                                    </tr>
                                 </thead>
                                 <tbody>
                                     {closed.map(t => {
                                         const pnl = t.realized_pnl || 0;
-                                        const win = pnl > 0;  // matches reporter: pnl > 0
+                                        const win = pnl > 0;
                                         const statusColor =
                                             t.status === "TARGET" ? "badge-green" :
                                                 t.status === "STOPPED" ? "badge-red" :
@@ -157,6 +203,18 @@ export default function PerformancePage() {
                                                 </td>
                                                 <td><span className={`badge ${statusColor}`}>{t.status}</span></td>
                                                 <td style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{t.exit_date}</td>
+                                                <td>
+                                                    <button
+                                                        className="btn-danger"
+                                                        onClick={() => handleDelete(t)}
+                                                        disabled={deletingId === t.id}
+                                                        title="Delete trade"
+                                                    >
+                                                        {deletingId === t.id
+                                                            ? <span className="spinner" style={{ width: 11, height: 11 }} />
+                                                            : <Trash2 size={11} />}
+                                                    </button>
+                                                </td>
                                             </tr>
                                         );
                                     })}

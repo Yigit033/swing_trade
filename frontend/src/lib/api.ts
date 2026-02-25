@@ -79,6 +79,9 @@ export const addTrade = (trade: Partial<Trade>) =>
 export const deleteTrade = (id: number) =>
     api.delete(`/api/trades/${id}`).then((r) => r.data);
 
+export const updateTrade = (id: number, updates: Partial<Trade>) =>
+    api.patch(`/api/trades/${id}`, updates).then((r) => r.data);
+
 export const closeTrade = (id: number, exit_price: number, notes = "") =>
     api.post(`/api/trades/${id}/close`, { exit_price, notes }).then((r) => r.data);
 
