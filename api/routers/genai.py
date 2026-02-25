@@ -14,9 +14,6 @@ from api.deps import get_paper_storage
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Closed statuses — matches storage.get_closed_trades() logic
-CLOSED_STATUSES = {"STOPPED", "TRAILED", "TARGET", "MANUAL", "WIN", "LOSS", "CLOSED", "REJECTED"}
-
 
 class ChatRequest(BaseModel):
     message: str
@@ -32,13 +29,13 @@ class SignalBriefRequest(BaseModel):
 async def strategy_chat(body: ChatRequest):
     """Free-form strategy chat using trade history as context."""
     storage = get_paper_storage()
-    trades = storage.get_all_trades() or []   # FIX: was storage.get_trades() (non-existent)
 
     try:
         from swing_trader.genai.strategy_chat import StrategyChat
-        chat = StrategyChat()
-        answer = chat.answer(body.message, trades, history=body.history)
-        return {"answer": answer}
+        # StrategyChat requires storage; method is ask(), not answer()
+        chat = StrategyChat(storage=storage)
+        result = chat.ask(body.message)
+        return {"answer": result.get("answer", "Cevap alınamadı")}
     except Exception as e:
         logger.warning(f"GenAI chat error: {e}")
         # Deterministic fallback using correct closed-trades logic
@@ -47,8 +44,8 @@ async def strategy_chat(body: ChatRequest):
         wr     = round(len(wins) / len(closed) * 100, 1) if closed else 0
         return {
             "answer": (
-                f"GenAI şu an erişilemiyor. Mevcut istatistikler: "
-                f"{len(closed)} kapalı işlem, %{wr} kazanma oranı."
+                f"GenAI şu an erişilemiyor (hata: {e}). "
+                f"Mevcut istatistikler: {len(closed)} kapalı işlem, %{wr} kazanma oranı."
             )
         }
 
@@ -78,10 +75,10 @@ async def signal_brief(body: SignalBriefRequest):
 async def weekly_report():
     """Generate weekly performance report."""
     storage = get_paper_storage()
-    trades  = storage.get_all_trades() or []   # FIX: was storage.get_trades() (non-existent)
     try:
         from swing_trader.paper_trading.reporter import PaperTradeReporter
-        reporter = PaperTradeReporter()
+        reporter = PaperTradeReporter(storage)
+        trades = storage.get_all_trades() or []
         report = reporter.generate_weekly_report(trades)
         return {"report": report}
     except Exception as e:

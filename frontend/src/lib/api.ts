@@ -50,6 +50,7 @@ export interface Signal {
     expected_hold_max?: number;
     expiration_date?: string;
     win_probability?: number;
+    position_size?: number;
     notes?: string;
 }
 
@@ -120,7 +121,7 @@ export const trackSignal = (signal: Signal & { hold_days_max?: number }) =>
         target_1: signal.target_1 || signal.target,
         swing_type: signal.swing_type || "A",
         quality_score: signal.quality_score,
-        position_size: (signal as Record<string, number>).position_size || 100,
+        position_size: signal.position_size || 100,
         hold_days_max: signal.hold_days_max ?? signal.expected_hold_max ?? 7,
         atr: signal.atr || 0,
     }).then((r) => r.data);
