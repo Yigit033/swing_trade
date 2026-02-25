@@ -13,10 +13,27 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# ── Bağlantı modu ─────────────────────────────────────────────────────────────
+# ── Bağlantı modu ─────────────────────────────────────────────────────────────────────────────────
 DATABASE_URL = os.environ.get("DATABASE_URL")
 DB_PATH = Path(__file__).parent.parent.parent / "data" / "paper_trades.db"
-_MODE = "pg" if DATABASE_URL else "sqlite"
+
+
+def _detect_mode() -> str:
+    """PostgreSQL erişilebilirse 'pg', yoksa 'sqlite' döndürür."""
+    if not DATABASE_URL:
+        return "sqlite"
+    try:
+        import psycopg2
+        conn = psycopg2.connect(DATABASE_URL, connect_timeout=5)
+        conn.close()
+        logger.info("PostgreSQL bağlantısı başarılı — pg modu aktif")
+        return "pg"
+    except Exception as e:
+        logger.warning(f"PostgreSQL erişilemiyor ({e.__class__.__name__}) — SQLite fallback aktif")
+        return "sqlite"
+
+
+_MODE = _detect_mode()
 
 
 def _connect():
@@ -28,6 +45,7 @@ def _connect():
         return conn
     else:
         import sqlite3
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(DB_PATH))
         conn.row_factory = sqlite3.Row
         return conn
