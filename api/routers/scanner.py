@@ -2,19 +2,61 @@
 SmallCap Scanner router.
 GET  /api/scanner/chart     - OHLCV + indicators for any ticker
 POST /api/scanner/smallcap  - run SmallCap momentum scan
+POST /api/scanner/track     - add a signal to paper trades via tracker (duplicate-safe)
 """
 
 import logging
+import datetime
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
-from api.deps import get_smallcap_engine
+from typing import Optional
+from api.deps import get_smallcap_engine, get_paper_tracker
 from api.utils import flatten_yf_df
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+class TrackSignalRequest(BaseModel):
+    ticker: str
+    entry_price: float
+    stop_loss: float
+    target_1: float
+    swing_type: str = "A"
+    quality_score: float = 0
+    position_size: int = 100
+    hold_days_max: int = 7
+    atr: Optional[float] = 0
+    date: Optional[str] = None
+
+
+@router.post("/track")
+def track_signal(body: TrackSignalRequest):
+    """
+    Add a signal to paper trades using the tracker (duplicate-safe).
+    Returns: {"status": "added", "trade_id": N} or {"status": "duplicate"}
+    """
+    tracker = get_paper_tracker()
+    signal = {
+        "ticker": body.ticker,
+        "entry_price": body.entry_price,
+        "stop_loss": body.stop_loss,
+        "target_1": body.target_1,
+        "swing_type": body.swing_type,
+        "quality_score": body.quality_score,
+        "position_size": body.position_size,
+        "hold_days_max": body.hold_days_max,
+        "atr": body.atr or 0,
+        "date": body.date or datetime.date.today().isoformat(),
+    }
+    trade_id = tracker.add_trade_from_signal(signal)
+    if trade_id > 0:
+        return {"status": "added", "trade_id": trade_id}
+    else:
+        return {"status": "duplicate", "trade_id": -1}
 
 
 @router.get("/chart")

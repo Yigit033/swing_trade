@@ -1,8 +1,8 @@
 "use client";
-import { useState } from "react";
-import { runSmallcapScan, addTrade } from "@/lib/api";
+import { useState, useEffect } from "react";
+import { runSmallcapScan, trackSignal, addTrade } from "@/lib/api";
 import type { Signal } from "@/lib/api";
-import { Search, Plus, TrendingUp, AlertTriangle } from "lucide-react";
+import { Search, Plus, TrendingUp, AlertTriangle, Settings, ChevronDown, ChevronUp } from "lucide-react";
 
 function QualityBadge({ score }: { score: number }) {
     const cls = score >= 80 ? "badge-green" : score >= 65 ? "badge-blue" : "badge-yellow";
@@ -11,20 +11,76 @@ function QualityBadge({ score }: { score: number }) {
 }
 
 export default function ScannerPage() {
+    // Scan params
     const [minQuality, setMinQuality] = useState(65);
     const [topN, setTopN] = useState(10);
     const [portfolioValue, setPortfolioValue] = useState(10000);
+
+    // Auto-track settings (persisted in localStorage)
+    const [autoTrackEnabled, setAutoTrackEnabled] = useState(true);
+    const [autoTrackMinQuality, setAutoTrackMinQuality] = useState(65);
+    const [autoTrackOpen, setAutoTrackOpen] = useState(false);
+
+    // Results
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState<{ signals: Signal[]; stats: Record<string, unknown>; market_regime: string } | null>(null);
     const [error, setError] = useState("");
     const [adding, setAdding] = useState<string | null>(null);
     const [msg, setMsg] = useState("");
 
+    // Auto-track result state
+    const [autoTrackResult, setAutoTrackResult] = useState<{ tracked: string[]; skipped: string[] } | null>(null);
+
+    // Load persisted auto-track settings on mount
+    useEffect(() => {
+        try {
+            const saved = localStorage.getItem("autoTrack");
+            if (saved) {
+                const { enabled, minQuality: mq } = JSON.parse(saved);
+                if (enabled !== undefined) setAutoTrackEnabled(enabled);
+                if (mq !== undefined) setAutoTrackMinQuality(mq);
+            }
+        } catch { /* ignore */ }
+    }, []);
+
+    // Persist auto-track settings on change
+    useEffect(() => {
+        try {
+            localStorage.setItem("autoTrack", JSON.stringify({ enabled: autoTrackEnabled, minQuality: autoTrackMinQuality }));
+        } catch { /* ignore */ }
+    }, [autoTrackEnabled, autoTrackMinQuality]);
+
+    const runAutoTrack = async (signals: Signal[]) => {
+        setAutoTrackResult(null);
+        const qualifying = signals.filter(s => s.quality_score >= autoTrackMinQuality);
+        if (!qualifying.length) return;
+
+        const tracked: string[] = [];
+        const skipped: string[] = [];
+
+        await Promise.all(qualifying.map(async (s) => {
+            try {
+                const res = await trackSignal(s);
+                if (res?.status === "added") tracked.push(s.ticker);
+                else skipped.push(s.ticker); // duplicate
+            } catch {
+                skipped.push(s.ticker);
+            }
+        }));
+
+        setAutoTrackResult({ tracked, skipped });
+    };
+
     const scan = async () => {
-        setLoading(true); setError(""); setMsg("");
+        setLoading(true); setError(""); setMsg(""); setAutoTrackResult(null);
         try {
             const data = await runSmallcapScan({ min_quality: minQuality, top_n: topN, portfolio_value: portfolioValue });
             setResult(data);
+
+            // Auto-track if enabled
+            if (autoTrackEnabled && data?.signals?.length > 0) {
+                await runAutoTrack(data.signals);
+            }
         } catch {
             setError("Scan failed. Make sure the API is running.");
         } finally {
@@ -64,7 +120,7 @@ export default function ScannerPage() {
             <p className="page-subtitle">AI-powered momentum signals · SmallCap universe</p>
 
             {/* Controls */}
-            <div className="glass-card" style={{ padding: 20, marginBottom: 24, display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div className="glass-card" style={{ padding: 20, marginBottom: 16, display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <div style={{ flex: 1, minWidth: 160 }}>
                     <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 6 }}>
                         MIN QUALITY
@@ -93,6 +149,96 @@ export default function ScannerPage() {
                 </button>
             </div>
 
+            {/* ⚙️ Auto-Track Ayarları */}
+            <div className="glass-card" style={{ marginBottom: 24, overflow: "hidden" }}>
+                <button
+                    onClick={() => setAutoTrackOpen(o => !o)}
+                    style={{
+                        width: "100%", padding: "14px 20px", background: "transparent", border: "none",
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        cursor: "pointer", color: "var(--text-primary)", fontWeight: 600, fontSize: "0.9rem",
+                    }}
+                >
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Settings size={15} style={{ color: "var(--accent)" }} />
+                        ⚙️ Auto-Track Ayarları
+                        {autoTrackEnabled && (
+                            <span className="badge badge-green" style={{ fontSize: "0.65rem", padding: "2px 7px" }}>
+                                AKTİF ✓
+                            </span>
+                        )}
+                    </span>
+                    {autoTrackOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </button>
+
+                {autoTrackOpen && (
+                    <div style={{ borderTop: "1px solid var(--border)", padding: "16px 20px" }}>
+                        <div style={{ display: "flex", gap: 32, flexWrap: "wrap", alignItems: "flex-start" }}>
+                            {/* Enable toggle */}
+                            <div>
+                                <label style={{
+                                    display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
+                                    fontSize: "0.875rem", fontWeight: 600, userSelect: "none"
+                                }}>
+                                    <div
+                                        onClick={() => setAutoTrackEnabled(e => !e)}
+                                        style={{
+                                            width: 42, height: 24, borderRadius: 12, position: "relative",
+                                            background: autoTrackEnabled ? "var(--green)" : "var(--border)",
+                                            transition: "background 0.2s", cursor: "pointer", flexShrink: 0,
+                                        }}
+                                    >
+                                        <div style={{
+                                            position: "absolute", top: 3, left: autoTrackEnabled ? 21 : 3,
+                                            width: 18, height: 18, borderRadius: "50%", background: "#fff",
+                                            transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                                        }} />
+                                    </div>
+                                    📌 Otomatik Paper Trade Takibi
+                                </label>
+                                <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 6, marginLeft: 52 }}>
+                                    Scan sonucu kaliteli sinyalleri otomatik paper trade&apos;e ekler
+                                </p>
+                            </div>
+
+                            {/* Min quality slider */}
+                            <div style={{ flex: 1, minWidth: 220 }}>
+                                <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 6 }}>
+                                    MİN KALİTE (Auto-Track)
+                                </label>
+                                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                    <input
+                                        type="range" min={50} max={100} value={autoTrackMinQuality}
+                                        onChange={e => setAutoTrackMinQuality(+e.target.value)}
+                                        disabled={!autoTrackEnabled}
+                                        style={{ flex: 1, accentColor: autoTrackEnabled ? "var(--green)" : "var(--border)", opacity: autoTrackEnabled ? 1 : 0.4 }}
+                                    />
+                                    <span style={{ color: autoTrackEnabled ? "var(--green)" : "var(--text-muted)", fontWeight: 700, minWidth: 32 }}>
+                                        {autoTrackMinQuality}
+                                    </span>
+                                </div>
+                                <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 4 }}>
+                                    Bu puanın üzerindeki sinyaller otomatik takibe alınır
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Status info */}
+                        <div style={{
+                            marginTop: 14, padding: "10px 14px", borderRadius: 8, fontSize: "0.8rem",
+                            background: autoTrackEnabled ? "rgba(34,197,94,0.08)" : "rgba(255,255,255,0.03)",
+                            border: `1px solid ${autoTrackEnabled ? "rgba(34,197,94,0.3)" : "var(--border)"}`,
+                            color: autoTrackEnabled ? "var(--green)" : "var(--text-muted)",
+                        }}>
+                            {autoTrackEnabled
+                                ? `✅ Kalite ≥ ${autoTrackMinQuality} olan sinyaller otomatik paper trade'e eklenecek`
+                                : "⏸️ Otomatik takip kapalı — sinyalleri manuel olarak eklemeniz gerekir"
+                            }
+                        </div>
+                    </div>
+                )}
+            </div>
+
             {error && (
                 <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "12px 18px", color: "var(--red)", marginBottom: 16, display: "flex", gap: 10, alignItems: "center" }}>
                     <AlertTriangle size={16} /> {error}
@@ -102,6 +248,27 @@ export default function ScannerPage() {
             {msg && (
                 <div style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 10, padding: "12px 18px", color: "var(--green)", marginBottom: 16 }}>
                     {msg}
+                </div>
+            )}
+
+            {/* Auto-track result banner */}
+            {autoTrackResult && (
+                <div style={{ marginBottom: 16 }}>
+                    {autoTrackResult.tracked.length > 0 && (
+                        <div style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 10, padding: "12px 18px", color: "var(--green)", marginBottom: 8 }}>
+                            📌 <strong>Auto-Track:</strong> {autoTrackResult.tracked.length} sinyal paper trade&apos;e eklendi → {autoTrackResult.tracked.join(", ")}
+                        </div>
+                    )}
+                    {autoTrackResult.skipped.length > 0 && (
+                        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 18px", color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                            ⏭️ Zaten takipte: {autoTrackResult.skipped.join(", ")}
+                        </div>
+                    )}
+                    {autoTrackResult.tracked.length === 0 && autoTrackResult.skipped.length === 0 && (
+                        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 18px", color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                            ℹ️ Kalite ≥ {autoTrackMinQuality} olan sinyal bulunamadı
+                        </div>
+                    )}
                 </div>
             )}
 

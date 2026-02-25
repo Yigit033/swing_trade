@@ -1,4 +1,4 @@
-import axios from "axios";
+﻿import axios from "axios";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -111,6 +111,19 @@ export const runSmallcapScan = (params: {
     top_n?: number;
     portfolio_value?: number;
 }) => api.post("/api/scanner/smallcap", params).then((r) => r.data);
+
+export const trackSignal = (signal: Signal & { hold_days_max?: number }) =>
+    api.post("/api/scanner/track", {
+        ticker: signal.ticker,
+        entry_price: signal.entry_price,
+        stop_loss: signal.stop_loss,
+        target_1: signal.target_1 || signal.target,
+        swing_type: signal.swing_type || "A",
+        quality_score: signal.quality_score,
+        position_size: (signal as Record<string, number>).position_size || 100,
+        hold_days_max: signal.hold_days_max ?? signal.expected_hold_max ?? 7,
+        atr: signal.atr || 0,
+    }).then((r) => r.data);
 
 // Lookup
 export const lookupTickers = (tickers: string[], portfolio_value = 10000) =>
