@@ -18,37 +18,35 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 DB_PATH = Path(__file__).parent.parent.parent / "data" / "paper_trades.db"
 
 
-def _detect_mode() -> str:
-    """PostgreSQL erişilebilirse 'pg', yoksa 'sqlite' döndürür."""
-    if not DATABASE_URL:
-        return "sqlite"
-    try:
-        import psycopg2
-        conn = psycopg2.connect(DATABASE_URL, connect_timeout=5)
-        conn.close()
-        logger.info("PostgreSQL bağlantısı başarılı — pg modu aktif")
+# Mode detection based on URL scheme only (non-blocking, no DNS/TCP at import time).
+# Actual connection errors are handled gracefully in _connect().
+def _url_mode() -> str:
+    if DATABASE_URL and (DATABASE_URL.startswith("postgresql") or DATABASE_URL.startswith("postgres")):
+        logger.info("PostgreSQL modu secildi (baglanti ilk istekte denenir)")
         return "pg"
-    except Exception as e:
-        logger.warning(f"PostgreSQL erişilemiyor ({e.__class__.__name__}) — SQLite fallback aktif")
-        return "sqlite"
+    return "sqlite"
 
 
-_MODE = _detect_mode()
+_MODE = _url_mode()
 
 
 def _connect():
-    """Aktif moda göre DB bağlantısı döndürür."""
+    """Aktif moda gore DB baglantisi dondurur. PG basarisiz olursa SQLite'a gec."""
+    global _MODE
     if _MODE == "pg":
-        import psycopg2
-        import psycopg2.extras
-        conn = psycopg2.connect(DATABASE_URL)
-        return conn
-    else:
-        import sqlite3
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(DB_PATH))
-        conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            import psycopg2
+            import psycopg2.extras
+            conn = psycopg2.connect(DATABASE_URL, connect_timeout=5)
+            return conn
+        except Exception as e:
+            logger.warning(f"PostgreSQL baglantisi basarisiz ({e.__class__.__name__}) - SQLite'a gecildi")
+            _MODE = "sqlite"  # Permanently switch for this process
+    import sqlite3
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def _ph():
