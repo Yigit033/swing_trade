@@ -114,7 +114,7 @@ class PaperTradeTracker:
         initial_stop = trade.get('initial_stop') or stop_loss
         target = trade['target']
         max_hold_days = trade.get('max_hold_days', 7)
-        entry_date = datetime.strptime(trade['entry_date'], '%Y-%m-%d').date()
+        entry_date = datetime.strptime(trade['entry_date'][:10], '%Y-%m-%d').date()
         atr = trade.get('atr') or 0
         trailing_stop = trade.get('trailing_stop') or stop_loss
         
@@ -276,7 +276,7 @@ class PaperTradeTracker:
             })
 
             # Calculate days held
-            entry_dt = datetime.strptime(entry_date, '%Y-%m-%d').date()
+            entry_dt = datetime.strptime(entry_date[:10], '%Y-%m-%d').date()
             trade['days_held'] = (datetime.now().date() - entry_dt).days
 
         return trade
@@ -329,7 +329,7 @@ class PaperTradeTracker:
         
         trade = {
             'ticker': signal['ticker'],
-            'entry_date': signal.get('date', datetime.now().strftime('%Y-%m-%d')),
+            'entry_date': signal.get('date', datetime.now().strftime('%Y-%m-%d')) + ' ' + datetime.now().strftime('%H:%M'),
             'entry_price': signal_price,  # Will be updated at confirmation
             'stop_loss': signal['stop_loss'],
             'target': signal['target_1'],
@@ -345,9 +345,10 @@ class PaperTradeTracker:
             'status': 'PENDING'
         }
         
-        # Check for duplicate
-        if self.storage.check_duplicate(trade['ticker'], trade['entry_date']):
-            logger.warning(f"Trade already exists: {trade['ticker']} on {trade['entry_date']}")
+        # Check for duplicate (sadece tarih kısmıyla karşılaştır)
+        date_only = trade['entry_date'][:10]
+        if self.storage.check_duplicate(trade['ticker'], date_only):
+            logger.warning(f"Trade already exists: {trade['ticker']} on {date_only}")
             return -1
         
         return self.storage.add_trade(trade)
@@ -372,7 +373,7 @@ class PaperTradeTracker:
         for trade in pending:
             ticker = trade['ticker']
             signal_price = trade.get('signal_price') or trade['entry_price']
-            signal_date = trade['entry_date']
+            signal_date = trade['entry_date'][:10]  # sadece YYYY-MM-DD kısmı
             trade_id = trade['id']
             
             # Fetch price data after signal date
@@ -393,7 +394,7 @@ class PaperTradeTracker:
                 # Get the next trading day's Open
                 next_day = price_data.iloc[1]
                 open_price = float(next_day['Open'])
-                entry_date = str(next_day['Date']).split(' ')[0]
+                entry_date = str(next_day['Date']).split(' ')[0] + ' 09:30'  # NYSE açılış saati
                 
                 # Gap filter
                 gap_pct = ((open_price / signal_price) - 1) * 100

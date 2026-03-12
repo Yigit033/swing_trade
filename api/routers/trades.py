@@ -50,11 +50,27 @@ def list_trades(status: Optional[str] = Query(None)):
     return {"trades": all_trades}
 
 
+@router.get("/last-update")
+def last_update():
+    """
+    Return the last time paper trades were updated (any field).
+    
+    This uses the MAX(updated_at) across all trades and is used by the
+    frontend to show a 'Last data refresh' indicator on the Paper Trades page.
+    """
+    storage = get_paper_storage()
+    ts = storage.get_last_update_timestamp()
+    return {"last_update": ts}
+
+
 @router.post("/update-prices")
 def update_prices():
     """Fetch latest prices and update all open/pending trades."""
     tracker = get_paper_tracker()
+    storage = get_paper_storage()
     updated = tracker.update_all_open_trades()
+    # Record that a price refresh was triggered (even if there were no open trades)
+    storage.touch_last_price_update()
     return {"message": f"Updated {len(updated) if updated else 0} trades", "trades": updated or []}
 
 

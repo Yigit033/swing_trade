@@ -6,7 +6,7 @@ Bu dosya XGBoost modelini paper trade geçmişiyle eğitir ve kaydeder.
 ─────────────────────────────────────────────────
 TEMEL KAVRAM: Supervised Learning Pipeline
 ─────────────────────────────────────────────────
-1. Veri yükle        → SQLite'dan closed trades çek
+1. Veri yükle        → Veritabanından closed trades çek (PostgreSQL/Supabase)
 2. Feature hazırla   → features.py ile X, y oluştur
 3. Split             → %80 train, %20 test
 4. Model eğit        → XGBoost (cross-validation ile)
@@ -100,7 +100,7 @@ class SignalTrainer:
 
     def load_data(self) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series], int]:
         """
-        SQLite'dan closed trades çeker ve feature matrix oluşturur.
+        Veritabanından (PostgreSQL/Supabase) closed trades çeker ve feature matrix oluşturur.
         
         Returns:
             (X, y, raw_count) veya (None, None, 0) yeterli veri yoksa

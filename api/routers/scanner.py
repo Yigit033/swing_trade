@@ -13,8 +13,8 @@ import numpy as np
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from typing import Optional
-from api.deps import get_smallcap_engine, get_paper_tracker
-from api.utils import flatten_yf_df
+from api.deps import get_smallcap_engine, get_paper_tracker, get_fetcher
+from api.utils import flatten_yf_df, sanitize_for_json, fetch_ticker_history
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -54,24 +54,22 @@ def track_signal(body: TrackSignalRequest):
     }
     trade_id = tracker.add_trade_from_signal(signal)
     if trade_id > 0:
-        return {"status": "added", "trade_id": trade_id}
+        return sanitize_for_json({"status": "added", "trade_id": trade_id})
     else:
-        return {"status": "duplicate", "trade_id": -1}
+        return sanitize_for_json({"status": "duplicate", "trade_id": -1})
 
 
 @router.get("/chart")
 def get_chart_data(ticker: str = Query(...), period: str = Query("3mo")):
     """Return OHLCV + RSI + MACD + EMAs for charting."""
     try:
-        raw = yf.download(ticker.upper(), period=period, interval="1d",
-                          auto_adjust=True, progress=False)
-        if raw is None or raw.empty or len(raw) < 5:
-            return {"error": "No data available for this ticker", "ticker": ticker}
+        fetcher = get_fetcher()
+        df = fetcher.fetch_stock_data(ticker.upper(), period=period)
+        if df is None or len(df) < 5:
+            return {"error": f"Veri alınamadı ({ticker}). Yahoo Finance geçici olarak rate limit uygulamış olabilir — birkaç dakika sonra tekrar deneyin.", "ticker": ticker}
 
-        df = flatten_yf_df(raw)
-
-        close = df["Close"].squeeze().astype(float)
-        vol   = df["Volume"].squeeze().astype(float)
+        close = df["Close"].astype(float)
+        vol   = df["Volume"].astype(float)
 
         # RSI (14)
         delta = close.diff()
@@ -120,11 +118,11 @@ def get_chart_data(ticker: str = Query(...), period: str = Query("3mo")):
                 "volume_ma":   safe(row.get("Volume_MA")),
             })
 
-        return {"ticker": ticker.upper(), "period": period, "data": rows}
+        return sanitize_for_json({"ticker": ticker.upper(), "period": period, "data": rows})
 
     except Exception as e:
         logger.exception(f"Chart data error for {ticker}")
-        return {"error": str(e), "ticker": ticker}
+        return sanitize_for_json({"error": str(e), "ticker": ticker})
 
 
 class ScanRequest(BaseModel):
@@ -137,19 +135,22 @@ class ScanRequest(BaseModel):
 def run_smallcap_scan(body: ScanRequest):
     """Run the SmallCap Momentum Scanner."""
     engine = get_smallcap_engine()
+    fetcher = get_fetcher()
     try:
         tickers = engine.get_small_cap_universe(use_finviz=True, max_tickers=200)
         logger.info(f"SmallCap universe: {len(tickers)} tickers")
 
+        # Use fetcher.fetch_stock_data (same as Streamlit) instead of yf.download
+        # This ensures identical data pipeline: yf.Ticker().history(), same validation,
+        # same period (3mo), same column format → identical technical indicators → identical scores
         data_dict: dict[str, pd.DataFrame] = {}
         for ticker in tickers:
             try:
-                raw = yf.download(ticker, period="60d", interval="1d",
-                                  auto_adjust=True, progress=False)
-                if raw is not None and not raw.empty and len(raw) >= 20:
-                    data_dict[ticker] = flatten_yf_df(raw)
+                df = fetcher.fetch_stock_data(ticker, period='3mo')
+                if df is not None and len(df) >= 20:
+                    data_dict[ticker] = df
             except Exception:
-                pass
+                continue
 
         if not data_dict:
             return {"signals": [], "stats": {"reason": "no_data"}, "market_regime": "UNKNOWN"}
@@ -170,9 +171,9 @@ def run_smallcap_scan(body: ScanRequest):
             "filtered_signals": len(filtered),
             "reason": "success" if filtered else "no_qualifying",
         }
-        return {"signals": filtered, "stats": stats, "market_regime": "RISK_ON"}
+        return sanitize_for_json({"signals": filtered, "stats": stats, "market_regime": "RISK_ON"})
 
     except Exception as e:
         logger.exception("SmallCap scan failed")
-        return {"signals": [], "stats": {"reason": "error", "error": str(e)},
-                "market_regime": "UNKNOWN", "error": str(e)}
+        return sanitize_for_json({"signals": [], "stats": {"reason": "error", "error": str(e)},
+                "market_regime": "UNKNOWN", "error": str(e)})

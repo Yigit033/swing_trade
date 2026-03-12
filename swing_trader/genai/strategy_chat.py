@@ -97,12 +97,23 @@ class StrategyChat:
             answer = self.client.complete(
                 prompt=prompt,
                 system_prompt=STRATEGY_CHAT_SYSTEM,
-                max_tokens=400,
+                max_tokens=1200,
                 temperature=0.3,   # Düşük — veriyle tutarlı cevap istiyoruz
             )
 
             if not answer:
-                raise ValueError("LLM bos cevap dondurudu")
+                # Boş yanıt — fallback istatistik ver
+                return {
+                    "success": False,
+                    "answer": (
+                        "LLM boş yanıt döndürdü. Mevcut istatistikler:\n\n"
+                        f"- Toplam trade: {context['all_time_summary'].get('total', 0)}\n"
+                        f"- Win Rate: %{context['all_time_summary'].get('win_rate', 0):.1f}\n"
+                        f"- Ort. P/L: {context['all_time_summary'].get('avg_pnl_pct', 0):+.2f}%"
+                    ),
+                    "llm_available": True,
+                    "question": question,
+                }
 
             return {
                 "success": True,
@@ -113,9 +124,11 @@ class StrategyChat:
 
         except Exception as e:
             logger.error(f"StrategyChat hatasi: {e}")
+            err_msg = str(e)
+            # Kullanıcıya rate limit veya genel hata açıkça gösterilsin
             return {
                 "success": False,
-                "answer": f"Hata olustu: {e}",
+                "answer": err_msg if 'rate' in err_msg.lower() or 'limit' in err_msg.lower() else f"Hata olustu: {err_msg}",
                 "llm_available": self.client.is_ready(),
                 "question": question,
             }

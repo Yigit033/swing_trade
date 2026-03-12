@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Desteklenen modeller
 DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",   # Daha ucuz ama güçlü
-    "gemini": "gemini-1.5-flash",
+    "gemini": "gemini-2.5-flash",  # Updated: 2.0-flash deprecated
 }
 
 
@@ -48,6 +48,9 @@ class LLMClient:
             provider: "openai" | "gemini" | None (.env'den okur)
             model: Model adı (None ise provider'a göre default)
         """
+        # Defensive: ensure .env is loaded regardless of calling context
+        self._ensure_env_loaded()
+
         self.provider = (
             provider
             or os.getenv("LLM_PROVIDER", "openai")
@@ -58,6 +61,23 @@ class LLMClient:
         self.available = False   # API key var mı?
 
         self._setup()
+
+    @staticmethod
+    def _ensure_env_loaded():
+        """Load .env if not already loaded — guarantees API keys are available."""
+        if os.getenv("_LLM_ENV_LOADED"):
+            return
+        try:
+            from pathlib import Path
+            from dotenv import load_dotenv
+            # Try project root (.env next to swing_trader/)
+            env_path = Path(__file__).resolve().parents[2] / ".env"
+            if env_path.exists():
+                load_dotenv(env_path, override=False)
+                logger.info(f"LLMClient: loaded .env from {env_path}")
+            os.environ["_LLM_ENV_LOADED"] = "1"
+        except ImportError:
+            pass  # python-dotenv not installed
 
     def _setup(self):
         """Provider'a göre client'ı hazırla ve API key kontrol et."""
@@ -86,6 +106,7 @@ class LLMClient:
     def _setup_gemini(self):
         """Google Gemini client kurulumu."""
         api_key = os.getenv("GEMINI_API_KEY", "")
+        logger.info(f"Gemini setup: key_exists={bool(api_key)}, key_starts_with_your={api_key.startswith('your_') if api_key else 'N/A'}, key_len={len(api_key)}")
         if not api_key or api_key.startswith("your_"):
             logger.info("GEMINI_API_KEY bulunamadı — AI rapor özelliği pasif")
             return
@@ -98,6 +119,8 @@ class LLMClient:
             logger.info(f"Gemini client hazır: {self.model}")
         except ImportError:
             logger.warning("google-generativeai paketi yüklü değil. Kur: pip install google-generativeai")
+        except Exception as e:
+            logger.error(f"Gemini setup error: {e}", exc_info=True)
 
     # ─────────────────────────────────────────────
     # Ana Method: complete()
@@ -107,7 +130,7 @@ class LLMClient:
         self,
         prompt: str,
         system_prompt: str = "",
-        max_tokens: int = 1500,
+        max_tokens: int = 100000,
         temperature: float = 0.5,
     ) -> Optional[str]:
         """
@@ -127,14 +150,23 @@ class LLMClient:
 
         try:
             if self.provider == "openai":
-                return self._complete_openai(prompt, system_prompt, max_tokens, temperature)
+                result = self._complete_openai(prompt, system_prompt, max_tokens, temperature)
             elif self.provider == "gemini":
-                return self._complete_gemini(prompt, system_prompt, max_tokens, temperature)
-        except Exception as e:
-            logger.error(f"LLM complete hatası ({self.provider}): {e}")
-            return None
+                result = self._complete_gemini(prompt, system_prompt, max_tokens, temperature)
+            else:
+                return None
 
-        return None
+            if result:
+                return result
+            logger.warning(f"LLM ({self.provider}) returned empty response")
+            return None
+        except Exception as e:
+            err_msg = str(e).lower()
+            if 'rate' in err_msg or 'limit' in err_msg or 'quota' in err_msg or 'resource' in err_msg:
+                logger.warning(f"LLM rate limited ({self.provider}): {e}")
+                raise RuntimeError("Gemini API rate limited — birkaç dakika bekleyip tekrar deneyin.") from e
+            logger.error(f"LLM complete hatası ({self.provider}): {e}", exc_info=True)
+            raise
 
     def _complete_openai(self, prompt, system_prompt, max_tokens, temperature) -> str:
         messages = []
@@ -159,7 +191,32 @@ class LLMClient:
                 "temperature": temperature,
             }
         )
-        return response.text.strip()
+
+        # Handle safety blocks and empty responses
+        try:
+            text = response.text
+        except ValueError as e:
+            # Safety filter blocked the response
+            logger.warning(f"Gemini safety block: {e}")
+            if hasattr(response, 'prompt_feedback'):
+                logger.warning(f"Prompt feedback: {response.prompt_feedback}")
+            # Try to extract from candidates
+            if response.candidates:
+                for c in response.candidates:
+                    if c.content and c.content.parts:
+                        return c.content.parts[0].text.strip()
+            return ""
+
+        if text:
+            return text.strip()
+
+        # Fallback: try candidates directly
+        logger.warning(f"Gemini empty text. Candidates: {getattr(response, 'candidates', 'N/A')}")
+        if hasattr(response, 'candidates') and response.candidates:
+            for c in response.candidates:
+                if c.content and c.content.parts:
+                    return c.content.parts[0].text.strip()
+        return ""
 
     def is_ready(self) -> bool:
         """API key var mı ve client hazır mı?"""

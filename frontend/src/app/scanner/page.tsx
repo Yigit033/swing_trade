@@ -2,21 +2,230 @@
 import { useState, useEffect } from "react";
 import { runSmallcapScan, trackSignal, addTrade } from "@/lib/api";
 import type { Signal } from "@/lib/api";
-import { Search, Plus, TrendingUp, AlertTriangle, Settings, ChevronDown, ChevronUp } from "lucide-react";
+import { Search, Plus, TrendingUp, AlertTriangle, Settings, ChevronDown, ChevronUp, Star, Zap, Shield, Target, BarChart2 } from "lucide-react";
 
+/* ───── helpers ───── */
 function QualityBadge({ score }: { score: number }) {
     const cls = score >= 80 ? "badge-green" : score >= 65 ? "badge-blue" : "badge-yellow";
     const emoji = score >= 80 ? "🔥" : score >= 65 ? "✅" : "⚠️";
     return <span className={`badge ${cls}`}>{emoji} {score.toFixed(0)}</span>;
 }
 
+function TypeLabel({ type, label }: { type?: string; label?: string }) {
+    const colors: Record<string, string> = {
+        S: "badge-red", B: "badge-yellow", C: "badge-green", A: "badge-blue",
+    };
+    const labels: Record<string, string> = {
+        S: "Short Squeeze", B: "Momentum", C: "Erken Aşama", A: "Continuation",
+    };
+    const t = type || "A";
+    const holdLabels: Record<string, string> = {
+        S: "1-4 gün", B: "1-2 gün", C: "3-8 gün", A: "8-14 gün",
+    };
+    return (
+        <span className={`badge ${colors[t] || "badge-blue"}`}>
+            {labels[t] || label || t} ({holdLabels[t] || ""})
+        </span>
+    );
+}
+
+/* ───── Sinyal Analiz Kartı (Accordion — Streamlit tarzında) ───── */
+function SignalCard({ s, onTrack, tracking }: { s: Signal; onTrack: (s: Signal) => void; tracking: boolean }) {
+    const [open, setOpen] = useState(false);
+
+    const q = s.quality_score;
+    const qualityEmoji = q >= 80 ? "🔥" : q >= 65 ? "🟢" : "🟡";
+    const qualityLabel = q >= 80 ? "Güçlü sinyal" : q >= 65 ? "İyi sinyal" : "Zayıf sinyal";
+
+    // Build boosters list
+    const boosters: string[] = [];
+    if (s.higher_lows) boosters.push("Higher lows");
+    if (s.macd_bullish) boosters.push("MACD bullish cross");
+    if (s.high_rvol) boosters.push("High relative volume");
+    if (s.gap_continuation) boosters.push("Gap continuation");
+    if (s.rsi_divergence) boosters.push("RSI divergence");
+    if (s.has_recent_news) boosters.push("Recent news catalyst");
+    if (s.has_insider_buying) boosters.push("Insider buying detected");
+    if (s.is_squeeze_candidate) boosters.push(`Squeeze candidate (SI: ${s.short_percent?.toFixed(1)}%)`);
+
+    return (
+        <div className="glass-card" style={{ marginBottom: 12, overflow: "hidden" }}>
+            {/* Accordion Header */}
+            <button
+                onClick={() => setOpen(o => !o)}
+                style={{
+                    width: "100%", padding: "14px 20px", background: "transparent", border: "none",
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    cursor: "pointer", color: "var(--text-primary)", gap: 12,
+                }}
+            >
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: "1.05rem", fontWeight: 800, color: "var(--accent)" }}>{s.ticker}</span>
+                    <TypeLabel type={s.swing_type} label={s.swing_type_label} />
+                    <span>{qualityEmoji} {qualityLabel}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <QualityBadge score={q} />
+                    {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </div>
+            </button>
+
+            {/* Accordion Content */}
+            {open && (
+                <div style={{ borderTop: "1px solid var(--border)", padding: "18px 20px" }}>
+                    {/* Title row */}
+                    <div style={{ fontWeight: 700, fontSize: "0.95rem", marginBottom: 14, color: "var(--text-primary)" }}>
+                        {s.ticker} - {s.swing_type_label || s.swing_type} ({s.expected_hold_min || s.hold_days_min}-{s.expected_hold_max || s.hold_days_max} gün) | {qualityEmoji} {qualityLabel}
+                    </div>
+
+                    {/* Narrative / Setup */}
+                    {s.narrative_text && (
+                        <div style={{
+                            background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.15)",
+                            borderRadius: 10, padding: "14px 18px", marginBottom: 16,
+                            fontSize: "0.85rem", lineHeight: 1.7, color: "var(--text-secondary)",
+                        }}>
+                            <div style={{ fontWeight: 700, marginBottom: 6, color: "var(--accent)", fontSize: "0.8rem" }}>
+                                ✨ Setup:
+                            </div>
+                            {s.narrative_text}
+                        </div>
+                    )}
+
+                    {/* Fiyat Seviyeleri */}
+                    <div style={{
+                        display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+                        gap: 10, marginBottom: 16,
+                    }}>
+                        <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "10px 14px" }}>
+                            <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>🎯 Entry</div>
+                            <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--text-primary)", marginTop: 4 }}>${s.entry_price?.toFixed(2)}</div>
+                        </div>
+                        <div style={{ background: "rgba(239,68,68,0.06)", borderRadius: 8, padding: "10px 14px" }}>
+                            <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>🛑 Stop</div>
+                            <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--red)", marginTop: 4 }}>
+                                ${s.stop_loss?.toFixed(2)} <span style={{ fontSize: "0.75rem", opacity: 0.7 }}>({s.stop_loss_pct?.toFixed(1)}%)</span>
+                            </div>
+                        </div>
+                        <div style={{ background: "rgba(34,197,94,0.06)", borderRadius: 8, padding: "10px 14px" }}>
+                            <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>🎯 T1</div>
+                            <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--green)", marginTop: 4 }}>
+                                ${s.target_1?.toFixed(2)} <span style={{ fontSize: "0.75rem", opacity: 0.7 }}>(+{s.target_1_pct?.toFixed(1)}%)</span>
+                            </div>
+                        </div>
+                        <div style={{ background: "rgba(34,197,94,0.08)", borderRadius: 8, padding: "10px 14px" }}>
+                            <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>🚀 T2</div>
+                            <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--green)", marginTop: 4 }}>
+                                ${s.target_2?.toFixed(2)} <span style={{ fontSize: "0.75rem", opacity: 0.7 }}>(+{s.target_2_pct?.toFixed(1)}%)</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Risk/Reward */}
+                    <div style={{
+                        display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 16,
+                        fontSize: "0.82rem", color: "var(--text-secondary)",
+                    }}>
+                        <span>🔥 <strong>Risk/Ödül:</strong> T1 → 1:{s.risk_reward?.toFixed(1)} | T2 → 1:{s.risk_reward_t2?.toFixed(1)}</span>
+                        {s.position_size != null && s.position_size > 0 && (
+                            <span>📊 <strong>Pozisyon:</strong> {s.position_size} adet (${(s.position_size * s.entry_price).toFixed(0)})</span>
+                        )}
+                        {s.risk_amount != null && s.risk_amount > 0 && (
+                            <span>⚠️ <strong>Risk:</strong> ${s.risk_amount.toFixed(0)}</span>
+                        )}
+                    </div>
+
+                    {/* Teknik Bilgiler */}
+                    <div style={{
+                        display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16,
+                        fontSize: "0.82rem", color: "var(--text-secondary)",
+                    }}>
+                        <span>📉 <strong>Teknik:</strong> RSI {s.rsi?.toFixed(0)} — {
+                            (s.rsi || 50) <= 40 ? "aşırı satım" :
+                                (s.rsi || 50) <= 55 ? "sağlıklı seviye" :
+                                    (s.rsi || 50) <= 70 ? "yükseliyor" : "aşırı alım ⚠️"
+                        }</span>
+                        <span>📊 <strong>Vol Surge:</strong> {s.volume_surge?.toFixed(1)}x</span>
+                        <span>📈 <strong>5 Gün:</strong> {s.five_day_return != null ? `${s.five_day_return >= 0 ? "+" : ""}${s.five_day_return.toFixed(1)}%` : "—"}</span>
+                        {s.atr_percent != null && <span>📐 <strong>ATR%:</strong> {s.atr_percent.toFixed(1)}%</span>}
+                    </div>
+
+                    {/* Extras: Sector RS, Catalyst */}
+                    {(s.sector_rs_score != null && s.sector_rs_score > 0 || s.total_catalyst_bonus != null && s.total_catalyst_bonus > 0) && (
+                        <div style={{
+                            display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16,
+                            fontSize: "0.82rem", color: "var(--text-secondary)",
+                        }}>
+                            {s.sector_rs_score != null && s.sector_rs_score > 0 && (
+                                <span>⚡ <strong>Ekstra:</strong> Sektör performansı: +{s.sector_rs_score.toFixed(0)}{s.is_sector_leader ? " (Lider!)" : ""}</span>
+                            )}
+                            {s.total_catalyst_bonus != null && s.total_catalyst_bonus > 0 && (
+                                <span>📰 <strong>Katalist bonus:</strong> +{s.total_catalyst_bonus.toFixed(0)}</span>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Boosters */}
+                    {boosters.length > 0 && (
+                        <div style={{ marginBottom: 16, fontSize: "0.82rem" }}>
+                            <span style={{ color: "var(--text-muted)", fontWeight: 600 }}>✅ Teknik onaylar: </span>
+                            <span style={{ color: "var(--text-secondary)" }}>{boosters.join(", ")}</span>
+                        </div>
+                    )}
+
+                    {/* Öneri */}
+                    <div style={{
+                        background: "rgba(168,85,247,0.06)", border: "1px solid rgba(168,85,247,0.15)",
+                        borderRadius: 10, padding: "12px 16px", marginBottom: 16,
+                        fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.6,
+                    }}>
+                        <span style={{ fontWeight: 700, color: "#a855f7" }}>💡 Öneri:</span>{" "}
+                        ⏳ {s.expected_hold_min || s.hold_days_min}-{s.expected_hold_max || s.hold_days_max} gün hold önerisi
+                        {s.type_reason && <span> | {s.type_reason}</span>}
+                        {s.volatility_warning && <span style={{ color: "var(--red)" }}> | ⚠️ Yüksek volatilite uyarısı</span>}
+                    </div>
+
+                    {/* Track Button */}
+                    <button
+                        className="btn-primary"
+                        onClick={() => onTrack(s)}
+                        disabled={tracking}
+                        style={{ fontSize: "0.85rem", padding: "8px 20px" }}
+                    >
+                        {tracking ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <Star size={14} />}
+                        Track {s.ticker}
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
+/* ───── STORAGE KEYS ───── */
+const STORAGE_KEY = "scannerResults";
+const STORAGE_STATS_KEY = "scannerStats";
+
+function saveScanResults(data: { signals: Signal[]; stats: Record<string, unknown>; market_regime: string }) {
+    try {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch { /* quota exceeded — ignore */ }
+}
+
+function loadScanResults(): { signals: Signal[]; stats: Record<string, unknown>; market_regime: string } | null {
+    try {
+        const raw = sessionStorage.getItem(STORAGE_KEY);
+        return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+}
+
+/* ───── PAGE ───── */
 export default function ScannerPage() {
     // Scan params
     const [minQuality, setMinQuality] = useState(65);
     const [topN, setTopN] = useState(10);
     const [portfolioValue, setPortfolioValue] = useState(10000);
 
-    // Auto-track settings (persisted in localStorage)
+    // Auto-track settings
     const [autoTrackEnabled, setAutoTrackEnabled] = useState(true);
     const [autoTrackMinQuality, setAutoTrackMinQuality] = useState(65);
     const [autoTrackOpen, setAutoTrackOpen] = useState(false);
@@ -27,11 +236,9 @@ export default function ScannerPage() {
     const [error, setError] = useState("");
     const [adding, setAdding] = useState<string | null>(null);
     const [msg, setMsg] = useState("");
-
-    // Auto-track result state
     const [autoTrackResult, setAutoTrackResult] = useState<{ tracked: string[]; skipped: string[] } | null>(null);
 
-    // Load persisted auto-track settings on mount
+    // Load persisted auto-track settings + scan results on mount
     useEffect(() => {
         try {
             const saved = localStorage.getItem("autoTrack");
@@ -41,9 +248,12 @@ export default function ScannerPage() {
                 if (mq !== undefined) setAutoTrackMinQuality(mq);
             }
         } catch { /* ignore */ }
+
+        // Restore last scan results from sessionStorage
+        const cached = loadScanResults();
+        if (cached) setResult(cached);
     }, []);
 
-    // Persist auto-track settings on change
     useEffect(() => {
         try {
             localStorage.setItem("autoTrack", JSON.stringify({ enabled: autoTrackEnabled, minQuality: autoTrackMinQuality }));
@@ -62,7 +272,7 @@ export default function ScannerPage() {
             try {
                 const res = await trackSignal(s);
                 if (res?.status === "added") tracked.push(s.ticker);
-                else skipped.push(s.ticker); // duplicate
+                else skipped.push(s.ticker);
             } catch {
                 skipped.push(s.ticker);
             }
@@ -76,36 +286,37 @@ export default function ScannerPage() {
         try {
             const data = await runSmallcapScan({ min_quality: minQuality, top_n: topN, portfolio_value: portfolioValue });
             setResult(data);
+            saveScanResults(data); // Persist to sessionStorage
 
-            // Auto-track if enabled
             if (autoTrackEnabled && data?.signals?.length > 0) {
                 await runAutoTrack(data.signals);
             }
-        } catch {
-            setError("Scan failed. Make sure the API is running.");
+        } catch (err: any) {
+            if (err?.code === "ECONNABORTED" || err?.message?.includes("timeout")) {
+                setError("Scan timed out — 200 hisse taraması 10 dakikaya kadar sürebilir. Tekrar deneyin veya Top N'i azaltın.");
+            } else if (err?.response) {
+                setError(`Scan failed (HTTP ${err.response.status}): ${err.response.data?.error || "Server error"}`);
+            } else if (err?.request) {
+                setError("API'ye ulaşılamıyor. Uvicorn'un port 8000'de çalıştığından emin olun.");
+            } else {
+                setError("Scan failed. Make sure the API is running.");
+            }
         } finally {
             setLoading(false);
         }
     };
 
-    const addToTrades = async (s: Signal) => {
+    const handleTrack = async (s: Signal) => {
         setAdding(s.ticker);
         try {
-            await addTrade({
-                ticker: s.ticker,
-                entry_date: new Date().toISOString().slice(0, 10),
-                entry_price: s.entry_price,
-                stop_loss: s.stop_loss,
-                target: s.target_1 || s.target,
-                quality_score: s.quality_score,
-                swing_type: s.swing_type || "A",
-                atr: s.atr,
-                signal_price: s.entry_price,
-                status: "PENDING",
-            });
-            setMsg(`✅ ${s.ticker} added as PENDING trade!`);
+            const res = await trackSignal(s);
+            if (res?.status === "added") {
+                setMsg(`✅ ${s.ticker} paper trade'e eklendi! (ID: ${res.trade_id})`);
+            } else {
+                setMsg(`⏭️ ${s.ticker} zaten takipte (duplicate)`);
+            }
         } catch {
-            setMsg(`❌ Failed to add ${s.ticker}`);
+            setMsg(`❌ ${s.ticker} eklenemedi`);
         } finally {
             setAdding(null);
         }
@@ -149,7 +360,7 @@ export default function ScannerPage() {
                 </button>
             </div>
 
-            {/* ⚙️ Auto-Track Ayarları */}
+            {/* Auto-Track Ayarları */}
             <div className="glass-card" style={{ marginBottom: 24, overflow: "hidden" }}>
                 <button
                     onClick={() => setAutoTrackOpen(o => !o)}
@@ -174,12 +385,8 @@ export default function ScannerPage() {
                 {autoTrackOpen && (
                     <div style={{ borderTop: "1px solid var(--border)", padding: "16px 20px" }}>
                         <div style={{ display: "flex", gap: 32, flexWrap: "wrap", alignItems: "flex-start" }}>
-                            {/* Enable toggle */}
                             <div>
-                                <label style={{
-                                    display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
-                                    fontSize: "0.875rem", fontWeight: 600, userSelect: "none"
-                                }}>
+                                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: "0.875rem", fontWeight: 600, userSelect: "none" }}>
                                     <div
                                         onClick={() => setAutoTrackEnabled(e => !e)}
                                         style={{
@@ -200,8 +407,6 @@ export default function ScannerPage() {
                                     Scan sonucu kaliteli sinyalleri otomatik paper trade&apos;e ekler
                                 </p>
                             </div>
-
-                            {/* Min quality slider */}
                             <div style={{ flex: 1, minWidth: 220 }}>
                                 <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 6 }}>
                                     MİN KALİTE (Auto-Track)
@@ -217,13 +422,8 @@ export default function ScannerPage() {
                                         {autoTrackMinQuality}
                                     </span>
                                 </div>
-                                <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 4 }}>
-                                    Bu puanın üzerindeki sinyaller otomatik takibe alınır
-                                </p>
                             </div>
                         </div>
-
-                        {/* Status info */}
                         <div style={{
                             marginTop: 14, padding: "10px 14px", borderRadius: 8, fontSize: "0.8rem",
                             background: autoTrackEnabled ? "rgba(34,197,94,0.08)" : "rgba(255,255,255,0.03)",
@@ -239,12 +439,14 @@ export default function ScannerPage() {
                 )}
             </div>
 
+            {/* Error */}
             {error && (
                 <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "12px 18px", color: "var(--red)", marginBottom: 16, display: "flex", gap: 10, alignItems: "center" }}>
                     <AlertTriangle size={16} /> {error}
                 </div>
             )}
 
+            {/* Success / info messages */}
             {msg && (
                 <div style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 10, padding: "12px 18px", color: "var(--green)", marginBottom: 16 }}>
                     {msg}
@@ -264,15 +466,22 @@ export default function ScannerPage() {
                             ⏭️ Zaten takipte: {autoTrackResult.skipped.join(", ")}
                         </div>
                     )}
-                    {autoTrackResult.tracked.length === 0 && autoTrackResult.skipped.length === 0 && (
-                        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 18px", color: "var(--text-muted)", fontSize: "0.85rem" }}>
-                            ℹ️ Kalite ≥ {autoTrackMinQuality} olan sinyal bulunamadı
-                        </div>
-                    )}
                 </div>
             )}
 
-            {result && (
+            {/* Loading indicator with progress */}
+            {loading && (
+                <div className="glass-card" style={{ padding: 48, textAlign: "center" }}>
+                    <div className="spinner" style={{ width: 48, height: 48, margin: "0 auto 16px" }} />
+                    <h3 style={{ color: "var(--text-secondary)", marginBottom: 8 }}>Taranıyor...</h3>
+                    <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                        200 hisse taranıyor, bu işlem 5-10 dakika sürebilir. Lütfen bekleyin.
+                    </p>
+                </div>
+            )}
+
+            {/* Results */}
+            {result && !loading && (
                 <>
                     {/* Stats bar */}
                     <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
@@ -288,60 +497,40 @@ export default function ScannerPage() {
                             <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>Scanned</div>
                             <div style={{ fontSize: "1.4rem", fontWeight: 800 }}>{(result.stats as Record<string, number>).stocks_scanned || "—"}</div>
                         </div>
+                        <div className="metric-card" style={{ padding: "14px 20px", flex: 1, minWidth: 120 }}>
+                            <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>Raw Signals</div>
+                            <div style={{ fontSize: "1.4rem", fontWeight: 800 }}>{(result.stats as Record<string, number>).raw_signals || "—"}</div>
+                        </div>
                     </div>
 
-                    {/* Signals table */}
+                    {/* Signal cards */}
                     {result.signals.length === 0 ? (
                         <div className="glass-card" style={{ padding: 48, textAlign: "center", color: "var(--text-muted)" }}>
                             <TrendingUp size={48} style={{ marginBottom: 12, opacity: 0.3 }} />
-                            <div>No signals found with current filters. Try lowering min quality.</div>
+                            <div>Mevcut filtrelerle sinyal bulunamadı. Min Quality&apos;yi düşürmeyi deneyin.</div>
                         </div>
                     ) : (
-                        <div className="glass-card" style={{ overflow: "hidden" }}>
-                            <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--border)" }}>
-                                <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700 }}>🎯 Top Signals</h2>
-                            </div>
-                            <div style={{ overflowX: "auto" }}>
-                                <table className="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Ticker</th><th>Quality</th><th>Entry</th><th>Stop</th>
-                                            <th>Target</th><th>RSI</th><th>Vol Surge</th><th>Win Prob</th><th>Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {result.signals.map((s, i) => (
-                                            <tr key={i}>
-                                                <td><strong style={{ color: "var(--accent)", fontSize: "0.95rem" }}>{s.ticker}</strong></td>
-                                                <td><QualityBadge score={s.quality_score} /></td>
-                                                <td style={{ fontWeight: 600 }}>${s.entry_price?.toFixed(2)}</td>
-                                                <td style={{ color: "var(--red)" }}>${s.stop_loss?.toFixed(2)}</td>
-                                                <td style={{ color: "var(--green)" }}>${(s.target_1 || s.target)?.toFixed(2)}</td>
-                                                <td>{s.rsi?.toFixed(1)}</td>
-                                                <td>{s.volume_surge?.toFixed(2)}x</td>
-                                                <td>
-                                                    {s.win_probability != null
-                                                        ? <span className="badge badge-purple">{(s.win_probability * 100).toFixed(0)}%</span>
-                                                        : <span style={{ color: "var(--text-muted)" }}>—</span>
-                                                    }
-                                                </td>
-                                                <td>
-                                                    <button className="btn-secondary" onClick={() => addToTrades(s)}
-                                                        disabled={adding === s.ticker} style={{ fontSize: "0.78rem", padding: "5px 12px" }}>
-                                                        {adding === s.ticker ? <span className="spinner" style={{ width: 12, height: 12 }} /> : <Plus size={12} />}
-                                                        Track
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
+                        <div>
+                            <h2 style={{ fontSize: "1.05rem", fontWeight: 700, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+                                📊 Sinyal Analizleri
+                                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 400 }}>
+                                    Her sinyal için detaylı yorum ve öneri
+                                </span>
+                            </h2>
+                            {result.signals.map((s, i) => (
+                                <SignalCard
+                                    key={`${s.ticker}-${i}`}
+                                    s={s}
+                                    onTrack={handleTrack}
+                                    tracking={adding === s.ticker}
+                                />
+                            ))}
                         </div>
                     )}
                 </>
             )}
 
+            {/* Empty state */}
             {!result && !loading && (
                 <div className="glass-card" style={{ padding: 60, textAlign: "center" }}>
                     <Search size={56} style={{ color: "var(--text-muted)", marginBottom: 16 }} />

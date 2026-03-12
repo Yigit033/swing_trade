@@ -100,8 +100,8 @@ class PaperTradeReporter:
             # Hold days
             if trade.get('entry_date') and trade.get('exit_date'):
                 try:
-                    entry_dt = datetime.strptime(trade['entry_date'], '%Y-%m-%d')
-                    exit_dt = datetime.strptime(trade['exit_date'], '%Y-%m-%d')
+                    entry_dt = datetime.strptime(trade['entry_date'][:10], '%Y-%m-%d')
+                    exit_dt = datetime.strptime(trade['exit_date'][:10], '%Y-%m-%d')
                     hold_days = (exit_dt - entry_dt).days
                     hold_days_list.append(hold_days)
                 except:

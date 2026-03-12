@@ -13,7 +13,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List
 
-from api.deps import get_smallcap_engine
+from api.deps import get_smallcap_engine, get_fetcher
 from api.utils import flatten_yf_df, sanitize_for_json
 
 router = APIRouter()
@@ -165,23 +165,27 @@ def _safe_5d(df) -> float:
 
 @router.post("")
 def lookup_tickers(body: LookupRequest):
-    """Analyze tickers with full stage-by-stage diagnostic breakdown."""
+    """Analyze tickers with full stage-by-stage diagnostic breakdown.
+    
+    Uses the SAME DataFetcher.fetch_stock_data() as Streamlit to ensure
+    identical data fetching behavior (session management, validation, etc.).
+    """
     engine = get_smallcap_engine()
+    fetcher = get_fetcher()
     results = []
 
     for ticker in body.tickers:
         ticker = ticker.upper().strip()
         try:
-            raw = yf.download(ticker, period="60d", interval="1d",
-                              auto_adjust=True, progress=False)
-            if raw is None or raw.empty or len(raw) < 20:
+            # Use DataFetcher — SAME as Streamlit's fetcher.fetch_stock_data()
+            df = fetcher.fetch_stock_data(ticker, period='3mo')
+
+            if df is None or len(df) < 20:
                 results.append({
                     "ticker": ticker, "status": "error",
                     "message": "Yetersiz veri (20+ gün gerekli)",
                 })
                 continue
-
-            df = flatten_yf_df(raw)
 
             info = {}
             try:

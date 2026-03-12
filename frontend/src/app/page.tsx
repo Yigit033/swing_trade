@@ -1,8 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
-import { getPerformance, getPending, getTrades } from "@/lib/api";
+import { getPerformance, getPending } from "@/lib/api";
 import type { PerformanceSummary, Trade } from "@/lib/api";
-import { TrendingUp, TrendingDown, Activity, Clock, DollarSign, Target } from "lucide-react";
+import { TrendingUp, TrendingDown, Activity, Clock, BarChart2, Target } from "lucide-react";
 
 function MetricCard({
   label, value, sub, positive, icon: Icon, color = "blue"
@@ -10,7 +10,7 @@ function MetricCard({
   label: string; value: string; sub?: string;
   positive?: boolean; icon?: React.ElementType; color?: string;
 }) {
-  const colors = { blue: "#3b82f6", green: "#22c55e", red: "#ef4444", purple: "#a855f7", yellow: "#f59e0b" };
+  const colors = { blue: "#3b82f6", green: "#22c55e", red: "#ef4444", purple: "#a855f7", yellow: "#f59e0b", teal: "#14b8a6" };
   const c = colors[color as keyof typeof colors] || colors.blue;
   return (
     <div className="metric-card">
@@ -36,14 +36,32 @@ function MetricCard({
   );
 }
 
-function PnlBadge({ pnl }: { pnl?: number | null }) {
-  if (pnl == null) return <span className="badge badge-blue">Open</span>;
+function TypeBadge({ type }: { type?: string }) {
+  if (!type) return <span className="badge badge-blue">—</span>;
+  const colors: Record<string, string> = { A: "badge-green", B: "badge-blue", C: "badge-yellow" };
+  return <span className={`badge ${colors[type] || "badge-purple"}`}>{type}</span>;
+}
+
+function PnlCell({ pnl, pct }: { pnl?: number | null; pct?: number | null }) {
+  if (pnl == null) return <span style={{ color: "var(--text-muted)" }}>—</span>;
   const pos = pnl >= 0;
   return (
-    <span className={`badge ${pos ? "badge-green" : "badge-red"}`}>
-      {pos ? "+" : ""}{pnl.toFixed(2)}$
-    </span>
+    <div>
+      <span style={{ color: pos ? "var(--green)" : "var(--red)", fontWeight: 600 }}>
+        {pos ? "+" : ""}{pnl.toFixed(2)}$
+      </span>
+      {pct != null && (
+        <div style={{ fontSize: "0.72rem", color: pos ? "var(--green)" : "var(--red)", opacity: 0.8 }}>
+          {pos ? "+" : ""}{pct.toFixed(2)}%
+        </div>
+      )}
+    </div>
   );
+}
+
+function fmtDate(d?: string | null) {
+  if (!d) return "—";
+  return d.slice(0, 10);
 }
 
 export default function DashboardPage() {
@@ -54,7 +72,7 @@ export default function DashboardPage() {
   useEffect(() => {
     Promise.all([
       getPerformance().catch(() => null),
-      getPending().catch(() => ({ pending: [] })),
+      getPending().catch(() => ({ count: 0 })),
     ]).then(([p, pnd]) => {
       setPerf(p);
       setPendingCount(pnd?.count || 0);
@@ -64,23 +82,32 @@ export default function DashboardPage() {
   if (loading) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh", flexDirection: "column", gap: 16 }}>
       <div className="spinner" style={{ width: 40, height: 40 }} />
-      <div style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>Loading dashboard...</div>
+      <div style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>Loading live portfolio...</div>
     </div>
   );
 
   const s = perf?.summary;
+  const openTrades = perf?.open_trades || [];
+  const recentClosed = perf?.recent_closed || [];
 
   return (
     <div>
       {/* Header */}
       <div style={{ marginBottom: 28 }}>
-        <h1 className="page-title gradient-text">Trading Dashboard</h1>
-        <p className="page-subtitle">AI-powered swing trading overview · SmallCap Momentum v2.1</p>
+        <h1 className="page-title gradient-text">Live Portfolio</h1>
+        <p className="page-subtitle">Real-time position monitor · SmallCap Momentum v2.1</p>
       </div>
 
       {/* Metrics */}
       <div className="metrics-grid">
-        <MetricCard label="Total P&L" value={s ? `$${s.total_pnl.toFixed(2)}` : "—"} positive={s && s.total_pnl >= 0} icon={DollarSign} color={s && s.total_pnl >= 0 ? "green" : "red"} />
+        <MetricCard
+          label="Total P&L %"
+          value={s ? `${s.total_pnl_pct >= 0 ? "+" : ""}${s.total_pnl_pct.toFixed(2)}%` : "—"}
+          sub={s ? `Avg: ${s.avg_pnl_pct.toFixed(2)}% per trade` : undefined}
+          positive={s ? s.total_pnl_pct >= 0 : undefined}
+          icon={s && s.total_pnl_pct >= 0 ? TrendingUp : TrendingDown}
+          color={s && s.total_pnl_pct >= 0 ? "green" : "red"}
+        />
         <MetricCard label="Win Rate" value={s ? `${s.win_rate}%` : "—"} sub={s ? `${s.wins}W / ${s.losses}L` : "—"} icon={Target} color="blue" />
         <MetricCard label="Open Trades" value={s ? `${s.open_trades}` : "—"} icon={Activity} color="purple" />
         <MetricCard label="Pending" value={`${pendingCount}`} sub="awaiting confirmation" icon={Clock} color="yellow" />
@@ -88,77 +115,98 @@ export default function DashboardPage() {
         <MetricCard label="Avg Loss" value={s ? `$${s.avg_loss.toFixed(2)}` : "—"} positive={false} icon={TrendingDown} color="red" />
       </div>
 
-      {/* Active Trades */}
+      {/* Active Positions */}
       <div className="glass-card" style={{ marginBottom: 24, overflow: "hidden" }}>
         <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700 }}>🟢 Active Positions</h2>
-          <span className="badge badge-blue">{perf?.open_trades?.length || 0} open</span>
+          <span className="badge badge-blue">{openTrades.length} OPEN</span>
         </div>
         <div style={{ overflowX: "auto" }}>
-          {(!perf?.open_trades?.length) ? (
+          {openTrades.length === 0 ? (
             <div style={{ padding: 32, textAlign: "center", color: "var(--text-muted)" }}>No open positions</div>
           ) : (
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Ticker</th><th>Entry</th><th>Stop</th><th>Target</th>
-                  <th>Quality</th><th>Current P&L</th><th>Status</th>
+                  <th>Ticker</th><th>Type</th><th>Entry Date</th>
+                  <th>Entry $</th><th>Current $</th><th>Stop</th><th>Target</th>
+                  <th>Quality</th><th>P&amp;L</th>
                 </tr>
               </thead>
               <tbody>
-                {perf.open_trades.map(t => (
-                  <tr key={t.id}>
-                    <td><strong style={{ color: "var(--accent)" }}>{t.ticker}</strong></td>
-                    <td>${t.entry_price?.toFixed(2)}</td>
-                    <td style={{ color: "var(--red)" }}>${t.stop_loss?.toFixed(2)}</td>
-                    <td style={{ color: "var(--green)" }}>${t.target?.toFixed(2)}</td>
-                    <td>
-                      <span className={`badge ${t.quality_score >= 80 ? "badge-green" : t.quality_score >= 65 ? "badge-blue" : "badge-yellow"}`}>
-                        {t.quality_score?.toFixed(0)}
-                      </span>
-                    </td>
-                    <td><PnlBadge pnl={t.unrealized_pnl} /></td>
-                    <td><span className="badge badge-green">OPEN</span></td>
-                  </tr>
-                ))}
+                {openTrades.map(t => {
+                  const cp = t.current_price;
+                  const hasLive = cp != null;
+                  return (
+                    <tr key={t.id}>
+                      <td><strong style={{ color: "var(--accent)" }}>{t.ticker}</strong></td>
+                      <td><TypeBadge type={t.swing_type} /></td>
+                      <td style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{fmtDate(t.entry_date)}</td>
+                      <td>${t.entry_price?.toFixed(2)}</td>
+                      <td>
+                        {hasLive ? (
+                          <span style={{ fontWeight: 700, color: (cp! >= (t.entry_price || 0)) ? "var(--green)" : "var(--red)" }}>
+                            ${cp!.toFixed(2)}
+                          </span>
+                        ) : <span style={{ color: "var(--text-muted)" }}>—</span>}
+                      </td>
+                      <td style={{ color: "var(--red)" }}>${t.stop_loss?.toFixed(2)}</td>
+                      <td style={{ color: "var(--green)" }}>${t.target?.toFixed(2)}</td>
+                      <td>
+                        <span className={`badge ${(t.quality_score || 0) >= 80 ? "badge-green" : (t.quality_score || 0) >= 65 ? "badge-blue" : "badge-yellow"}`}>
+                          {t.quality_score?.toFixed(0)}
+                        </span>
+                      </td>
+                      <td><PnlCell pnl={t.unrealized_pnl} pct={t.unrealized_pnl_pct} /></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
         </div>
       </div>
 
-      {/* Recent Closed */}
+      {/* Recent Closed — compact, link to Performance for full history */}
       <div className="glass-card" style={{ overflow: "hidden" }}>
-        <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--border)" }}>
+        <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700 }}>📋 Recent Closed Trades</h2>
+          <a href="/performance" style={{ fontSize: "0.78rem", color: "var(--accent)", textDecoration: "none", opacity: 0.8 }}>
+            View full history →
+          </a>
         </div>
         <div style={{ overflowX: "auto" }}>
-          {(!perf?.recent_closed?.length) ? (
+          {recentClosed.length === 0 ? (
             <div style={{ padding: 32, textAlign: "center", color: "var(--text-muted)" }}>No closed trades yet</div>
           ) : (
             <table className="data-table">
               <thead>
-                <tr><th>Ticker</th><th>Entry</th><th>Exit</th><th>P&L</th><th>P&L %</th><th>Result</th></tr>
+                <tr>
+                  <th>Ticker</th><th>Type</th><th>Entry Date</th><th>Close Date</th>
+                  <th>Entry $</th><th>Exit $</th><th>P&amp;L %</th><th>Result</th>
+                </tr>
               </thead>
               <tbody>
-                {perf.recent_closed.slice(0, 10).map(t => {
+                {recentClosed.slice(0, 8).map(t => {
+                  const pct = t.realized_pnl_pct;
                   const win = (t.realized_pnl || 0) > 0;
+                  const statusColor =
+                    t.status === "TARGET" ? "badge-green" :
+                      t.status === "STOPPED" ? "badge-red" :
+                        t.status === "TRAILED" ? "badge-yellow" :
+                          t.status === "MANUAL" ? "badge-blue" : "badge-red";
                   return (
                     <tr key={t.id}>
                       <td><strong>{t.ticker}</strong></td>
+                      <td><TypeBadge type={t.swing_type} /></td>
+                      <td style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{fmtDate(t.entry_date)}</td>
+                      <td style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{fmtDate(t.exit_date)}</td>
                       <td>${t.entry_price?.toFixed(2)}</td>
-                      <td>${t.exit_price?.toFixed(2)}</td>
-                      <td style={{ color: win ? "var(--green)" : "var(--red)" }}>
-                        {win ? "+" : ""}{t.realized_pnl?.toFixed(2)}$
+                      <td>${t.exit_price?.toFixed(2) || "—"}</td>
+                      <td style={{ color: win ? "var(--green)" : "var(--red)", fontWeight: 600 }}>
+                        {pct != null ? `${win ? "+" : ""}${pct.toFixed(2)}%` : "—"}
                       </td>
-                      <td style={{ color: win ? "var(--green)" : "var(--red)" }}>
-                        {win ? "+" : ""}{t.realized_pnl_pct?.toFixed(2)}%
-                      </td>
-                      <td>
-                        <span className={`badge ${win ? "badge-green" : t.status === "REJECTED" ? "badge-red" : "badge-red"}`}>
-                          {t.status || (win ? "WIN" : "LOSS")}
-                        </span>
-                      </td>
+                      <td><span className={`badge ${statusColor}`}>{t.status}</span></td>
                     </tr>
                   );
                 })}

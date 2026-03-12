@@ -14,6 +14,13 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # ── Bağlantı modu ─────────────────────────────────────────────────────────────────────────────────
+# .env dosyasını yükle — Streamlit ve API'nin AYNI DB'ye bağlanması için kritik
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()
+except ImportError:
+    pass
+
 DATABASE_URL = os.environ.get("DATABASE_URL")
 DB_PATH = Path(__file__).parent.parent.parent / "data" / "paper_trades.db"
 
@@ -40,8 +47,8 @@ def _connect():
             conn = psycopg2.connect(DATABASE_URL, connect_timeout=5)
             return conn
         except Exception as e:
-            logger.warning(f"PostgreSQL baglantisi basarisiz ({e.__class__.__name__}) - SQLite'a gecildi")
-            _MODE = "sqlite"  # Permanently switch for this process
+            logger.warning(f"PostgreSQL baglantisi basarisiz ({e.__class__.__name__}): {e}")
+            raise Exception(f"Database connection failed: {e}")
     import sqlite3
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
@@ -152,31 +159,60 @@ class PaperTradeStorage:
         return _connect()
 
     def _init_db(self):
-        """Create table if not exists. Also run SQLite migrations for existing DBs."""
+        """Create table if not exists. Run migrations for both PG and SQLite."""
+        # v3 columns that may be missing from older schema
+        v3_columns = [
+            ('trailing_stop', 'REAL'),
+            ('initial_stop', 'REAL'),
+            ('atr', 'REAL'),
+            ('signal_price', 'REAL'),
+            ('current_price', 'REAL'),
+            ('unrealized_pnl', 'REAL'),
+            ('unrealized_pnl_pct', 'REAL'),
+        ]
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
 
             if _MODE == "pg" and not self._override_path:
                 cursor.execute(_CREATE_TABLE_PG)
+                # PostgreSQL migrations for existing tables
+                for col_name, col_type in v3_columns:
+                    try:
+                        cursor.execute(
+                            f"ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
+                        )
+                    except Exception:
+                        pass
+                # Meta table for lightweight key/value data (e.g. last price update)
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS paper_meta (
+                        key TEXT PRIMARY KEY,
+                        value TEXT,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
             else:
                 cursor.execute(_CREATE_TABLE_SQLITE)
                 # SQLite migrations for existing DBs
-                v3_columns = [
-                    ('trailing_stop', 'REAL'),
-                    ('initial_stop', 'REAL'),
-                    ('atr', 'REAL'),
-                    ('signal_price', 'REAL'),
-                    ('current_price', 'REAL'),
-                    ('unrealized_pnl', 'REAL'),
-                    ('unrealized_pnl_pct', 'REAL'),
-                ]
                 import sqlite3 as _sq
                 for col_name, col_type in v3_columns:
                     try:
                         cursor.execute(f"ALTER TABLE paper_trades ADD COLUMN {col_name} {col_type}")
                     except _sq.OperationalError:
                         pass
+                # Meta table for lightweight key/value data (e.g. last price update)
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS paper_meta (
+                        key TEXT PRIMARY KEY,
+                        value TEXT,
+                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
 
             conn.commit()
             conn.close()
@@ -189,6 +225,26 @@ class PaperTradeStorage:
     def add_trade(self, trade: Dict) -> int:
         """Add a new paper trade. Returns trade ID."""
         ph = _ph()
+
+        # ── numpy → native Python dönüşümü (psycopg2 np.float64 tanımıyor) ──
+        def _native(v):
+            """Convert numpy types to Python native types."""
+            if v is None:
+                return v
+            try:
+                import numpy as _np
+                if isinstance(v, (_np.integer,)):
+                    return int(v)
+                if isinstance(v, (_np.floating,)):
+                    return float(v)
+                if isinstance(v, _np.ndarray):
+                    return v.tolist()
+            except ImportError:
+                pass
+            return v
+
+        trade = {k: _native(v) for k, v in trade.items()}
+
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
@@ -295,6 +351,63 @@ class PaperTradeStorage:
         except Exception as e:
             logger.error(f"Error getting all trades: {e}")
             return []
+
+    def _set_meta(self, key: str, value: str) -> None:
+        """Upsert a key/value pair into paper_meta."""
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            if _MODE == "pg" and not self._override_path:
+                cursor.execute(
+                    """
+                    INSERT INTO paper_meta (key, value, updated_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (key) DO UPDATE
+                    SET value = EXCLUDED.value, updated_at = NOW()
+                    """,
+                    (key, value),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT OR REPLACE INTO paper_meta (key, value, updated_at)
+                    VALUES (?, ?, datetime('now'))
+                    """,
+                    (key, value),
+                )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Error setting meta '{key}': {e}")
+
+    def _get_meta(self, key: str) -> Optional[str]:
+        """Fetch a value from paper_meta by key."""
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            placeholder = "%s" if _MODE == "pg" and not self._override_path else "?"
+            cursor.execute(f"SELECT value FROM paper_meta WHERE key = {placeholder}", (key,))
+            row = cursor.fetchone()
+            conn.close()
+            if not row:
+                return None
+            return row[0] if isinstance(row, (tuple, list)) else row
+        except Exception as e:
+            logger.error(f"Error getting meta '{key}': {e}")
+            return None
+
+    def touch_last_price_update(self) -> None:
+        """Record the moment when prices were last refreshed."""
+        self._set_meta("last_price_update", datetime.now().isoformat())
+
+    def get_last_update_timestamp(self) -> Optional[str]:
+        """
+        Return the last time prices were refreshed via the API.
+        
+        This is stored in the paper_meta table and updated whenever
+        /api/trades/update-prices is called.
+        """
+        return self._get_meta("last_price_update")
 
     def get_trade_by_id(self, trade_id: int) -> Optional[Dict]:
         """Get a specific trade by ID."""

@@ -1,4 +1,4 @@
-﻿import axios from "axios";
+import axios from "axios";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -37,20 +37,69 @@ export interface Trade {
 
 export interface Signal {
     ticker: string;
+    date?: string;
+    signal_type?: string;
     entry_price: number;
     stop_loss: number;
     target_1: number;
+    target_2?: number;
     target: number;
     quality_score: number;
     swing_type?: string;
-    rsi?: number;
+    swing_type_label?: string;
+    hold_days_min?: number;
+    hold_days_max?: number;
+    type_reason?: string;
+    close_position?: number;
+    // Momentum
     volume_surge?: number;
+    atr_percent?: number;
     atr?: number;
+    float_millions?: number;
+    market_cap_millions?: number;
+    // Swing metrics
+    five_day_return?: number;
+    ma20_distance?: number;
+    rsi?: number;
+    swing_ready?: boolean;
+    higher_lows?: boolean;
+    // Boosters
+    high_rvol?: boolean;
+    gap_continuation?: boolean;
+    higher_highs?: boolean;
+    // Sector & Catalyst
+    sector_rs_score?: number;
+    sector_rs_bonus?: number;
+    is_sector_leader?: boolean;
+    short_percent?: number;
+    days_to_cover?: number;
+    is_squeeze_candidate?: boolean;
+    has_insider_buying?: boolean;
+    has_recent_news?: boolean;
+    total_catalyst_bonus?: number;
+    rsi_divergence?: boolean;
+    macd_bullish?: boolean;
+    // Risk
+    target_1_pct?: number;
+    target_2_pct?: number;
+    stop_loss_pct?: number;
+    risk_reward?: number;
+    risk_reward_t2?: number;
+    position_size?: number;
+    risk_amount?: number;
     expected_hold_min?: number;
     expected_hold_max?: number;
+    max_hold_date?: string;
     expiration_date?: string;
+    volatility_warning?: boolean;
+    // Narrative
+    narrative?: { full_text?: string; headline?: string;[key: string]: any };
+    narrative_text?: string;
+    narrative_headline?: string;
+    // Info
+    company_name?: string;
+    sector?: string;
     win_probability?: number;
-    position_size?: number;
     notes?: string;
 }
 
@@ -64,6 +113,8 @@ export interface PerformanceSummary {
     breakeven: number;
     win_rate: number;
     total_pnl: number;
+    total_pnl_pct: number;
+    avg_pnl_pct: number;
     avg_win: number;
     avg_loss: number;
 }
@@ -89,6 +140,9 @@ export const closeTrade = (id: number, exit_price: number, notes = "") =>
 export const updatePrices = () =>
     api.post("/api/trades/update-prices").then((r) => r.data);
 
+export const getTradesLastUpdate = () =>
+    api.get("/api/trades/last-update").then((r) => r.data);
+
 // Pending
 export const getPending = () =>
     api.get("/api/pending").then((r) => r.data);
@@ -111,7 +165,7 @@ export const runSmallcapScan = (params: {
     min_quality?: number;
     top_n?: number;
     portfolio_value?: number;
-}) => api.post("/api/scanner/smallcap", params).then((r) => r.data);
+}) => api.post("/api/scanner/smallcap", params, { timeout: 600000 }).then((r) => r.data);
 
 export const trackSignal = (signal: Signal & { hold_days_max?: number }) =>
     api.post("/api/scanner/track", {
@@ -136,6 +190,26 @@ export const chatWithAI = (message: string, history: unknown[] = []) =>
 
 export const getSignalBrief = (ticker: string, signal: Signal) =>
     api.post("/api/genai/signal-brief", { ticker, signal }).then((r) => r.data);
+
+export const getWeeklyReportAI = () =>
+    api.get("/api/genai/weekly-report-ai", { timeout: 120000 }).then((r) => r.data);
+
+export const getModelStatus = () =>
+    api.get("/api/genai/model-status").then((r) => r.data);
+
+export const trainModel = () =>
+    api.post("/api/genai/train", {}, { timeout: 120000 }).then((r) => r.data);
+
+export const predictSignal = (params: {
+    entry_price: number;
+    stop_loss: number;
+    target: number;
+    atr?: number;
+    quality_score?: number;
+    swing_type?: string;
+    max_hold_days?: number;
+}) =>
+    api.post("/api/genai/predict", params).then((r) => r.data);
 
 // ---- Backtest types ----
 export interface BacktestMetrics {

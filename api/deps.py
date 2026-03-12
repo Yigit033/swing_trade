@@ -40,3 +40,9 @@ def get_paper_reporter():
 def get_smallcap_engine():
     from swing_trader.small_cap import SmallCapEngine
     return SmallCapEngine(get_config())
+
+
+@lru_cache(maxsize=1)
+def get_fetcher():
+    from swing_trader.data.fetcher import DataFetcher
+    return DataFetcher(get_config())

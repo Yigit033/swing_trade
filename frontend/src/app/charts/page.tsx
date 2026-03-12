@@ -1,5 +1,6 @@
 "use client";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import {
     ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -33,7 +34,8 @@ const CTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function ChartsPage() {
-    const [ticker, setTicker] = useState("AAPL");
+    const searchParams = useSearchParams();
+    const [ticker, setTicker] = useState(searchParams.get("ticker")?.toUpperCase() || "AAPL");
     const [period, setPeriod] = useState("3mo");
     const [data, setData] = useState<ChartRow[]>([]);
     const [loading, setLoading] = useState(false);
@@ -50,6 +52,15 @@ export default function ChartsPage() {
         } catch { setError("Could not load chart. Make sure the API is running."); }
         finally { setLoading(false); }
     }, [ticker, period]);
+
+    // Auto-load if ticker param exists
+    useEffect(() => {
+        const t = searchParams.get("ticker");
+        if (t) {
+            setTicker(t.toUpperCase());
+            fetchChart(t.toUpperCase(), period);
+        }
+    }, [searchParams, fetchChart, period]);
 
     // Stats from last/first data points
     const last = data[data.length - 1];
