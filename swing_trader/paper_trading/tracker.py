@@ -14,9 +14,18 @@ from datetime import datetime, timedelta
 import yfinance as yf
 import pandas as pd
 
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo  # Python < 3.9
+
 from .storage import PaperTradeStorage
 
 logger = logging.getLogger(__name__)
+
+# NYSE timezone & market hours
+_NYSE_TZ = ZoneInfo("America/New_York")
+NYSE_OPEN_TIME = "09:30"  # NYSE opens 09:30 ET (= 16:30 Turkey time in winter)
 
 # V3 Constants (match backtest engine)
 MAX_GAP_UP_PCT = 5.0     # Skip if gap-up > 5%
@@ -66,11 +75,11 @@ class PaperTradeTracker:
         try:
             stock = yf.Ticker(ticker)
             
-            # yfinance 'end' is EXCLUSIVE, so add 1 day to include today
+            # yfinance 'end' is EXCLUSIVE — add 2 days to cover weekends/holidays
             if end_date is None:
-                end_dt = datetime.now() + timedelta(days=1)
+                end_dt = datetime.now() + timedelta(days=2)
             else:
-                end_dt = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
+                end_dt = datetime.strptime(end_date[:10], '%Y-%m-%d') + timedelta(days=2)
             
             end_date_adj = end_dt.strftime('%Y-%m-%d')
             
@@ -96,33 +105,39 @@ class PaperTradeTracker:
             return None
     
     def check_exit_conditions(
-        self, 
-        trade: Dict, 
+        self,
+        trade: Dict,
         price_history: pd.DataFrame
     ) -> Tuple[str, float, str, str, float]:
         """
         Check if trade should be closed.
-        
-        V3: Includes trailing stop and gap-down slippage.
-        
+
+        V3.1: Includes trailing stop, gap-down slippage, AND partial T1/T2 exit.
+
+        Exit priority per bar:
+        1. Stop loss (with gap-down slippage)
+        2. T1 partial exit — sell 50%, move stop to breakeven, target T2
+        3. T2 full exit — sell remaining 50%
+        4. Timeout — close at market
+
         Returns:
             Tuple of (status, exit_price, exit_date, reason, trailing_stop)
-            Returns ('OPEN', 0, '', '', trailing_stop) if still open
+            status: 'OPEN' | 'STOPPED' | 'TRAILED' | 'T1_PARTIAL' | 'TARGET' | 'TIMEOUT'
         """
         entry_price = trade['entry_price']
         stop_loss = trade['stop_loss']
         initial_stop = trade.get('initial_stop') or stop_loss
-        target = trade['target']
+        target = trade['target']  # T1 initially; becomes T2 after partial
+        target_2 = trade.get('target_2') or target
         max_hold_days = trade.get('max_hold_days', 7)
         entry_date = datetime.strptime(trade['entry_date'][:10], '%Y-%m-%d').date()
         atr = trade.get('atr') or 0
         trailing_stop = trade.get('trailing_stop') or stop_loss
-        
-        # Skip entry day (we enter at open, so check from entry day close onward)
+        has_partial = (trade.get('partial_exit_price') or 0) > 0
+
         if len(price_history) <= 1:
             return ('OPEN', 0, '', '', trailing_stop)
-        
-        # Iterate through each day after entry
+
         for _, row in price_history.iloc[1:].iterrows():
             current_date = row['Date']
             today_open = row['Open']
@@ -130,52 +145,58 @@ class PaperTradeTracker:
             high = row['High']
             close = row['Close']
             days_held = (current_date - entry_date).days
-            
-            # Use trailing stop as active stop
+
             active_stop = trailing_stop
-            
+
             # ── TRAILING STOP UPDATE ──
-            # Activate after 50% of max hold time AND 2+ ATR gain
             if atr > 0 and close > entry_price and days_held >= max_hold_days * 0.5:
                 unrealized_gain = close - entry_price
                 atr_gain = unrealized_gain / atr
-                
                 if atr_gain >= 2.0:
                     atr_steps = int(atr_gain) - 1
                     new_trail = initial_stop + (atr_steps * atr)
-                    # Only move stop UP, never down
                     if new_trail > trailing_stop:
                         trailing_stop = round(new_trail, 2)
                         active_stop = trailing_stop
-            
+
             # ── CHECK STOP LOSS (with gap-down slippage) ──
             if low <= active_stop:
                 if today_open <= active_stop:
-                    # Gap-down through stop — exit at Open (realistic slippage)
                     exit_price = today_open
                 else:
-                    # Intraday dip to stop — exit at stop price
                     exit_price = active_stop
-                
+
                 is_trail = active_stop > initial_stop
                 exit_date = str(current_date)
                 pnl_pct = ((exit_price / entry_price) - 1) * 100
-                
+
                 if is_trail:
                     reason = f"Trailing stop at ${exit_price:.2f} ({pnl_pct:+.1f}%)"
                     return ('TRAILED', exit_price, exit_date, reason, trailing_stop)
                 else:
                     reason = f"Stop hit at ${exit_price:.2f} ({pnl_pct:+.1f}%)"
                     return ('STOPPED', exit_price, exit_date, reason, trailing_stop)
-            
-            # ── CHECK TARGET ──
+
+            # ── CHECK T1 PARTIAL EXIT (v3.1) ──
+            # Fire only if: no partial taken yet AND T2 is meaningfully above T1
+            if not has_partial and target_2 > target * 1.01 and high >= target:
+                exit_date = str(current_date)
+                pnl_pct = ((target / entry_price) - 1) * 100
+                reason = (
+                    f"T1 partial 50% at ${target:.2f} ({pnl_pct:+.1f}%) | "
+                    f"Stop->breakeven ${entry_price:.2f} | T2 ${target_2:.2f}"
+                )
+                return ('T1_PARTIAL', target, exit_date, reason, trailing_stop)
+
+            # ── CHECK TARGET (T2 after partial, or T1 if no T2) ──
             if high >= target:
                 exit_price = target
                 exit_date = str(current_date)
                 pnl_pct = ((exit_price / entry_price) - 1) * 100
-                reason = f"Target hit at ${exit_price:.2f} ({pnl_pct:+.1f}%)"
+                label = "T2 target" if has_partial else "Target"
+                reason = f"{label} hit at ${exit_price:.2f} ({pnl_pct:+.1f}%)"
                 return ('TARGET', exit_price, exit_date, reason, trailing_stop)
-            
+
             # ── CHECK TIMEOUT ──
             if days_held >= max_hold_days:
                 exit_price = close
@@ -183,16 +204,16 @@ class PaperTradeTracker:
                 pnl_pct = ((exit_price / entry_price) - 1) * 100
                 reason = f"Timeout after {days_held} days at ${exit_price:.2f} ({pnl_pct:+.1f}%)"
                 return ('TIMEOUT', exit_price, exit_date, reason, trailing_stop)
-        
+
         return ('OPEN', 0, '', '', trailing_stop)
     
     def get_current_price(self, ticker: str) -> Optional[float]:
-        """Get current/last price for a ticker."""
+        """Get current/last price for a ticker. Uses period='5d' to handle weekends."""
         try:
             stock = yf.Ticker(ticker)
-            hist = stock.history(period='1d')
+            hist = stock.history(period='5d')
             if hist is not None and len(hist) > 0:
-                return float(hist['Close'].iloc[-1])
+                return round(float(hist['Close'].iloc[-1]), 4)
             return None
         except Exception as e:
             logger.error(f"Error getting current price for {ticker}: {e}")
@@ -216,18 +237,33 @@ class PaperTradeTracker:
             return trade
         
         ticker = trade['ticker']
-        entry_date = trade['entry_date']
+        entry_date = trade['entry_date'][:10]  # Strip time part (e.g. "2026-03-11 09:30" → "2026-03-11")
         trade_id = trade['id']
-        
+
         # Fetch price history since entry
         today = datetime.now().strftime('%Y-%m-%d')
         price_history = self.fetch_price_history(ticker, entry_date, today)
         
         if price_history is None or len(price_history) == 0:
-            trade['current_price'] = trade['entry_price']
-            trade['unrealized_pnl'] = 0
-            trade['unrealized_pnl_pct'] = 0
+            # History fetch failed — try a direct current price lookup
+            cp = self.get_current_price(ticker)
+            if cp and cp > 0:
+                pnl = (cp - trade['entry_price']) * trade['position_size']
+                pnl_pct = ((cp / trade['entry_price']) - 1) * 100
+                trade['current_price'] = round(cp, 2)
+                trade['unrealized_pnl'] = round(pnl, 2)
+                trade['unrealized_pnl_pct'] = round(pnl_pct, 2)
+            else:
+                trade['current_price'] = trade['entry_price']
+                trade['unrealized_pnl'] = 0
+                trade['unrealized_pnl_pct'] = 0
             trade['days_held'] = 0
+            # Persist so GET /api/trades returns real values
+            self.storage.update_trade(trade_id, {
+                'current_price': trade['current_price'],
+                'unrealized_pnl': trade['unrealized_pnl'],
+                'unrealized_pnl_pct': trade['unrealized_pnl_pct'],
+            })
             return trade
         
         # Check exit conditions (V3: returns trailing_stop too)
@@ -240,8 +276,33 @@ class PaperTradeTracker:
             self.storage.update_trade(trade_id, {'trailing_stop': trailing_stop})
             trade['trailing_stop'] = trailing_stop
         
-        if status != 'OPEN':
-            # Trade should be closed
+        if status == 'T1_PARTIAL':
+            # ── v3.1: Partial exit at T1 — sell 50%, keep trade OPEN ──
+            target_2 = trade.get('target_2') or trade['target']
+            self.storage.update_trade(trade_id, {
+                'partial_exit_price': exit_price,
+                'partial_exit_pct': 50.0,
+                'stop_loss': trade['entry_price'],       # breakeven
+                'trailing_stop': trade['entry_price'],    # reset trail to breakeven
+                'target': target_2,                       # now targeting T2
+                'notes': reason,
+            })
+            trade['partial_exit_price'] = exit_price
+            trade['partial_exit_pct'] = 50.0
+            trade['stop_loss'] = trade['entry_price']
+            trade['trailing_stop'] = trade['entry_price']
+            trade['target'] = target_2
+            trade['notes'] = reason
+            # Keep status OPEN — remaining 50% still in play
+            trade['status'] = 'OPEN'
+
+            logger.info(
+                f"T1 partial exit {trade['ticker']}: sold 50% at ${exit_price:.2f}, "
+                f"stop→breakeven ${trade['entry_price']:.2f}, new target T2 ${target_2:.2f}"
+            )
+
+        elif status != 'OPEN':
+            # Trade should be fully closed
             self.storage.close_trade(
                 trade_id, exit_price, exit_date, status, reason
             )
@@ -249,10 +310,19 @@ class PaperTradeTracker:
             trade['exit_price'] = exit_price
             trade['exit_date'] = exit_date
             trade['notes'] = reason
-            
-            # Calculate realized P/L
-            pnl = (exit_price - trade['entry_price']) * trade['position_size']
-            pnl_pct = ((exit_price / trade['entry_price']) - 1) * 100
+
+            # Calculate realized P/L (blended if partial exit exists)
+            partial_price = trade.get('partial_exit_price') or 0
+            if partial_price > 0:
+                half = trade['position_size'] // 2
+                rest = trade['position_size'] - half
+                pnl = half * (partial_price - trade['entry_price']) + rest * (exit_price - trade['entry_price'])
+                total_cost = trade['position_size'] * trade['entry_price']
+                pnl_pct = (pnl / total_cost) * 100 if total_cost > 0 else 0
+            else:
+                pnl = (exit_price - trade['entry_price']) * trade['position_size']
+                pnl_pct = ((exit_price / trade['entry_price']) - 1) * 100
+
             trade['realized_pnl'] = round(pnl, 2)
             trade['realized_pnl_pct'] = round(pnl_pct, 2)
             trade['current_price'] = exit_price
@@ -329,10 +399,11 @@ class PaperTradeTracker:
         
         trade = {
             'ticker': signal['ticker'],
-            'entry_date': signal.get('date', datetime.now().strftime('%Y-%m-%d')) + ' ' + datetime.now().strftime('%H:%M'),
+            'entry_date': signal.get('date', datetime.now(tz=_NYSE_TZ).strftime('%Y-%m-%d')) + ' ' + datetime.now(tz=_NYSE_TZ).strftime('%H:%M'),
             'entry_price': signal_price,  # Will be updated at confirmation
             'stop_loss': signal['stop_loss'],
             'target': signal['target_1'],
+            'target_2': signal.get('target_2', signal['target_1']),  # v3.1: store T2
             'swing_type': signal.get('swing_type', 'A'),
             'quality_score': signal.get('quality_score', 0),
             'position_size': signal.get('position_size', 100),
@@ -394,7 +465,7 @@ class PaperTradeTracker:
                 # Get the next trading day's Open
                 next_day = price_data.iloc[1]
                 open_price = float(next_day['Open'])
-                entry_date = str(next_day['Date']).split(' ')[0] + ' 09:30'  # NYSE açılış saati
+                entry_date = str(next_day['Date']).split(' ')[0] + f' {NYSE_OPEN_TIME}'  # NYSE open (ET)
                 
                 # Gap filter
                 gap_pct = ((open_price / signal_price) - 1) * 100
@@ -430,7 +501,7 @@ class PaperTradeTracker:
                     max_stop = open_price * 0.85
                     if stop_loss < max_stop:
                         stop_loss = round(max_stop, 2)
-                    
+
                     # Target = entry + 3 × risk distance
                     risk_distance = open_price - stop_loss
                     target = round(open_price + (risk_distance * 3), 2)
@@ -440,7 +511,15 @@ class PaperTradeTracker:
                     orig_target_pct = (trade['target'] - signal_price) / signal_price
                     stop_loss = round(open_price * (1 - orig_stop_pct), 2)
                     target = round(open_price * (1 + orig_target_pct), 2)
-                
+
+                # v3.1: Recalculate T2 proportionally to new entry
+                orig_t2 = trade.get('target_2') or trade['target']
+                if signal_price > 0 and orig_t2 > 0:
+                    t2_pct = (orig_t2 / signal_price) - 1
+                    target_2 = round(open_price * (1 + t2_pct), 2)
+                else:
+                    target_2 = target
+
                 # Confirm the trade
                 self.storage.update_trade(trade_id, {
                     'status': 'OPEN',
@@ -450,6 +529,7 @@ class PaperTradeTracker:
                     'initial_stop': stop_loss,
                     'trailing_stop': stop_loss,
                     'target': target,
+                    'target_2': target_2,
                     'notes': f"Confirmed at Open ${open_price:.2f} (gap {gap_pct:+.1f}%)"
                 })
                 

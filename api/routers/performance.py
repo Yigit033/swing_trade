@@ -27,7 +27,7 @@ def _fetch_live_prices(tickers: list) -> dict:
     try:
         import yfinance as yf
         tickers_str = " ".join(tickers)
-        data = yf.download(tickers_str, period="1d", interval="5m",
+        data = yf.download(tickers_str, period="5d",
                            progress=False, auto_adjust=True)
         if data.empty:
             return {}
@@ -37,13 +37,13 @@ def _fetch_live_prices(tickers: list) -> dict:
             # Single ticker — Close is a Series
             val = close.dropna()
             if not val.empty:
-                prices[tickers[0]] = round(float(val.iloc[-1]), 4)
+                prices[tickers[0]] = round(float(val.iloc[-1].item()), 4)
         else:
             for t in tickers:
                 try:
                     val = close[t].dropna()
                     if not val.empty:
-                        prices[t] = round(float(val.iloc[-1]), 4)
+                        prices[t] = round(float(val.iloc[-1].item()), 4)
                 except Exception:
                     pass
         return prices

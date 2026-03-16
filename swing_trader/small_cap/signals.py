@@ -601,11 +601,11 @@ class SmallCapSignals:
             # SAFE if:
             # - Today < +15%
             # - No single day > +25%
-            # - 5-day total between +10% and +40%
+            # - 5-day total <= +40% (v3.0: removed lower bound — don't penalize early entries)
             is_safe = (
                 today_change <= 15 and
                 max_single_day <= 25 and
-                10 <= five_day_total <= 40
+                five_day_total <= 40
             )
             
             return is_safe, result
@@ -683,6 +683,234 @@ class SmallCapSignals:
         
         return details['swing_ready'], details
     
+    # ============================================================
+    # OBV TREND ANALYSIS (v3.0 — Smart Money Detection)
+    # ============================================================
+    def calculate_obv_trend(self, df: pd.DataFrame, period: int = 10) -> Dict:
+        """
+        Calculate On-Balance Volume trend slope.
+
+        Positive OBV slope while price consolidates = smart money accumulation.
+        Negative OBV slope while price rises = distribution (warning!).
+
+        Returns:
+            {
+                'obv_slope': float,       # Normalized slope (-1 to +1)
+                'obv_rising': bool,       # OBV trending up
+                'accumulation': bool,     # OBV up + price flat/down = smart money
+                'distribution': bool,     # OBV down + price up = warning
+                'bonus': int              # Scoring bonus (-5 to +8)
+            }
+        """
+        result = {
+            'obv_slope': 0.0,
+            'obv_rising': False,
+            'accumulation': False,
+            'distribution': False,
+            'bonus': 0
+        }
+
+        if df is None or len(df) < period + 2:
+            return result
+
+        try:
+            close = df['Close'].values
+            volume = df['Volume'].values
+
+            # Calculate OBV
+            obv = np.zeros(len(close))
+            for i in range(1, len(close)):
+                if close[i] > close[i - 1]:
+                    obv[i] = obv[i - 1] + volume[i]
+                elif close[i] < close[i - 1]:
+                    obv[i] = obv[i - 1] - volume[i]
+                else:
+                    obv[i] = obv[i - 1]
+
+            # Calculate OBV slope over last `period` bars (linear regression)
+            obv_recent = obv[-period:]
+            x = np.arange(period)
+            slope = np.polyfit(x, obv_recent, 1)[0]
+
+            # Normalize slope by average volume (makes it comparable)
+            avg_vol = np.mean(volume[-period:])
+            normalized_slope = slope / avg_vol if avg_vol > 0 else 0
+
+            result['obv_slope'] = round(float(normalized_slope), 4)
+            result['obv_rising'] = normalized_slope > 0.05
+
+            # Price trend over same period
+            price_change = (close[-1] / close[-period] - 1) * 100
+
+            # Detect accumulation: OBV rising, price flat or down
+            if normalized_slope > 0.1 and price_change < 5:
+                result['accumulation'] = True
+                result['bonus'] = 8  # Strong signal
+
+            # Detect distribution: OBV falling, price rising
+            elif normalized_slope < -0.1 and price_change > 5:
+                result['distribution'] = True
+                result['bonus'] = -8  # Distribution warning — smart money exiting
+
+            # Simple OBV confirmation
+            elif normalized_slope > 0.1:
+                result['bonus'] = 4  # OBV confirms uptrend
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error calculating OBV trend: {e}")
+            return result
+
+    # ============================================================
+    # MARKET REGIME DETECTION (v4.0 — Anti-Whipsaw)
+    # ============================================================
+    def detect_market_regime(self) -> Dict:
+        """
+        Detect broad market regime using SPY with 5-day confirmation.
+
+        v4.0 improvements over v3.0:
+        - 5-day confirmation window prevents whipsaw around MA lines
+        - 1y data for real MA200 calculation (was 6mo → MA200 was fake)
+        - VIX-based fear adjustment (>30 = forced BEAR)
+        - Confidence level (CONFIRMED vs TENTATIVE)
+        - BEAR multiplier 0.65 → 0.75 (less aggressive)
+
+        Returns:
+            {
+                'regime': str,           # 'BULL', 'CAUTION', 'BEAR'
+                'confidence': str,       # 'CONFIRMED', 'TENTATIVE'
+                'spy_above_ma50': bool,
+                'spy_above_ma200': bool,
+                'spy_5d_return': float,
+                'score_multiplier': float,
+                'spy_price': float,
+                'ma50': float,
+                'ma200': float,
+                'vix': float,
+            }
+        """
+        result = {
+            'regime': 'BULL',
+            'confidence': 'TENTATIVE',
+            'spy_above_ma50': True,
+            'spy_above_ma200': True,
+            'spy_5d_return': 0.0,
+            'score_multiplier': 1.0,
+            'spy_price': 0.0,
+            'ma50': 0.0,
+            'ma200': 0.0,
+            'vix': 0.0,
+        }
+
+        try:
+            import yfinance as yf
+
+            # 1y data so MA200 is real (6mo only had ~126 bars → MA200 was MA50 fallback)
+            spy = yf.Ticker('SPY')
+            hist = spy.history(period='1y')
+
+            if hist is None or len(hist) < 50:
+                return result
+
+            close = hist['Close']
+            current = float(close.iloc[-1])
+            ma50_val = float(close.rolling(50).mean().iloc[-1])
+            has_ma200 = len(close) >= 200
+            ma200_val = float(close.rolling(200).mean().iloc[-1]) if has_ma200 else ma50_val
+
+            result['spy_price'] = round(current, 2)
+            result['ma50'] = round(ma50_val, 2)
+            result['ma200'] = round(ma200_val, 2)
+            result['spy_above_ma50'] = current > ma50_val
+            result['spy_above_ma200'] = current > ma200_val
+
+            # 5-day return
+            if len(close) >= 6:
+                result['spy_5d_return'] = round(((current / float(close.iloc[-6])) - 1) * 100, 2)
+
+            # ----------------------------------------------------------
+            # VIX check — extreme fear overrides everything
+            # ----------------------------------------------------------
+            vix_val = 0.0
+            try:
+                vix = yf.Ticker('^VIX')
+                vix_hist = vix.history(period='5d')
+                if vix_hist is not None and len(vix_hist) > 0:
+                    vix_val = float(vix_hist['Close'].iloc[-1])
+                    result['vix'] = round(vix_val, 2)
+            except Exception:
+                pass  # VIX fetch fail is non-fatal
+
+            # VIX > 30 = panic mode → forced BEAR regardless of MA
+            if vix_val > 30:
+                result['regime'] = 'BEAR'
+                result['confidence'] = 'CONFIRMED'
+                result['score_multiplier'] = 0.70  # Panic discount
+                logger.info(
+                    f"Market Regime: BEAR (VIX PANIC {vix_val:.1f}) | "
+                    f"Multiplier: 0.70"
+                )
+                return result
+
+            # ----------------------------------------------------------
+            # 5-Day Confirmation — anti-whipsaw
+            # ----------------------------------------------------------
+            ma50_series = close.rolling(50).mean()
+            ma200_series = close.rolling(200).mean() if has_ma200 else ma50_series
+
+            last_5_close = close.tail(5)
+            last_5_ma50 = ma50_series.tail(5)
+            last_5_ma200 = ma200_series.tail(5)
+
+            # Count days meeting each condition over last 5 trading days
+            bull_days = int(((last_5_close > last_5_ma50) & (last_5_close > last_5_ma200)).sum())
+            bear_days = int((last_5_close < last_5_ma200).sum())
+
+            # ----------------------------------------------------------
+            # Regime Decision (confirmation-based)
+            # ----------------------------------------------------------
+            if bull_days >= 4:
+                # 4+ of 5 days above both MAs = strong BULL
+                result['regime'] = 'BULL'
+                result['confidence'] = 'CONFIRMED'
+                result['score_multiplier'] = 1.0
+            elif bear_days >= 4:
+                # 4+ of 5 days below MA200 = confirmed BEAR
+                result['regime'] = 'BEAR'
+                result['confidence'] = 'CONFIRMED'
+                result['score_multiplier'] = 0.75
+            elif current > ma200_val:
+                # Above MA200 today but mixed signals → CAUTION (above)
+                result['regime'] = 'CAUTION'
+                result['confidence'] = 'TENTATIVE'
+                result['score_multiplier'] = 0.85
+            else:
+                # Below MA200 today but not yet confirmed bear → CAUTION (below)
+                result['regime'] = 'CAUTION'
+                result['confidence'] = 'TENTATIVE'
+                result['score_multiplier'] = 0.80
+
+            # ----------------------------------------------------------
+            # VIX micro-adjustment (elevated but not panic)
+            # ----------------------------------------------------------
+            if vix_val > 25 and result['regime'] != 'BEAR':
+                # Elevated fear: nudge multiplier down slightly
+                result['score_multiplier'] = round(result['score_multiplier'] - 0.05, 2)
+
+            logger.info(
+                f"Market Regime: {result['regime']} ({result['confidence']}) | "
+                f"SPY ${current:.2f} vs MA50 ${ma50_val:.2f} / MA200 ${ma200_val:.2f} | "
+                f"Bull days: {bull_days}/5, Bear days: {bear_days}/5 | "
+                f"VIX: {vix_val:.1f} | Multiplier: {result['score_multiplier']}"
+            )
+
+            return result
+
+        except Exception as e:
+            logger.warning(f"Market regime detection failed: {e}")
+            return result
+
     # Optional Boosters
     def check_boosters(self, df: pd.DataFrame) -> Dict:
         """
@@ -728,6 +956,13 @@ class SmallCapSignals:
         boosters['higher_lows'] = swing_details.get('higher_lows', {}).get('passed', False)
         boosters['multi_day_volume'] = swing_details.get('multi_day_volume', {}).get('passed', False)
         boosters['rsi'] = swing_details.get('rsi', 50)
-        
+
+        # 5. OBV TREND (v3.0 — Smart Money)
+        obv_data = self.calculate_obv_trend(df)
+        boosters['obv_trend'] = obv_data
+        boosters['obv_accumulation'] = obv_data.get('accumulation', False)
+        boosters['obv_distribution'] = obv_data.get('distribution', False)
+        boosters['obv_bonus'] = obv_data.get('bonus', 0)
+
         return boosters
 

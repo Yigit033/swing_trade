@@ -33,9 +33,12 @@ function TypeLabel({ type, label }: { type?: string; label?: string }) {
 function SignalCard({ s, onTrack, tracking }: { s: Signal; onTrack: (s: Signal) => void; tracking: boolean }) {
     const [open, setOpen] = useState(false);
 
-    const q = s.quality_score;
-    const qualityEmoji = q >= 80 ? "🔥" : q >= 65 ? "🟢" : "🟡";
-    const qualityLabel = q >= 80 ? "Güçlü sinyal" : q >= 65 ? "İyi sinyal" : "Zayıf sinyal";
+    const qOriginal = s.original_quality_score ?? s.quality_score;
+    const qAdjusted = s.quality_score;
+    const hasRegimePenalty = s.regime_multiplier != null && s.regime_multiplier < 1;
+    // Use ORIGINAL score for quality assessment (before regime penalty)
+    const qualityEmoji = qOriginal >= 80 ? "🔥" : qOriginal >= 65 ? "🟢" : "🟡";
+    const qualityLabel = qOriginal >= 80 ? "Güçlü sinyal" : qOriginal >= 65 ? "İyi sinyal" : "Zayıf sinyal";
 
     // Build boosters list
     const boosters: string[] = [];
@@ -47,6 +50,8 @@ function SignalCard({ s, onTrack, tracking }: { s: Signal; onTrack: (s: Signal) 
     if (s.has_recent_news) boosters.push("Recent news catalyst");
     if (s.has_insider_buying) boosters.push("Insider buying detected");
     if (s.is_squeeze_candidate) boosters.push(`Squeeze candidate (SI: ${s.short_percent?.toFixed(1)}%)`);
+    if (s.obv_accumulation) boosters.push("OBV accumulation (smart money)");
+    if (s.obv_distribution) boosters.push("OBV distribution warning");
 
     return (
         <div className="glass-card" style={{ marginBottom: 12, overflow: "hidden" }}>
@@ -65,7 +70,16 @@ function SignalCard({ s, onTrack, tracking }: { s: Signal; onTrack: (s: Signal) 
                     <span>{qualityEmoji} {qualityLabel}</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <QualityBadge score={q} />
+                    {hasRegimePenalty ? (
+                        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <QualityBadge score={qOriginal} />
+                            <span style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>
+                                (x{s.regime_multiplier?.toFixed(2)})
+                            </span>
+                        </span>
+                    ) : (
+                        <QualityBadge score={qOriginal} />
+                    )}
                     {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                 </div>
             </button>
@@ -128,10 +142,10 @@ function SignalCard({ s, onTrack, tracking }: { s: Signal; onTrack: (s: Signal) 
                     }}>
                         <span>🔥 <strong>Risk/Ödül:</strong> T1 → 1:{s.risk_reward?.toFixed(1)} | T2 → 1:{s.risk_reward_t2?.toFixed(1)}</span>
                         {s.position_size != null && s.position_size > 0 && (
-                            <span>📊 <strong>Pozisyon:</strong> {s.position_size} adet (${(s.position_size * s.entry_price).toFixed(0)})</span>
+                            <span>📊 <strong>Pozisyon:</strong> {s.position_size} adet (${((s.position_size || 0) * (s.entry_price || 0)).toFixed(0)})</span>
                         )}
                         {s.risk_amount != null && s.risk_amount > 0 && (
-                            <span>⚠️ <strong>Risk:</strong> ${s.risk_amount.toFixed(0)}</span>
+                            <span>⚠️ <strong>Risk:</strong> ${(s.risk_amount || 0).toFixed(0)}</span>
                         )}
                     </div>
 
@@ -173,16 +187,73 @@ function SignalCard({ s, onTrack, tracking }: { s: Signal; onTrack: (s: Signal) 
                         </div>
                     )}
 
-                    {/* Öneri */}
+                    {/* OBV Smart Money indicator */}
+                    {(s.obv_accumulation || s.obv_distribution) && (
+                        <div style={{
+                            background: s.obv_accumulation ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)",
+                            border: `1px solid ${s.obv_accumulation ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)"}`,
+                            borderRadius: 8, padding: "8px 14px", marginBottom: 12,
+                            fontSize: "0.8rem", color: s.obv_accumulation ? "var(--green)" : "var(--red)",
+                        }}>
+                            {s.obv_accumulation
+                                ? "📊 OBV Accumulation — Smart money birikim yapıyor (hacim artarken fiyat konsolide)"
+                                : "📊 OBV Distribution — Satış baskısı var (hacim düşerken fiyat yükseliyor)"}
+                        </div>
+                    )}
+
+                    {/* Regime warning */}
+                    {s.regime_multiplier != null && s.regime_multiplier < 1 && (
+                        <div style={{
+                            background: s.market_regime === "BEAR" ? "rgba(239,68,68,0.08)" : "rgba(234,179,8,0.08)",
+                            border: `1px solid ${s.market_regime === "BEAR" ? "rgba(239,68,68,0.2)" : "rgba(234,179,8,0.2)"}`,
+                            borderRadius: 8, padding: "8px 14px", marginBottom: 12,
+                            fontSize: "0.8rem", color: s.market_regime === "BEAR" ? "var(--red)" : "var(--yellow)",
+                        }}>
+                            {s.market_regime === "BEAR"
+                                ? `🐻 Bear Market — Score %${((1 - s.regime_multiplier) * 100).toFixed(0)} düşürüldü. Pozisyon küçült!`
+                                : `⚠️ Piyasa temkinli — Score %${((1 - s.regime_multiplier) * 100).toFixed(0)} düşürüldü.`}
+                            {s.regime_confidence === "TENTATIVE" && " (henüz teyit edilmedi)"}
+                        </div>
+                    )}
+
+                    {/* Öneri — dynamic, regime-aware */}
                     <div style={{
                         background: "rgba(168,85,247,0.06)", border: "1px solid rgba(168,85,247,0.15)",
                         borderRadius: 10, padding: "12px 16px", marginBottom: 16,
-                        fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.6,
+                        fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.8,
                     }}>
-                        <span style={{ fontWeight: 700, color: "#a855f7" }}>💡 Öneri:</span>{" "}
-                        ⏳ {s.expected_hold_min || s.hold_days_min}-{s.expected_hold_max || s.hold_days_max} gün hold önerisi
-                        {s.type_reason && <span> | {s.type_reason}</span>}
-                        {s.volatility_warning && <span style={{ color: "var(--red)" }}> | ⚠️ Yüksek volatilite uyarısı</span>}
+                        <div style={{ fontWeight: 700, color: "#a855f7", marginBottom: 6 }}>💡 Öneri:</div>
+                        <div>⏳ <strong>{s.expected_hold_min || s.hold_days_min}-{s.expected_hold_max || s.hold_days_max} gün</strong> hold önerisi
+                            {s.type_reason && <span> — {s.type_reason}</span>}
+                        </div>
+                        <div>
+                            {s.swing_type === "S" && "⚡ Squeeze setup — Hızlı hareket bekleniyor, kademeli kâr al. Ani düşüşlere hazır ol!"}
+                            {s.swing_type === "B" && "🏃 Momentum play — Trend tarafında kal, trailing stop ile kâr koru."}
+                            {s.swing_type === "C" && "🎯 Erken giriş — Sabırlı ol, setup gelişiyor. Erken girişin avantajını kullan."}
+                            {s.swing_type === "A" && "📊 Trend devamı — Mevcut trende uygun giriş. Planlı kâr al."}
+                        </div>
+                        {s.target_2 != null && s.target_1 != null && s.target_2 > s.target_1 && (
+                            <div>🎯 T1'de %50 sat (${s.target_1.toFixed(2)}), kalan %50'yi T2'ye taşı (${s.target_2.toFixed(2)}). Stop → breakeven.</div>
+                        )}
+                        {(s.rsi || 50) > 70 && (
+                            <div style={{ color: "var(--yellow)" }}>⚠️ RSI yüksek ({s.rsi?.toFixed(0)}) — kademeli kâr al, tam pozisyon girme.</div>
+                        )}
+                        {s.atr_percent != null && s.atr_percent > 10 && (
+                            <div style={{ color: "var(--yellow)" }}>⚠️ Volatilite yüksek (ATR %{s.atr_percent.toFixed(1)}) — spread geniş olabilir, limit order kullan.</div>
+                        )}
+                        {s.market_regime === "BEAR" && (
+                            <div style={{ color: "var(--red)" }}>🐻 Bear market — Pozisyon boyutunu %50 küçült, daha sıkı stop kullan.</div>
+                        )}
+                        {s.market_regime === "CAUTION" && (
+                            <div style={{ color: "var(--yellow)" }}>⚠️ Piyasa temkinli — Normal pozisyonun %75'i ile gir.</div>
+                        )}
+                        {s.obv_accumulation && (
+                            <div style={{ color: "var(--green)" }}>📊 Smart money birikim yapıyor — güçlü destek sinyali.</div>
+                        )}
+                        {s.obv_distribution && (
+                            <div style={{ color: "var(--red)" }}>📊 OBV dağılım — satış baskısı var, dikkatli ol.</div>
+                        )}
+                        {s.volatility_warning && <div style={{ color: "var(--red)" }}>⚠️ Yüksek volatilite uyarısı — risk yönetimi kritik.</div>}
                     </div>
 
                     {/* Track Button */}
@@ -262,7 +333,7 @@ export default function ScannerPage() {
 
     const runAutoTrack = async (signals: Signal[]) => {
         setAutoTrackResult(null);
-        const qualifying = signals.filter(s => s.quality_score >= autoTrackMinQuality);
+        const qualifying = signals.filter(s => (s.original_quality_score ?? s.quality_score) >= autoTrackMinQuality);
         if (!qualifying.length) return;
 
         const tracked: string[] = [];
@@ -323,7 +394,10 @@ export default function ScannerPage() {
     };
 
     const regime = result?.market_regime || "";
-    const regimeColor = regime === "RISK_ON" ? "var(--green)" : regime === "RISK_OFF" ? "var(--red)" : "var(--yellow)";
+    const regimeColor = regime === "BULL" ? "var(--green)" : regime === "BEAR" ? "var(--red)" : "var(--yellow)";
+    const regimeLabel = regime === "BULL" ? "BULL" : regime === "BEAR" ? "BEAR" : regime === "CAUTION" ? "CAUTION" : regime || "—";
+    const regimeMultiplier = (result?.stats as Record<string, number>)?.regime_multiplier;
+    const regimeConfidence = (result?.stats as Record<string, string>)?.regime_confidence || "";
 
     return (
         <div>
@@ -489,9 +563,23 @@ export default function ScannerPage() {
                             <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>Signals</div>
                             <div style={{ fontSize: "1.4rem", fontWeight: 800 }}>{result.signals.length}</div>
                         </div>
-                        <div className="metric-card" style={{ padding: "14px 20px", flex: 1, minWidth: 120 }}>
-                            <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>Market</div>
-                            <div style={{ fontSize: "1rem", fontWeight: 800, color: regimeColor }}>{regime || "—"}</div>
+                        <div className="metric-card" style={{ padding: "14px 20px", flex: 1, minWidth: 160 }}>
+                            <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>Market Regime</div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ fontSize: "1rem", fontWeight: 800, color: regimeColor }}>
+                                    {regimeLabel}
+                                </span>
+                                {regimeConfidence === "TENTATIVE" && (
+                                    <span style={{ fontSize: "0.6rem", color: "var(--text-muted)", background: "rgba(255,255,255,0.06)", padding: "2px 6px", borderRadius: 4, fontWeight: 500 }}>
+                                        Unconfirmed
+                                    </span>
+                                )}
+                                {regimeMultiplier != null && regimeMultiplier < 1 && (
+                                    <span style={{ fontSize: "0.7rem", fontWeight: 500, opacity: 0.7 }}>
+                                        x{regimeMultiplier}
+                                    </span>
+                                )}
+                            </div>
                         </div>
                         <div className="metric-card" style={{ padding: "14px 20px", flex: 1, minWidth: 120 }}>
                             <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>Scanned</div>

@@ -26,11 +26,16 @@ export interface Trade {
     realized_pnl_pct?: number;
     notes?: string;
     trailing_stop?: number;
+    initial_stop?: number;
     atr?: number;
     signal_price?: number;
     current_price?: number;
     unrealized_pnl?: number;
     unrealized_pnl_pct?: number;
+    // v3.1: Dual target & partial exit
+    target_2?: number;
+    partial_exit_price?: number;
+    partial_exit_pct?: number;
     created_at?: string;
     updated_at?: string;
 }
@@ -45,6 +50,7 @@ export interface Signal {
     target_2?: number;
     target: number;
     quality_score: number;
+    original_quality_score?: number;
     swing_type?: string;
     swing_type_label?: string;
     hold_days_min?: number;
@@ -79,6 +85,14 @@ export interface Signal {
     total_catalyst_bonus?: number;
     rsi_divergence?: boolean;
     macd_bullish?: boolean;
+    // OBV Trend (v3.0)
+    obv_accumulation?: boolean;
+    obv_distribution?: boolean;
+    obv_bonus?: number;
+    // Market Regime (v4.0)
+    market_regime?: string;
+    regime_multiplier?: number;
+    regime_confidence?: string;
     // Risk
     target_1_pct?: number;
     target_2_pct?: number;
@@ -173,12 +187,32 @@ export const trackSignal = (signal: Signal & { hold_days_max?: number }) =>
         entry_price: signal.entry_price,
         stop_loss: signal.stop_loss,
         target_1: signal.target_1 || signal.target,
+        target_2: signal.target_2 || signal.target_1 || signal.target,
         swing_type: signal.swing_type || "A",
         quality_score: signal.quality_score,
         position_size: signal.position_size || 100,
         hold_days_max: signal.hold_days_max ?? signal.expected_hold_max ?? 7,
         atr: signal.atr || 0,
     }).then((r) => r.data);
+
+// Market Regime
+export interface RegimeData {
+    regime: string;
+    confidence: string;
+    score_multiplier: number;
+    spy_price?: number;
+    ma50?: number;
+    ma200?: number;
+    vix?: number;
+    spy_5d_return?: number;
+    detected_at?: string;
+}
+
+export const getCurrentRegime = (): Promise<RegimeData> =>
+    api.get("/api/regime/current").then((r) => r.data);
+
+export const getRegimeHistory = (limit = 30) =>
+    api.get(`/api/regime/history?limit=${limit}`).then((r) => r.data);
 
 // Lookup
 export const lookupTickers = (tickers: string[], portfolio_value = 10000) =>

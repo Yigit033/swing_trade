@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
-import { getPending, checkPending, confirmTrade } from "@/lib/api";
-import type { Trade } from "@/lib/api";
+import { getPending, checkPending, confirmTrade, getCurrentRegime } from "@/lib/api";
+import type { Trade, RegimeData } from "@/lib/api";
 import { RefreshCw, CheckCircle, Clock } from "lucide-react";
 
 export default function PendingPage() {
@@ -10,13 +10,33 @@ export default function PendingPage() {
     const [checking, setChecking] = useState(false);
     const [confirming, setConfirming] = useState<number | null>(null);
     const [msg, setMsg] = useState("");
+    const [regime, setRegime] = useState<RegimeData | null>(null);
 
     const load = () => {
         setLoading(true);
         getPending().then(d => setPending(d.pending || [])).finally(() => setLoading(false));
     };
 
-    useEffect(() => { load(); }, []);
+    // Auto-check pending trades on page load (gap filter + confirm/reject)
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            setChecking(true);
+            try {
+                const res = await checkPending();
+                if (!cancelled) {
+                    const count = res.confirmed?.length || 0;
+                    if (count > 0) setMsg(`✅ Auto-checked on load: ${count} trades processed`);
+                }
+            } catch { /* silent — will still load list below */ }
+            finally { if (!cancelled) setChecking(false); }
+            // Fetch regime in parallel
+            getCurrentRegime().then(r => { if (!cancelled) setRegime(r); }).catch(() => {});
+            // Always reload the (now-updated) list
+            if (!cancelled) load();
+        })();
+        return () => { cancelled = true; };
+    }, []);
 
     const handleCheck = async () => {
         setChecking(true);
@@ -54,6 +74,33 @@ export default function PendingPage() {
             {msg && (
                 <div style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.25)", borderRadius: 10, padding: "10px 16px", marginBottom: 16, fontSize: "0.875rem", color: "var(--accent)" }}>
                     {msg}
+                </div>
+            )}
+
+            {/* Market Regime Context */}
+            {regime && regime.regime !== "BULL" && (
+                <div style={{
+                    background: regime.regime === "BEAR" ? "rgba(239,68,68,0.06)" : "rgba(245,158,11,0.06)",
+                    border: `1px solid ${regime.regime === "BEAR" ? "rgba(239,68,68,0.2)" : "rgba(245,158,11,0.2)"}`,
+                    borderRadius: 10, padding: "10px 16px", marginBottom: 16,
+                    fontSize: "0.8rem", display: "flex", alignItems: "center", gap: 10,
+                    color: regime.regime === "BEAR" ? "var(--red)" : "var(--yellow)",
+                }}>
+                    <span style={{ fontWeight: 700 }}>
+                        {regime.regime === "BEAR" ? "BEAR" : "CAUTION"}
+                    </span>
+                    {regime.confidence === "TENTATIVE" && (
+                        <span style={{ fontSize: "0.68rem", opacity: 0.7 }}>(Unconfirmed)</span>
+                    )}
+                    <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                        x{regime.score_multiplier} multiplier
+                        {regime.vix != null && regime.vix > 0 && ` · VIX ${regime.vix.toFixed(1)}`}
+                    </span>
+                    <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginLeft: "auto" }}>
+                        {regime.regime === "BEAR"
+                            ? "Pending trades risk-adjusted. Confirm with caution."
+                            : "Mixed signals. Verify before confirming."}
+                    </span>
                 </div>
             )}
 

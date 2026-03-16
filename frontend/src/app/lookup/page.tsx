@@ -51,6 +51,13 @@ type AnalysisResult = {
     position_size?: number;
     volume_surge?: number;
     atr_percent?: number;
+    // OBV Trend (v3.0)
+    obv_accumulation?: boolean;
+    obv_distribution?: boolean;
+    obv_bonus?: number;
+    // Market Regime (v3.0)
+    market_regime?: string;
+    regime_multiplier?: number;
     // nested diagnostic
     filter_details?: { filters?: Record<string, { passed: boolean; reason: string }> };
     trigger_details?: { triggers?: Record<string, { passed: boolean; reason: string; optional?: boolean }>; volume_surge?: number; atr_percent?: number };
@@ -194,16 +201,44 @@ function ResultCard({ r, onAdd, adding }: { r: AnalysisResult; onAdd: (r: Analys
                             <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 700, letterSpacing: "0.05em", marginBottom: 8 }}>🎯 AŞAMA 2 — SİNYAL TETİKLEYİCİLER</div>
                             <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: 8, padding: "8px 14px" }}>
                                 {Object.entries(r.trigger_details.triggers ?? {}).map(([k, v]) => (
-                                    <DetailRow key={k} icon={v.passed} label={TRIGGER_LABELS[k] || k} reason={v.reason} />
+                                    <DetailRow key={k} icon={v.passed}
+                                        label={(TRIGGER_LABELS[k] || k) + (v.optional ? " (opsiyonel)" : "")}
+                                        reason={v.reason}
+                                        warn={!v.optional}
+                                    />
                                 ))}
                             </div>
                             {!triggerOk && (
                                 <>
                                     <div style={{ marginTop: 10, padding: "8px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 8, fontSize: "0.82rem", color: "var(--red)" }}>
-                                        ⛔ Sinyal tetiklenmedi — hacim ortalamanın altında ({(r.trigger_details.volume_surge ?? 0).toFixed(1)}x). En az 1.3x olmalı.
+                                        {(() => {
+                                            const vol = r.trigger_details?.volume_surge ?? 0;
+                                            const atr = (r.trigger_details?.atr_percent ?? 0) * 100;
+                                            const volFail = vol < 1.3;
+                                            const atrFail = atr < 2;
+                                            if (volFail && atrFail)
+                                                return `⛔ Sinyal tetiklenmedi — Hacim çok düşük (${vol.toFixed(1)}x, min 1.3x) ve volatilite yetersiz (ATR ${atr.toFixed(1)}%, min 2%).`;
+                                            if (volFail)
+                                                return `⛔ Sinyal tetiklenmedi — Hacim ortalamanın altında (${vol.toFixed(1)}x). En az 1.3x olmalı.`;
+                                            if (atrFail)
+                                                return `⛔ Sinyal tetiklenmedi — Volatilite çok düşük (ATR ${atr.toFixed(1)}%). En az %2 olmalı.`;
+                                            return `⛔ Sinyal tetiklenmedi — Minimum eşikler karşılanmadı (Vol: ${vol.toFixed(1)}x, ATR: ${atr.toFixed(1)}%).`;
+                                        })()}
                                     </div>
                                     <div style={{ marginTop: 6, fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                                        💡 Bu hisse şu an yeterli alım ilgisi görmüyor. Hacim patlaması olmadan girmek riskli — momentum olmadan fiyat hareket etmez.
+                                        {(() => {
+                                            const vol = r.trigger_details?.volume_surge ?? 0;
+                                            const atr = (r.trigger_details?.atr_percent ?? 0) * 100;
+                                            const volFail = vol < 1.3;
+                                            const atrFail = atr < 2;
+                                            if (volFail && atrFail)
+                                                return "💡 Bu hisse ne yeterli hacim ne de volatilite gösteriyor. Swing trade için hem güçlü alım ilgisi hem de hareket potansiyeli gerekli.";
+                                            if (volFail)
+                                                return "💡 Bu hisse şu an yeterli alım ilgisi görmüyor. Hacim patlaması olmadan girmek riskli — momentum olmadan fiyat hareket etmez.";
+                                            if (atrFail)
+                                                return "💡 Bu hisse çok dar bir aralıkta işlem görüyor. Düşük volatilite = düşük kâr potansiyeli. ATR yükselmesini bekle.";
+                                            return "💡 Tetikleyici eşikler tam karşılanmıyor. Hisse izleme listesinde tutulabilir.";
+                                        })()}
                                     </div>
                                 </>
                             )}
@@ -219,8 +254,8 @@ function ResultCard({ r, onAdd, adding }: { r: AnalysisResult; onAdd: (r: Analys
                                     if (typeof v !== "object" || v === null) return null;
                                     const label = SWING_LABELS[k] || k;
                                     const passed = v.passed;
-                                    const detail = v.return !== undefined ? `${((v.return ?? 0) * 100).toFixed(1)}%` :
-                                        v.distance !== undefined ? `${((v.distance ?? 0) * 100).toFixed(1)}% uzaklık` :
+                                    const detail = v.return !== undefined ? `${(v.return ?? 0) >= 0 ? "+" : ""}${(v.return ?? 0).toFixed(1)}%` :
+                                        v.distance !== undefined ? `${(v.distance ?? 0) >= 0 ? "+" : ""}${(v.distance ?? 0).toFixed(1)}% uzaklık` :
                                             v.value !== undefined ? String(v.value) : "";
                                     return (
                                         <div key={k} style={{ display: "flex", gap: 10, alignItems: "center", padding: "5px 0", borderBottom: "1px solid var(--border-muted)", fontSize: "0.8rem" }}>
@@ -232,9 +267,34 @@ function ResultCard({ r, onAdd, adding }: { r: AnalysisResult; onAdd: (r: Analys
                                 })}
                             </div>
                             {!swingOk && (
-                                <div style={{ marginTop: 10, padding: "8px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 8, fontSize: "0.82rem", color: "var(--red)" }}>
-                                    ⛔ Swing onayı başarısız.
-                                </div>
+                                <>
+                                    <div style={{ marginTop: 10, padding: "8px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 8, fontSize: "0.82rem", color: "var(--red)" }}>
+                                        {(() => {
+                                            const sd = r.swing_details || {};
+                                            const momFail = sd.five_day_momentum && sd.five_day_momentum.passed === false;
+                                            const maFail = sd.above_ma20 && sd.above_ma20.passed === false;
+                                            if (momFail && maFail)
+                                                return "⛔ Swing onayı başarısız — 5 günlük momentum negatif ve fiyat 20 günlük ortalamanın altında.";
+                                            if (momFail)
+                                                return "⛔ Swing onayı başarısız — 5 günlük momentum negatif (son 5 günde fiyat düşmüş).";
+                                            if (maFail)
+                                                return "⛔ Swing onayı başarısız — Fiyat 20 günlük hareketli ortalamanın altında.";
+                                            return "⛔ Swing onayı başarısız — Gerekli teknik kriterler karşılanmadı.";
+                                        })()}
+                                    </div>
+                                    <div style={{ marginTop: 6, fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                                        {(() => {
+                                            const sd = r.swing_details || {};
+                                            const momFail = sd.five_day_momentum && sd.five_day_momentum.passed === false;
+                                            const maFail = sd.above_ma20 && sd.above_ma20.passed === false;
+                                            if (momFail)
+                                                return "💡 Fiyat kısa vadede zayıf. Yukarı momentum oluşmadan swing trade riskli — dip avcılığı yerine trend takibi yap.";
+                                            if (maFail)
+                                                return "💡 Fiyat orta vadeli trendinin altında. MA20 üzerine çıkması swing trade için onay sinyali olacaktır.";
+                                            return "💡 Teknik yapı henüz swing trade için uygun değil. İzleme listesinde tut ve tekrar kontrol et.";
+                                        })()}
+                                    </div>
+                                </>
                             )}
                         </div>
                     )}
@@ -267,6 +327,24 @@ function ResultCard({ r, onAdd, adding }: { r: AnalysisResult; onAdd: (r: Analys
                                         <div style={{ fontSize: "0.9rem", fontWeight: 700, color }}>{value}</div>
                                     </div>
                                 ))}
+                            </div>
+                            {/* OBV + Regime indicators (v3.0) */}
+                            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+                                {r.obv_accumulation && (
+                                    <span style={{ fontSize: "0.75rem", background: "rgba(34,197,94,0.12)", color: "var(--green)", padding: "3px 10px", borderRadius: 6, fontWeight: 600 }}>
+                                        📊 OBV Accumulation
+                                    </span>
+                                )}
+                                {r.obv_distribution && (
+                                    <span style={{ fontSize: "0.75rem", background: "rgba(239,68,68,0.12)", color: "var(--red)", padding: "3px 10px", borderRadius: 6, fontWeight: 600 }}>
+                                        📊 OBV Distribution
+                                    </span>
+                                )}
+                                {r.market_regime && r.market_regime !== "BULL" && (
+                                    <span style={{ fontSize: "0.75rem", background: r.market_regime === "BEAR" ? "rgba(239,68,68,0.12)" : "rgba(234,179,8,0.12)", color: r.market_regime === "BEAR" ? "var(--red)" : "var(--yellow)", padding: "3px 10px", borderRadius: 6, fontWeight: 600 }}>
+                                        {r.market_regime === "BEAR" ? "🐻" : "⚠️"} {r.market_regime}
+                                    </span>
+                                )}
                             </div>
                             <button className="btn-primary" style={{ fontSize: "0.82rem", padding: "7px 18px" }}
                                 onClick={() => onAdd(r)} disabled={adding}>

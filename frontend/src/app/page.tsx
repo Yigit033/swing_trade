@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
-import { getPerformance, getPending } from "@/lib/api";
-import type { PerformanceSummary, Trade } from "@/lib/api";
+import { getPerformance, getPending, getCurrentRegime } from "@/lib/api";
+import type { PerformanceSummary, Trade, RegimeData } from "@/lib/api";
 import { TrendingUp, TrendingDown, Activity, Clock, BarChart2, Target } from "lucide-react";
 
 function MetricCard({
@@ -48,7 +48,7 @@ function PnlCell({ pnl, pct }: { pnl?: number | null; pct?: number | null }) {
   return (
     <div>
       <span style={{ color: pos ? "var(--green)" : "var(--red)", fontWeight: 600 }}>
-        {pos ? "+" : ""}{pnl.toFixed(2)}$
+        {pos ? "+$" : "-$"}{Math.abs(pnl).toFixed(2)}
       </span>
       {pct != null && (
         <div style={{ fontSize: "0.72rem", color: pos ? "var(--green)" : "var(--red)", opacity: 0.8 }}>
@@ -67,15 +67,18 @@ function fmtDate(d?: string | null) {
 export default function DashboardPage() {
   const [perf, setPerf] = useState<{ summary: PerformanceSummary; open_trades: Trade[]; recent_closed: Trade[] } | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
+  const [regime, setRegime] = useState<RegimeData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
       getPerformance().catch(() => null),
       getPending().catch(() => ({ count: 0 })),
-    ]).then(([p, pnd]) => {
+      getCurrentRegime().catch(() => null),
+    ]).then(([p, pnd, r]) => {
       setPerf(p);
       setPendingCount(pnd?.count || 0);
+      setRegime(r);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -97,6 +100,49 @@ export default function DashboardPage() {
         <h1 className="page-title gradient-text">Live Portfolio</h1>
         <p className="page-subtitle">Real-time position monitor · SmallCap Momentum v2.1</p>
       </div>
+
+      {/* Market Regime Banner */}
+      {regime && (
+        <div className="glass-card" style={{
+          padding: "14px 22px", marginBottom: 20,
+          display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap",
+          borderLeft: `3px solid ${regime.regime === "BULL" ? "var(--green)" : regime.regime === "BEAR" ? "var(--red)" : "var(--yellow)"}`,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{
+              fontSize: "0.8rem", fontWeight: 800, letterSpacing: "0.05em",
+              padding: "4px 12px", borderRadius: 6,
+              background: regime.regime === "BULL" ? "rgba(34,197,94,0.12)" : regime.regime === "BEAR" ? "rgba(239,68,68,0.12)" : "rgba(245,158,11,0.12)",
+              color: regime.regime === "BULL" ? "var(--green)" : regime.regime === "BEAR" ? "var(--red)" : "var(--yellow)",
+            }}>
+              {regime.regime === "BULL" ? "BULL" : regime.regime === "BEAR" ? "BEAR" : "CAUTION"}
+            </span>
+            {regime.confidence === "TENTATIVE" && (
+              <span style={{ fontSize: "0.68rem", color: "var(--text-muted)", background: "rgba(255,255,255,0.06)", padding: "2px 8px", borderRadius: 4 }}>
+                Unconfirmed
+              </span>
+            )}
+            {regime.score_multiplier < 1 && (
+              <span style={{ fontSize: "0.72rem", color: "var(--text-secondary)" }}>
+                x{regime.score_multiplier}
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", display: "flex", gap: 14, flexWrap: "wrap" }}>
+            {regime.spy_price != null && <span>SPY ${regime.spy_price.toFixed(2)}</span>}
+            {regime.vix != null && regime.vix > 0 && (
+              <span style={{ color: regime.vix > 25 ? "var(--red)" : "var(--text-muted)" }}>
+                VIX {regime.vix.toFixed(1)}
+              </span>
+            )}
+            {regime.spy_5d_return != null && (
+              <span style={{ color: regime.spy_5d_return >= 0 ? "var(--green)" : "var(--red)" }}>
+                5d {regime.spy_5d_return >= 0 ? "+" : ""}{regime.spy_5d_return.toFixed(1)}%
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Metrics */}
       <div className="metrics-grid">

@@ -130,7 +130,7 @@ class LLMClient:
         self,
         prompt: str,
         system_prompt: str = "",
-        max_tokens: int = 100000,
+        max_tokens: int = 1000000,
         temperature: float = 0.5,
     ) -> Optional[str]:
         """

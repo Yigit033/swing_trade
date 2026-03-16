@@ -16,46 +16,37 @@ logger = logging.getLogger(__name__)
 class SmallCapScoring:
     """
     Quality scoring for Small Cap Momentum Engine.
-    
-    SENIOR TRADER SCORING SYSTEM (Max 150 points):
-    
-    BASE SCORE (max 100):
-    - Volume Explosion: 30 pts
-    - Volatility Expansion (ATR%): 20 pts
-    - Float Tightness: 20 pts (increased!)
-    - Momentum Continuity: 15 pts
-    - Risk Control: 15 pts
-    
-    CATALYST BONUS (max 35 pts):
-    - Sector Leadership: +10
-    - RSI Divergence: +8
-    - Short Squeeze Setup: +10
-    - News Catalyst: +8
-    - Gap Continuation: +6
-    - VWAP Above Close: +4
-    - MACD Bullish: +4
-    - Higher Lows: +5
-    
-    PENALTY SYSTEM (max -50):
-    - Parabolic Move: -25
-    - Earnings Week ±7: -20
-    - Chasing (today +20%): -15
-    - RSI > 90: -20
-    - RSI > 85: -15
-    - Single Day +30%: -20
-    - 5-day > 60%: -15
-    - Sector Underperform: -10
-    - No Catalyst: -5
-    
-    FINAL RANGE: -50 to 150
+
+    SENIOR TRADER SCORING SYSTEM v3.0 (Weighted):
+
+    BASE SCORE (max 100 — weighted):
+    - Volume Explosion:    30% weight (raw 0-30, normalized)
+    - Volatility (ATR%):   20% weight (raw 0-25, normalized)
+    - Float Tightness:     20% weight (raw 0-20, normalized)
+    - Momentum Continuity: 15% weight (raw 0-15, normalized)
+    - Risk Control:        15% weight (raw 0-15, normalized)
+
+    CATALYST BONUS (max +40 pts, capped):
+    PENALTY SYSTEM (max -40 pts)
+
+    FINAL RANGE: 0 to 140
     """
     
-    # SENIOR TRADER SCORING WEIGHTS
-    WEIGHT_VOLUME = 0.30          # 30 pts max
-    WEIGHT_VOLATILITY = 0.20      # 20 pts max
-    WEIGHT_FLOAT = 0.20           # 20 pts max (increased from 15%)
-    WEIGHT_MOMENTUM = 0.15        # 15 pts max
-    WEIGHT_RISK = 0.15            # 15 pts max
+    # SENIOR TRADER SCORING WEIGHTS (v3.0 — actually applied!)
+    # Each component is normalized to 0-100, then multiplied by weight.
+    # Weighted total = 0-100 base score.
+    WEIGHT_VOLUME = 0.30          # 30% importance
+    WEIGHT_VOLATILITY = 0.20      # 20% importance
+    WEIGHT_FLOAT = 0.20           # 20% importance
+    WEIGHT_MOMENTUM = 0.15        # 15% importance
+    WEIGHT_RISK = 0.15            # 15% importance
+
+    # Raw score maximums (for normalization to 0-100)
+    MAX_VOLUME_SCORE = 30
+    MAX_VOLATILITY_SCORE = 25
+    MAX_FLOAT_SCORE = 20
+    MAX_MOMENTUM_SCORE = 15
+    MAX_RISK_SCORE = 15
     
     def __init__(self, config: Dict = None):
         """Initialize SmallCapScoring."""
@@ -143,7 +134,7 @@ class SmallCapScoring:
         elif float_millions <= 80:
             return 0   # Accept but no bonus
         else:
-            return -5  # Too large (should be filtered)
+            return -8  # Too large — hard to move, poor R/R for small-cap play
     
     def score_momentum_continuity(self, df: pd.DataFrame) -> float:
         """
@@ -249,17 +240,24 @@ class SmallCapScoring:
         + Swing Bonuses (NEW)
         - Penalties for overextension (NEW)
         """
-        # Calculate component scores
-        volume_score = self.score_volume_explosion(
-            volume_surge, 
+        # Calculate raw component scores
+        volume_score_raw = self.score_volume_explosion(
+            volume_surge,
             boosters.get('rvol_value', volume_surge) if boosters else volume_surge
         )
-        volatility_score = self.score_volatility_expansion(atr_percent)
-        float_score = self.score_float_tightness(float_shares)
-        momentum_score = self.score_momentum_continuity(df)
-        risk_score = self.score_risk_control(df, atr_percent)
-        
-        # Calculate total
+        volatility_score_raw = self.score_volatility_expansion(atr_percent)
+        float_score_raw = self.score_float_tightness(float_shares)
+        momentum_score_raw = self.score_momentum_continuity(df)
+        risk_score_raw = self.score_risk_control(df, atr_percent)
+
+        # Normalize each to 0-100, then apply weights (v3.0)
+        volume_score = (max(volume_score_raw, 0) / self.MAX_VOLUME_SCORE) * 100 * self.WEIGHT_VOLUME
+        volatility_score = (max(volatility_score_raw, 0) / self.MAX_VOLATILITY_SCORE) * 100 * self.WEIGHT_VOLATILITY
+        float_score = (max(float_score_raw, 0) / self.MAX_FLOAT_SCORE) * 100 * self.WEIGHT_FLOAT
+        momentum_score = (max(momentum_score_raw, 0) / self.MAX_MOMENTUM_SCORE) * 100 * self.WEIGHT_MOMENTUM
+        risk_score = (max(risk_score_raw, 0) / self.MAX_RISK_SCORE) * 100 * self.WEIGHT_RISK
+
+        # Weighted total (0-100 range)
         total = volume_score + volatility_score + float_score + momentum_score + risk_score
         
         # ============================================================
@@ -324,6 +322,10 @@ class SmallCapScoring:
             # RSI Divergence (already exists but emphasize)
             if boosters.get('rsi_divergence'):
                 bonus += 8  # Game changer for early reversal
+
+            # OBV Trend (v3.0 — Smart Money detection)
+            obv_bonus = boosters.get('obv_bonus', 0)
+            bonus += obv_bonus  # +8 accumulation, +4 confirm, -5 distribution
         
         # ============================================================
         # PENALTY SYSTEM (max -40, expanded from -35)
@@ -400,16 +402,24 @@ class SmallCapScoring:
                 penalty += 5  # Missing key swing criteria
         
         # ============================================================
-        # FINAL SCORE (Range: -40 to 135)
+        # BONUS CAP (v3.0 — prevent score inflation)
+        # ============================================================
+        bonus = min(bonus, 40)
+
+        # ============================================================
+        # FINAL SCORE (Range: 0 to 140)
         # ============================================================
         final_score = total + bonus - penalty
-        
-        # Clamp between 0 and 135 (expanded range)
-        final_score = max(0, min(final_score, 135))
+
+        # Clamp between 0 and 140
+        final_score = max(0, min(final_score, 140))
         
         logger.debug(
-            f"SmallCap Score: Vol={volume_score}, Volatility={volatility_score}, "
-            f"Float={float_score}, Momentum={momentum_score}, Risk={risk_score}, "
+            f"SmallCap Score: Vol={volume_score:.1f}(raw {volume_score_raw}), "
+            f"Volatility={volatility_score:.1f}(raw {volatility_score_raw}), "
+            f"Float={float_score:.1f}(raw {float_score_raw}), "
+            f"Momentum={momentum_score:.1f}(raw {momentum_score_raw}), "
+            f"Risk={risk_score:.1f}(raw {risk_score_raw}), "
             f"Bonus={bonus}, Penalty={penalty} -> Total={final_score}"
         )
         

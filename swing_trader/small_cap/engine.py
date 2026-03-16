@@ -226,26 +226,24 @@ class SmallCapEngine:
         
         # Type B threshold: 6+ points
         if type_b_score >= 6:
-            # ── STRICT FILTER GATE (v2.2) ──
-            # Tip B is HIGH RISK (chasing extended stocks).
-            # Only enter if ALL conditions met:
-            #   1. Volume >= 5x (extreme conviction)
-            #   2. RSI <= 75 (not too extreme)
-            #   3. Has catalyst (news/squeeze/insider = real reason)
-            # If filter fails → downgrade to Type A (safer hold period)
-            if volume_surge < 5.0 or rsi > 75 or not has_catalyst:
-                # Doesn't meet strict criteria → reclass as Type A
+            # ── BALANCED FILTER GATE (v3.0) ──
+            # Type B is HIGH RISK — require strong volume + at least one safety:
+            #   1. Volume >= 3.5x (strong conviction)
+            #   2. At least ONE of: has_catalyst OR RSI <= 72
+            # If filter fails → downgrade to Type A
+            has_safety = has_catalyst or rsi <= 72
+            if volume_surge < 3.5 or not has_safety:
                 pass  # Fall through to Type A
             else:
-                # Meets strict criteria → genuine Tip B
                 if rsi > 73:
-                    hold_days = (2, 4)  # Overbought but catalyst-driven
+                    hold_days = (2, 4)  # Overbought — short hold
                 elif rsi > 68:
                     hold_days = (3, 5)  # Elevated
                 else:
                     hold_days = (4, 6)  # Room to run
-                
-                return ('B', hold_days, f"🚀 Momentum: 5d={five_day_return:+.0f}%, RSI={rsi:.0f}, Cat:✓")
+
+                cat_str = "Cat:✓" if has_catalyst else "Vol-driven"
+                return ('B', hold_days, f"🚀 Momentum: 5d={five_day_return:+.0f}%, RSI={rsi:.0f}, {cat_str}")
         
         # ============================================================
         # TYPE A - Continuation Swing (FALLBACK)
@@ -526,6 +524,11 @@ class SmallCapEngine:
                 'rsi_divergence': boosters.get('rsi_divergence', False),
                 'rsi_divergence_confidence': boosters.get('rsi_divergence_confidence', 0),
                 'macd_bullish': boosters.get('macd_bullish', False),
+
+                # OBV Trend (v3.0)
+                'obv_accumulation': boosters.get('obv_accumulation', False),
+                'obv_distribution': boosters.get('obv_distribution', False),
+                'obv_bonus': boosters.get('obv_bonus', 0),
                 
                 # Filter/trigger details
                 'filter_results': filter_results,
@@ -630,36 +633,50 @@ class SmallCapEngine:
         signals = []
         scanned = 0
         filter_failed = 0
-        trigger_failed = 0
-        
+
         logger.info(f"SmallCapEngine: Scanning {len(tickers)} stocks")
-        
+
+        # v4.0: Detect market regime ONCE for all stocks
+        market_regime = self.signals.detect_market_regime()
+        self._last_regime = market_regime  # expose for callers (e.g. scanner API)
+        regime_multiplier = market_regime.get('score_multiplier', 1.0)
+
         for ticker in tickers:
             if ticker not in data_dict:
                 continue
-            
+
             df = data_dict[ticker]
             scanned += 1
-            
+
             signal = self.scan_stock(ticker, df)
-            
+
             if signal:
-                # Add risk management
-                signal = self.risk.add_risk_management(signal, df, portfolio_value)
+                # v3.0: Apply market regime multiplier to quality score
+                # Store original score for user-facing min_quality filter
+                signal['original_quality_score'] = signal['quality_score']
+                signal['market_regime'] = market_regime['regime']
+                signal['regime_multiplier'] = regime_multiplier
+                signal['regime_confidence'] = market_regime.get('confidence', 'CONFIRMED')
+                if regime_multiplier < 1.0:
+                    signal['quality_score'] = round(signal['quality_score'] * regime_multiplier, 1)
+
+                # Re-apply risk with real portfolio value if different from default
+                if portfolio_value != 10000:
+                    signal = self.risk.add_risk_management(signal, df, portfolio_value)
                 signals.append(signal)
             else:
-                # Count failures for stats
-                filter_failed += 1  # Simplified - could track separately
-        
+                filter_failed += 1
+
         # Sort by quality score (highest first)
         signals.sort(key=lambda x: x.get('quality_score', 0), reverse=True)
-        
+
         logger.info(
             f"SmallCapEngine: Scanned {scanned} | "
             f"Signals: {len(signals)} | "
-            f"Filtered: {filter_failed}"
+            f"Filtered: {filter_failed} | "
+            f"Regime: {market_regime['regime']}"
         )
-        
+
         return signals
     
     def get_small_cap_universe(self, use_finviz: bool = True, max_tickers: int = 200) -> List[str]:

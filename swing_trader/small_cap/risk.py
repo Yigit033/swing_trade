@@ -14,16 +14,15 @@ logger = logging.getLogger(__name__)
 class SmallCapRisk:
     """
     Risk management for Small Cap Momentum Engine.
-    
-    v2.3 Improvements:
-    - Type-specific stop loss caps (%8-12 instead of flat %15)
-    - Type-specific T1/T2 dual profit targets
-    - Improved position sizing (%1.0 risk, %50 factor)
+
+    v3.0 Improvements:
+    - Type-specific stop loss caps (%8-12)
+    - Realistic T1/T2 dual profit targets (reduced for better hit rate)
+    - Clean position sizing: 1.5% risk, no artificial factor, only type cap
     """
     
-    # ── CORE CONSTANTS ──
-    POSITION_SIZE_FACTOR = 0.50       # 50% of normal position (was 30% — too conservative)
-    MAX_RISK_PER_TRADE = 0.010        # 1.0% of portfolio (was 0.5% — too small)
+    # ── CORE CONSTANTS (v3.0) ──
+    MAX_RISK_PER_TRADE = 0.015        # 1.5% of portfolio per trade (was 1.0% — too small for small cap)
     STOP_ATR_MULTIPLIER = 1.5         # 1.5 ATR stop
     MAX_HOLDING_DAYS = 14             # 14 days max hold
     
@@ -37,14 +36,13 @@ class SmallCapRisk:
     }
     MAX_STOP_PERCENT = 0.10  # Default fallback
     
-    # ── TYPE-SPECIFIC T1/T2 PROFIT TARGETS ──
-    # v2.3: Replaces single MIN_RR_RATIO = 3.0
+    # ── TYPE-SPECIFIC T1/T2 PROFIT TARGETS (v3.0 — realistic) ──
     # Format: (T1_percent, T2_percent)
     TYPE_TARGETS = {
-        'S': (0.30, 0.60),   # 🔥 Squeeze:  T1 +%30, T2 +%60
-        'B': (0.30, 0.50),   # 🚀 Momentum: T1 +%30, T2 +%50
-        'C': (0.18, 0.30),   # ⭐ Erken:     T1 +%18, T2 +%30
-        'A': (0.25, 0.40),   # 🐢 Devam:     T1 +%25, T2 +%40
+        'S': (0.25, 0.45),   # 🔥 Squeeze:  T1 +25%, T2 +45% (was 30/60 — too greedy)
+        'B': (0.20, 0.38),   # 🚀 Momentum: T1 +20%, T2 +38% (was 30/50 — hit rate too low)
+        'C': (0.15, 0.28),   # ⭐ Erken:     T1 +15%, T2 +28% (was 18/30 — slightly tighter)
+        'A': (0.20, 0.35),   # 🐢 Devam:     T1 +20%, T2 +35% (was 25/40 — better hit rate)
     }
     
     # ── TYPE-SPECIFIC POSITION CAPS (max % of portfolio per position) ──
@@ -58,7 +56,7 @@ class SmallCapRisk:
     def __init__(self, config: Dict = None):
         """Initialize SmallCapRisk."""
         self.config = config or {}
-        logger.info("SmallCapRisk initialized (v2.3 — type-specific risk rules)")
+        logger.info("SmallCapRisk initialized (v3.0 — realistic targets, clean sizing)")
     
     def calculate_atr(self, df: pd.DataFrame, period: int = 14) -> float:
         """Calculate ATR value."""
@@ -157,7 +155,7 @@ class SmallCapRisk:
         return t1
     
     def calculate_position_size(
-        self, 
+        self,
         portfolio_value: float,
         entry_price: float,
         stop_loss: float,
@@ -165,45 +163,38 @@ class SmallCapRisk:
     ) -> Tuple[int, float]:
         """
         Calculate position size for small-cap trade.
-        
-        v2.3: Improved sizing with type-specific portfolio caps.
-        - Risk per trade: 1.0% of portfolio (was 0.5%)
-        - Position factor: 50% (was 30%)
-        - Type-specific max position: S=%15, B=%20, C/A=%25
-        
+
+        v3.0: Clean risk-based sizing. No artificial position factor.
+        - Risk per trade: 1.5% of portfolio
+        - Only constraint: type-specific portfolio cap (S=15%, B=20%, C/A=25%)
+
         Returns:
             Tuple of (shares: int, risk_amount: float)
         """
         try:
-            # Calculate risk per share
             risk_per_share = entry_price - stop_loss
             if risk_per_share <= 0:
                 return 0, 0.0
-            
-            # Calculate max risk amount (1.0% of portfolio)
+
+            # Step 1: Calculate shares from risk budget (1.5% of portfolio)
             max_risk = portfolio_value * self.MAX_RISK_PER_TRADE
-            
-            # Calculate shares based on risk
-            shares = int(max_risk / risk_per_share)
-            
-            # Apply position size factor (50% of normal)
-            adjusted_shares = int(shares * self.POSITION_SIZE_FACTOR)
-            
-            # Apply type-specific portfolio cap
+            shares_by_risk = int(max_risk / risk_per_share)
+
+            # Step 2: Apply type-specific portfolio cap (only real constraint)
             max_position_pct = self.TYPE_POSITION_CAPS.get(swing_type, 0.25)
             max_shares_by_cap = int((portfolio_value * max_position_pct) / entry_price)
-            adjusted_shares = min(adjusted_shares, max_shares_by_cap)
-            
-            # Calculate actual risk
-            actual_risk = adjusted_shares * risk_per_share
-            
+
+            # Use the smaller of the two
+            final_shares = min(shares_by_risk, max_shares_by_cap)
+
             # Ensure minimum position
-            if adjusted_shares < 1:
-                adjusted_shares = 1
-                actual_risk = risk_per_share
-            
-            return adjusted_shares, actual_risk
-            
+            if final_shares < 1:
+                final_shares = 1
+
+            actual_risk = final_shares * risk_per_share
+
+            return final_shares, actual_risk
+
         except Exception as e:
             logger.error(f"Error calculating position size: {e}")
             return 0, 0.0
@@ -286,10 +277,16 @@ class SmallCapRisk:
             signal['position_size'] = shares
             signal['risk_amount'] = round(risk_amount, 2)
             
-            # Calculate expected hold
-            hold_min, hold_max = self.calculate_expected_hold(df, atr_percent)
-            signal['expected_hold_min'] = hold_min
-            signal['expected_hold_max'] = hold_max
+            # v3.0: Respect engine's type-based hold days instead of overriding.
+            # Engine already sets hold_days_min/max based on type + RSI + 5d return.
+            # Only fill in if engine didn't set them (standalone scan_stock call).
+            if not signal.get('hold_days_min'):
+                hold_min, hold_max = self.calculate_expected_hold(df, atr_percent)
+                signal['expected_hold_min'] = hold_min
+                signal['expected_hold_max'] = hold_max
+            else:
+                signal['expected_hold_min'] = signal['hold_days_min']
+                signal['expected_hold_max'] = signal['hold_days_max']
             
             # Max hold date
             signal_date = signal.get('date', datetime.now().strftime('%Y-%m-%d'))

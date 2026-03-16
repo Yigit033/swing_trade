@@ -9,12 +9,14 @@ POST /api/trades/{id}/close - close a trade
 POST /api/trades/update-prices - fetch latest prices for all open trades
 """
 
+import logging
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from api.deps import get_paper_storage, get_paper_tracker
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class TradeIn(BaseModel):
@@ -41,12 +43,67 @@ class CloseTradeIn(BaseModel):
     notes: str = ""
 
 
+def _enrich_open_trades_inline(trades: list) -> list:
+    """
+    For OPEN/PENDING trades missing real current_price, batch-fetch live prices via yfinance.
+    Uses period='5d' so weekends/holidays still return the last trading day's close.
+    """
+    # Detect trades needing price: null, 0, or same as entry_price (fallback value)
+    needs_price = [
+        t for t in trades
+        if t.get("status") in ("OPEN", "PENDING") and (
+            not t.get("current_price")
+            or t.get("current_price") == t.get("entry_price")
+        )
+    ]
+    if not needs_price:
+        return trades
+    tickers = list({t["ticker"] for t in needs_price if t.get("ticker")})
+    if not tickers:
+        return trades
+    try:
+        import yfinance as yf
+        data = yf.download(" ".join(tickers), period="5d",
+                           progress=False, auto_adjust=True)
+        if data.empty:
+            return trades
+        prices = {}
+        close = data["Close"]
+        if len(tickers) == 1:
+            val = close.dropna()
+            if not val.empty:
+                prices[tickers[0]] = round(float(val.iloc[-1].item()), 4)
+        else:
+            for tk in tickers:
+                try:
+                    val = close[tk].dropna()
+                    if not val.empty:
+                        prices[tk] = round(float(val.iloc[-1].item()), 4)
+                except Exception:
+                    pass
+        for t in trades:
+            if t.get("status") in ("OPEN", "PENDING"):
+                cp = prices.get(t["ticker"])
+                if cp:
+                    entry = t.get("entry_price") or 0
+                    size = t.get("position_size") or 100
+                    t["current_price"] = cp
+                    if entry and t.get("status") == "OPEN":
+                        t["unrealized_pnl"] = round((cp - entry) * size, 2)
+                        t["unrealized_pnl_pct"] = round(((cp / entry) - 1) * 100, 2)
+    except Exception as e:
+        logger.warning(f"Inline price enrichment failed: {e}")
+    return trades
+
+
 @router.get("")
 def list_trades(status: Optional[str] = Query(None)):
     storage = get_paper_storage()
     all_trades = storage.get_all_trades() or []
     if status:
         all_trades = [t for t in all_trades if t.get("status") == status]
+    # Enrich OPEN trades that have no current_price yet
+    all_trades = _enrich_open_trades_inline(all_trades)
     return {"trades": all_trades}
 
 

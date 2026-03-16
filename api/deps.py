@@ -46,3 +46,9 @@ def get_smallcap_engine():
 def get_fetcher():
     from swing_trader.data.fetcher import DataFetcher
     return DataFetcher(get_config())
+
+
+@lru_cache(maxsize=1)
+def get_regime_storage():
+    from swing_trader.data.regime_storage import RegimeHistoryStorage
+    return RegimeHistoryStorage()

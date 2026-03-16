@@ -246,7 +246,7 @@ export default function PerformancePage() {
                                                 <td>${t.entry_price?.toFixed(2)}</td>
                                                 <td>${t.exit_price?.toFixed(2) || "—"}</td>
                                                 <td style={{ color: pnl >= 0 ? "var(--green)" : "var(--red)", fontWeight: 600 }}>
-                                                    {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)}$
+                                                    {pnl >= 0 ? "+$" : "-$"}{Math.abs(pnl).toFixed(2)}
                                                 </td>
                                                 <td style={{ color: pnl >= 0 ? "var(--green)" : "var(--red)" }}>
                                                     {pnl >= 0 ? "+" : ""}{t.realized_pnl_pct?.toFixed(2) ?? "—"}%

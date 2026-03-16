@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \":*)",
+      "Bash(find /c/swing_trade/frontend -type f \\\\\\(-name *.tsx -o -name *.ts \\\\\\) ! -path */.next/* ! -path */node_modules/*)",
+      "Bash(grep -n \"market_regime\\\\|obv\\\\|regime_multiplier\" /c/swing_trade/api/routers/*.py)",
+      "Bash(npx tsc:*)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -r \"auto.*check\\\\|auto-check\" /c/swing_trade/frontend --include=*.tsx --include=*.ts -n)",
+      "Bash(python -c \"from swing_trader.paper_trading.tracker import PaperTradeTracker; print\\(''OK''\\)\")",
+      "Bash(python -c \"from swing_trader.paper_trading.tracker import PaperTradeTracker; from api.routers.performance import get_performance; print\\(''Python OK''\\)\")",
+      "Bash(npx next:*)",
+      "Bash(python -c \"from api.routers.trades import router; print\\(''trades.py OK''\\)\")",
+      "Bash(python -c \"from swing_trader.paper_trading.tracker import PaperTradeTracker; print\\(''tracker.py OK''\\)\")",
+      "Bash(python -c \"from swing_trader.paper_trading.storage import PaperTradeStorage; print\\(''storage.py OK''\\)\")",
+      "Bash(python -c \"from api.routers.performance import router; print\\(''performance.py OK''\\)\")",
+      "Bash(python -c \"from swing_trader.small_cap.engine import SmallCapEngine; print\\(''engine.py OK''\\)\")",
+      "Bash(python -c \"from api.routers.scanner import router; print\\(''scanner.py OK''\\)\")"
+    ]
+  }
+}

@@ -21,7 +21,7 @@ except ImportError:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import trades, pending, performance, lookup, scanner, genai, backtest
+from api.routers import trades, pending, performance, lookup, scanner, genai, backtest, regime
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
@@ -48,6 +48,7 @@ app.include_router(lookup.router,      prefix="/api/lookup",      tags=["lookup"
 app.include_router(scanner.router,     prefix="/api/scanner",     tags=["scanner"])
 app.include_router(genai.router,       prefix="/api/genai",       tags=["genai"])
 app.include_router(backtest.router,    prefix="/api/backtest",    tags=["backtest"])
+app.include_router(regime.router)
 
 
 @app.get("/api/health")

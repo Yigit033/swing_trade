@@ -27,6 +27,7 @@ function StatusBadge({ status }: { status: string }) {
         TARGET: { bg: "rgba(34,197,94,0.2)", color: "#22c55e" },
         TRAILED: { bg: "rgba(245,158,11,0.15)", color: "#f59e0b" },
         STOPPED: { bg: "rgba(239,68,68,0.15)", color: "#ef4444" },
+        T1_PARTIAL: { bg: "rgba(34,197,94,0.15)", color: "#22c55e" },
         MANUAL: { bg: "rgba(59,130,246,0.15)", color: "#3b82f6" },
         "I-MANUAL": { bg: "rgba(59,130,246,0.15)", color: "#3b82f6" },
         REJECTED: { bg: "rgba(239,68,68,0.15)", color: "#ef4444" },
@@ -246,25 +247,59 @@ export default function TradesPage() {
                 const last = await fetchLastUpdate();
                 const hasOpen = tradesData.some(t => t.status === "OPEN" || t.status === "PENDING");
 
-                // Auto-update only if there are open/pending trades AND
-                // last update is missing or older than 60 minutes.
+                // Auto-update if:
+                // 1. There are open/pending trades with missing current_price, OR
+                // 2. Last update is missing or older than 15 minutes
+                // Detect stale prices: null, 0, or same as entry (fallback value)
+                const hasMissingPrices = tradesData.some(
+                    t => (t.status === "OPEN") && (
+                        t.current_price == null
+                        || t.current_price === 0
+                        || t.current_price === t.entry_price
+                    )
+                );
                 const shouldAutoUpdate = () => {
                     if (!hasOpen) return false;
+                    if (hasMissingPrices) return true; // Always fetch if prices are missing
                     if (!last) return true;
                     const dt = new Date(last);
                     if (isNaN(dt.getTime())) return false;
                     const now = new Date();
                     const diffMinutes = (now.getTime() - dt.getTime()) / (1000 * 60);
-                    return diffMinutes > 60;
+                    return diffMinutes > 15; // Reduced from 60 to 15 min
                 };
 
                 if (shouldAutoUpdate()) {
                     setUpdatingPrices(true);
                     try {
-                        await updatePrices();
+                        const upRes = await updatePrices();
+                        // Merge live prices from update response into trades
+                        const updatedMap = new Map<number, Trade>();
+                        if (upRes?.trades) {
+                            for (const ut of upRes.trades) {
+                                if (ut.id) updatedMap.set(ut.id, ut);
+                            }
+                        }
+                        // Re-fetch from DB (which now has persisted values)
                         const d2 = await getTrades();
-                        setTrades(d2.trades || []);
+                        const freshTrades: Trade[] = d2.trades || [];
+                        // Overlay any live data from update response onto DB data
+                        const merged = freshTrades.map(t => {
+                            const live = updatedMap.get(t.id);
+                            if (live && t.status === "OPEN") {
+                                return {
+                                    ...t,
+                                    current_price: live.current_price ?? t.current_price,
+                                    unrealized_pnl: live.unrealized_pnl ?? t.unrealized_pnl,
+                                    unrealized_pnl_pct: live.unrealized_pnl_pct ?? t.unrealized_pnl_pct,
+                                };
+                            }
+                            return t;
+                        });
+                        setTrades(merged);
                         await fetchLastUpdate();
+                    } catch (err) {
+                        console.error("Auto price update failed:", err);
                     } finally {
                         setUpdatingPrices(false);
                     }
@@ -280,9 +315,32 @@ export default function TradesPage() {
     const handleUpdatePrices = async () => {
         setUpdatingPrices(true);
         try {
-            await updatePrices();
-            setMsg("✅ Fiyatlar güncellendi!");
-            load();
+            const upRes = await updatePrices();
+            setMsg(`✅ Fiyatlar güncellendi! (${upRes?.trades?.length || 0} trade)`);
+            // Re-fetch enriched trades
+            const d = await getTrades();
+            const freshTrades: Trade[] = d.trades || [];
+            // Merge update response data as overlay
+            const updatedMap = new Map<number, Trade>();
+            if (upRes?.trades) {
+                for (const ut of upRes.trades) {
+                    if (ut.id) updatedMap.set(ut.id, ut);
+                }
+            }
+            const merged = freshTrades.map(t => {
+                const live = updatedMap.get(t.id);
+                if (live && t.status === "OPEN") {
+                    return {
+                        ...t,
+                        current_price: live.current_price ?? t.current_price,
+                        unrealized_pnl: live.unrealized_pnl ?? t.unrealized_pnl,
+                        unrealized_pnl_pct: live.unrealized_pnl_pct ?? t.unrealized_pnl_pct,
+                    };
+                }
+                return t;
+            });
+            setTrades(merged);
+            await fetchLastUpdate();
         } catch { setMsg("❌ Güncelleme başarısız"); }
         finally { setUpdatingPrices(false); }
     };
@@ -535,13 +593,23 @@ export default function TradesPage() {
                                 </thead>
                                 <tbody>
                                     {paginated.map((t, idx) => {
-                                        const pnl = t.realized_pnl ?? t.unrealized_pnl;
-                                        const pnlPct = t.realized_pnl_pct ?? t.unrealized_pnl_pct;
-                                        const isPos = (pnl || 0) >= 0;
                                         const isOpen = t.status === "OPEN";
+                                        const isPending = t.status === "PENDING";
                                         const isClosed = CLOSED_STATUSES.has(t.status);
                                         const currentPrice = t.current_price ?? null;
                                         const exitPrice = isClosed ? t.exit_price : null;
+                                        // Compute P&L: use realized for closed, unrealized for open
+                                        // If unrealized is null but we have current_price, compute client-side
+                                        let pnl = t.realized_pnl ?? t.unrealized_pnl ?? null;
+                                        let pnlPct = t.realized_pnl_pct ?? t.unrealized_pnl_pct ?? null;
+                                        if (pnl == null && isOpen && currentPrice && t.entry_price) {
+                                            const size = t.position_size || 100;
+                                            pnl = (currentPrice - t.entry_price) * size;
+                                            pnlPct = ((currentPrice / t.entry_price) - 1) * 100;
+                                        }
+                                        // PENDING trades: no position yet, show 0
+                                        if (isPending) { pnl = 0; pnlPct = 0; }
+                                        const isPos = (pnl || 0) >= 0;
                                         const rowNum = (page - 1) * PAGE_SIZE + idx + 1;
 
                                         return (
@@ -557,13 +625,20 @@ export default function TradesPage() {
                                                 }}
                                             >
                                                 <td style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>{rowNum}</td>
-                                                <td><strong style={{ color: "var(--accent)" }}>{t.ticker}</strong></td>
+                                                <td>
+                                                    <strong style={{ color: "var(--accent)" }}>{t.ticker}</strong>
+                                                    {t.partial_exit_price != null && t.partial_exit_price > 0 && (
+                                                        <div style={{ fontSize: "0.62rem", color: "var(--green)", fontWeight: 600, marginTop: 1 }}>
+                                                            T1 @${t.partial_exit_price.toFixed(2)}
+                                                        </div>
+                                                    )}
+                                                </td>
                                                 <td><TypeBadge type={t.swing_type} /></td>
                                                 <td style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{t.entry_date || "—"}</td>
                                                 <td style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{t.exit_date || "—"}</td>
                                                 <td style={{ fontWeight: 600 }}>${t.entry_price?.toFixed(2)}</td>
                                                 <td>
-                                                    {currentPrice != null && isOpen ? (
+                                                    {isOpen && currentPrice != null && currentPrice > 0 ? (
                                                         <span
                                                             style={{
                                                                 fontWeight: 700,
@@ -571,6 +646,20 @@ export default function TradesPage() {
                                                             }}
                                                         >
                                                             ${currentPrice.toFixed(2)}
+                                                        </span>
+                                                    ) : isOpen && updatingPrices ? (
+                                                        <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>...</span>
+                                                    ) : isOpen ? (
+                                                        <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>
+                                                            ${(t.entry_price || 0).toFixed(2)}
+                                                        </span>
+                                                    ) : isPending ? (
+                                                        <span style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>
+                                                            ${(t.signal_price || t.entry_price || 0).toFixed(2)}
+                                                        </span>
+                                                    ) : isClosed && exitPrice != null && exitPrice > 0 ? (
+                                                        <span style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>
+                                                            ${exitPrice.toFixed(2)}
                                                         </span>
                                                     ) : (
                                                         <span style={{ color: "var(--text-muted)" }}>—</span>
@@ -597,7 +686,7 @@ export default function TradesPage() {
                                                         fontSize: "0.85rem",
                                                     }}
                                                 >
-                                                    {pnl != null ? `${isPos ? "+" : ""}$${pnl.toFixed(2)}` : "—"}
+                                                    {pnl != null ? `${isPos ? "+$" : "-$"}${Math.abs(pnl).toFixed(2)}` : "—"}
                                                 </td>
                                                 <td style={{ color: isPos ? "#22c55e" : "#ef4444", fontWeight: 600 }}>
                                                     {pnlPct != null ? `${isPos ? "+" : ""}${pnlPct.toFixed(2)}%` : "—"}

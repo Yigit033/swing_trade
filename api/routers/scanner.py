@@ -13,7 +13,7 @@ import numpy as np
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from typing import Optional
-from api.deps import get_smallcap_engine, get_paper_tracker, get_fetcher
+from api.deps import get_smallcap_engine, get_paper_tracker, get_fetcher, get_regime_storage
 from api.utils import flatten_yf_df, sanitize_for_json, fetch_ticker_history
 
 router = APIRouter()
@@ -25,6 +25,7 @@ class TrackSignalRequest(BaseModel):
     entry_price: float
     stop_loss: float
     target_1: float
+    target_2: Optional[float] = None
     swing_type: str = "A"
     quality_score: float = 0
     position_size: int = 100
@@ -45,6 +46,7 @@ def track_signal(body: TrackSignalRequest):
         "entry_price": body.entry_price,
         "stop_loss": body.stop_loss,
         "target_1": body.target_1,
+        "target_2": body.target_2 or body.target_1,
         "swing_type": body.swing_type,
         "quality_score": body.quality_score,
         "position_size": body.position_size,
@@ -161,8 +163,29 @@ def run_smallcap_scan(body: ScanRequest):
             portfolio_value=body.portfolio_value,
         )
 
-        filtered = [s for s in signals if s.get("quality_score", 0) >= body.min_quality]
+        # Filter on ORIGINAL quality score (before regime penalty) so users see
+        # fundamentally good signals even in BEAR/CAUTION markets.
+        # The regime-adjusted score is still displayed for risk awareness.
+        filtered = [s for s in signals if s.get("original_quality_score", s.get("quality_score", 0)) >= body.min_quality]
         filtered = filtered[:body.top_n]
+
+        # v4.0: Get actual market regime from signals (engine sets it per-signal)
+        actual_regime = "BULL"
+        regime_multiplier = 1.0
+        regime_confidence = "CONFIRMED"
+        source = filtered if filtered else signals
+        if source:
+            actual_regime = source[0].get("market_regime", "BULL")
+            regime_multiplier = source[0].get("regime_multiplier", 1.0)
+            regime_confidence = source[0].get("regime_confidence", "CONFIRMED")
+
+        # v4.0: Persist regime to DB (auto-log on every scan)
+        try:
+            regime_data = getattr(engine, '_last_regime', None)
+            if regime_data:
+                get_regime_storage().save_regime(regime_data)
+        except Exception:
+            logger.debug("Regime save skipped (non-critical)")
 
         stats = {
             "stocks_scanned":  len(tickers),
@@ -170,8 +193,10 @@ def run_smallcap_scan(body: ScanRequest):
             "raw_signals":     len(signals),
             "filtered_signals": len(filtered),
             "reason": "success" if filtered else "no_qualifying",
+            "regime_multiplier": regime_multiplier,
+            "regime_confidence": regime_confidence,
         }
-        return sanitize_for_json({"signals": filtered, "stats": stats, "market_regime": "RISK_ON"})
+        return sanitize_for_json({"signals": filtered, "stats": stats, "market_regime": actual_regime})
 
     except Exception as e:
         logger.exception("SmallCap scan failed")
