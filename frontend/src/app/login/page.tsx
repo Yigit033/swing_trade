@@ -93,8 +93,9 @@ export default function LoginPage() {
         return;
       }
       if (data.user) {
-        router.push("/");
-        router.refresh();
+        // Production'da client-side nav cookie'leri gecikmeli gönderebilir.
+        // Full page redirect ile session kesin sunucuya ulaşır.
+        window.location.href = "/";
       }
     } catch (err) {
       setError("An unexpected error occurred");
