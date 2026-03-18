@@ -122,6 +122,7 @@ def verify_token(
         return None
 
     if not credentials:
+        logger.warning("Auth 401: Missing Authorization header")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authorization header",
@@ -145,6 +146,10 @@ def verify_token(
     if payload:
         return payload
 
+    logger.warning(
+        "Auth 401: Token rejected (HS256/JWKS/API all failed). "
+        "Check Fly.io: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_JWT_SECRET"
+    )
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired token",

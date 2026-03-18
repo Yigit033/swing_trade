@@ -2,6 +2,25 @@
 
 Local'de çalışıyor, production'da (https://swingtrade.vercel.app) giriş sonrası tekrar login'e atıyorsa, aşağıdaki adımları kontrol edin.
 
+## 401 Unauthorized — Ana Kaynak
+
+**Belirti:** Login butonuna bastıktan sonra console'da "401 Unauthorized" görünüyor ve hemen login ekranına dönülüyor.
+
+**Gerçek sebep:** 401 **backend'den** (Fly.io) geliyor. Akış:
+1. Giriş başarılı → `window.location.href = "/"` ile dashboard'a yönleniyorsun
+2. Dashboard `/api/performance`, `/api/pending` vb. çağırıyor
+3. Backend token'ı doğrulayamıyor → 401 dönüyor
+4. Frontend 401'de sign out + `/login` redirect yapıyor
+
+**Debug adımları:**
+1. Console'da `[Auth 401] Backend token reddetti. Detail: ...` mesajına bak — `Missing authorization header` mı, `Invalid or expired token` mı?
+2. `https://swing-trade.fly.dev/api/auth/status` aç — `auth_configured: true`, `cors_origins_count > 0` olmalı
+3. Fly.io logs: `fly logs` — "Auth 401: Missing..." veya "Auth 401: Token rejected..." satırlarını ara
+
+**Çözüm:** Bölüm 1 (CORS) ve Bölüm 4 (Fly.io secrets) mutlaka doğrulanmalı.
+
+---
+
 ## Custom Domain vs Deployment URL
 
 **Belirti:** `https://swing-trade-p7lczngci-yigit033s-projects.vercel.app` üzerinden giriş çalışıyor, ama `https://swingtrade.vercel.app` üzerinden giriş sonrası tekrar login'e atıyor.
@@ -79,27 +98,30 @@ fly secrets set CORS_ORIGINS="https://swingtrade.vercel.app,https://www.swingtra
 
 ---
 
-## 4. Fly.io Auth Secrets
+## 4. Fly.io Auth Secrets (401'in En Sık Sebebi)
 
-**Kontrol:** Backend'de auth env'leri set mi?
+**Kontrol:** Backend token doğrulaması için bu secret'lar **zorunlu**:
 
 ```powershell
 fly secrets list
 ```
 
 Şunlar olmalı:
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
-- `SUPABASE_JWT_SECRET`
-- `CORS_ORIGINS`
-- `DATABASE_URL`
+- `SUPABASE_URL` — Supabase proje URL (örn. `https://xxx.supabase.co`)
+- `SUPABASE_ANON_KEY` — Frontend ile **aynı** anon key (Supabase Dashboard → Settings → API)
+- `SUPABASE_JWT_SECRET` — Supabase Dashboard → Settings → API → **JWT Secret** (JWT Settings bölümü)
+- `CORS_ORIGINS` — `https://swingtrade.vercel.app` (virgülle birden fazla eklenebilir)
+- `DATABASE_URL` — PostgreSQL connection string
+
+**JWT Secret nerede?** Supabase Dashboard → Project Settings → API → "JWT Settings" → "JWT Secret" (uzun string). Bu değer token imzasını doğrulamak için kullanılır; yanlışsa backend 401 döner.
 
 Eksikse:
 ```powershell
 fly secrets set SUPABASE_URL="https://xxx.supabase.co"
 fly secrets set SUPABASE_ANON_KEY="eyJhbG..."
-fly secrets set SUPABASE_JWT_SECRET="..."
+fly secrets set SUPABASE_JWT_SECRET="your-jwt-secret-from-supabase-dashboard"
 fly secrets set CORS_ORIGINS="https://swingtrade.vercel.app"
+fly deploy
 ```
 
 ---

@@ -93,8 +93,9 @@ export default function LoginPage() {
         return;
       }
       if (data.user) {
-        // Production'da client-side nav cookie'leri gecikmeli gönderebilir.
+        // Cookie'lerin browser'a yazılması için kısa bekleme (401 redirect loop önlemi).
         // Full page redirect ile session kesin sunucuya ulaşır.
+        await new Promise((r) => setTimeout(r, 250));
         window.location.href = "/";
       }
     } catch (err) {

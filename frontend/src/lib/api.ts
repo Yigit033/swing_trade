@@ -32,6 +32,16 @@ api.interceptors.response.use(
     async (err) => {
         if (typeof window !== "undefined" && err?.response?.status === 401) {
             const hadToken = !!err?.config?.headers?.Authorization;
+            // Debug: 401 sebebini logla (Fly.io logs + backend auth_configured kontrolü)
+            if (hadToken) {
+                const detail = err?.response?.data?.detail ?? "unknown";
+                console.error(
+                    "[Auth 401] Backend token reddetti.",
+                    "URL:", err?.config?.url,
+                    "Detail:", detail,
+                    "→ Fly.io logs kontrol et, CORS_ORIGINS + SUPABASE_* secrets doğrula"
+                );
+            }
             if (hadToken) {
                 try {
                     const { createSupabaseClient } = await import("@/lib/supabase/client");

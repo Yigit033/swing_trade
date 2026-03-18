@@ -72,3 +72,17 @@ app.include_router(regime.router)
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "version": "2.1.0"}
+
+
+@app.get("/api/auth/status")
+async def auth_status():
+    """Auth config check — 401 debug için. CORS + secrets doğrulama."""
+    import api.auth as auth_mod
+    return {
+        "auth_configured": bool(
+            (auth_mod.SUPABASE_URL and auth_mod.SUPABASE_ANON_KEY) or auth_mod.SUPABASE_JWT_SECRET
+        ),
+        "has_supabase_url": bool(auth_mod.SUPABASE_URL),
+        "has_jwt_secret": bool(auth_mod.SUPABASE_JWT_SECRET),
+        "cors_origins_count": len(_origins),
+    }
