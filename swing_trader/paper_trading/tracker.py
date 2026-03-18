@@ -424,7 +424,7 @@ class PaperTradeTracker:
         
         return self.storage.add_trade(trade, user_id)
     
-    def confirm_pending_trades(self) -> List[Dict]:
+    def confirm_pending_trades(self, user_id: Optional[str] = None) -> List[Dict]:
         """
         Confirm PENDING trades at next-day Open price.
         

@@ -36,12 +36,17 @@ app = FastAPI(
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """500 hatalarını logla; CORS middleware düzgün yanıt verebilsin."""
+    """500 hatalarını logla; CORS header'ları ekle (500'de CORS hatası önlemi)."""
     logger.exception("Unhandled exception: %s", exc)
-    return JSONResponse(
+    origin = request.headers.get("origin")
+    resp = JSONResponse(
         status_code=500,
         content={"detail": "Internal server error", "type": type(exc).__name__},
     )
+    if origin and origin in _origins:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+    return resp
 
 
 # CORS — credentials=true için "*" kullanılamaz, localhost açıkça eklenmeli
