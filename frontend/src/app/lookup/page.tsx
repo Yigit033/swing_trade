@@ -73,10 +73,10 @@ function Icon({ passed, muted }: { passed?: boolean; muted?: boolean }) {
 
 function DetailRow({ icon, label, reason, warn }: { icon: boolean; label: string; reason: string; warn?: boolean }) {
     return (
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "5px 0", borderBottom: "1px solid var(--border-muted)" }}>
+        <div className="lookup-detail-row">
             <Icon passed={icon} />
-            <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)", minWidth: 180, flexShrink: 0 }}>{label}</span>
-            <span style={{ fontSize: "0.8rem", color: icon ? "var(--text-muted)" : warn !== false ? "var(--red)" : "var(--text-secondary)", fontWeight: icon ? 400 : 600 }}>{reason}</span>
+            <span className="lookup-detail-label">{label}</span>
+            <span className="lookup-detail-reason" style={{ color: icon ? "var(--text-muted)" : warn !== false ? "var(--red)" : "var(--text-secondary)", fontWeight: icon ? 400 : 600 }}>{reason}</span>
         </div>
     );
 }
@@ -84,8 +84,9 @@ function DetailRow({ icon, label, reason, warn }: { icon: boolean; label: string
 function StageRow({ label, passed, muted }: { label: string; passed?: boolean; muted?: boolean }) {
     const color = muted ? "var(--text-muted)" : passed ? "var(--green)" : "var(--red)";
     return (
-        <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: "0.82rem", color, opacity: muted ? 0.45 : 1, marginBottom: 3 }}>
-            <Icon passed={passed} muted={muted} /> {label}
+        <div className="lookup-stage-row" style={{ color, opacity: muted ? 0.45 : 1 }}>
+            <Icon passed={passed} muted={muted} />
+            <span className="lookup-stage-label">{label}</span>
         </div>
     );
 }
@@ -108,24 +109,21 @@ function ResultCard({ r, onAdd, adding }: { r: AnalysisResult; onAdd: (r: Analys
         <div className="glass-card" style={{ marginBottom: 16, overflow: "hidden" }}>
             {/* Header row */}
             <div
+                className="lookup-card-header"
                 style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    padding: "14px 20px", cursor: "pointer",
                     background: isSignal ? "rgba(34,197,94,0.06)" : isError ? "rgba(245,158,11,0.06)" : "rgba(239,68,68,0.06)",
                     borderBottom: open ? "1px solid var(--border-muted)" : "none",
                 }}
                 onClick={() => setOpen(o => !o)}
             >
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <span style={{ color: isSignal ? "var(--green)" : isError ? "var(--yellow)" : "var(--red)", display: "flex" }}>
+                <div className="lookup-card-header-main">
+                    <span style={{ color: isSignal ? "var(--green)" : isError ? "var(--yellow)" : "var(--red)", display: "flex", flexShrink: 0 }}>
                         {isSignal ? <CheckCircle size={20} /> : <XCircle size={20} />}
                     </span>
-                    <div>
-                        <div style={{ fontWeight: 800, fontSize: "1.05rem" }}>
-                            {r.ticker}
-                            <span style={{ fontWeight: 400, fontSize: "0.78rem", color: "var(--text-muted)", marginLeft: 10 }}>
-                                {r.company_name} | {r.sector}
-                            </span>
+                    <div className="lookup-card-header-info">
+                        <div className="lookup-card-title">
+                            <span>{r.ticker}</span>
+                            <span className="lookup-card-subtitle">{r.company_name} | {r.sector}</span>
                         </div>
                         <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.05em", marginTop: 2, color: isSignal ? "var(--green)" : isError ? "var(--yellow)" : "var(--red)" }}>
                             {isSignal ? "✅ SWING HAZIR" : isError ? `⚠️ HATA — ${r.message}` : "❌ SWING HAZIR DEĞİL"}
@@ -133,7 +131,7 @@ function ResultCard({ r, onAdd, adding }: { r: AnalysisResult; onAdd: (r: Analys
                     </div>
                 </div>
                 {/* Quick metrics */}
-                <div style={{ display: "flex", gap: 18, alignItems: "center" }}>
+                <div className="lookup-card-metrics">
                     {[
                         { label: "STRATEJİ", value: r.strategy || "SmallCap" },
                         { label: "RSI", value: `${rsi.toFixed(0)} ${rsi < 30 ? "🟢" : rsi > 70 ? "🔴" : "⚪"}` },
@@ -141,12 +139,12 @@ function ResultCard({ r, onAdd, adding }: { r: AnalysisResult; onAdd: (r: Analys
                         { label: "FLOAT", value: `${floatM}M` },
                         { label: "M.CAP", value: `$${mcapB}B` },
                     ].map(({ label, value }) => (
-                        <div key={label} style={{ textAlign: "right", fontSize: "0.7rem" }}>
+                        <div key={label} className="lookup-metric-item">
                             <div style={{ color: "var(--text-muted)" }}>{label}</div>
                             <div style={{ color: "var(--text-secondary)", fontWeight: 700 }}>{value}</div>
                         </div>
                     ))}
-                    <span style={{ color: "var(--text-muted)", display: "flex" }}>
+                    <span style={{ color: "var(--text-muted)", display: "flex", flexShrink: 0 }}>
                         {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                     </span>
                 </div>
@@ -258,10 +256,10 @@ function ResultCard({ r, onAdd, adding }: { r: AnalysisResult; onAdd: (r: Analys
                                         v.distance !== undefined ? `${(v.distance ?? 0) >= 0 ? "+" : ""}${(v.distance ?? 0).toFixed(1)}% uzaklık` :
                                             v.value !== undefined ? String(v.value) : "";
                                     return (
-                                        <div key={k} style={{ display: "flex", gap: 10, alignItems: "center", padding: "5px 0", borderBottom: "1px solid var(--border-muted)", fontSize: "0.8rem" }}>
+                                        <div key={k} className="lookup-detail-row">
                                             <Icon passed={passed === undefined ? undefined : passed} muted={passed === undefined} />
-                                            <span style={{ color: "var(--text-secondary)", minWidth: 200 }}>{label}</span>
-                                            <span style={{ color: passed === false ? "var(--red)" : "var(--text-muted)" }}>{detail}</span>
+                                            <span className="lookup-detail-label">{label}</span>
+                                            <span className="lookup-detail-reason" style={{ color: passed === false ? "var(--red)" : "var(--text-muted)" }}>{detail}</span>
                                         </div>
                                     );
                                 })}

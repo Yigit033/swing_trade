@@ -268,6 +268,90 @@ body {
 .chat-user { align-self: flex-end; background: rgba(59,130,246,0.2); border: 1px solid rgba(59,130,246,0.3); border-radius: 14px 14px 4px 14px; padding: 10px 14px; max-width: 80%; }
 .chat-ai   { align-self: flex-start; background: rgba(26,34,53,0.8); border: 1px solid var(--border); border-radius: 14px 14px 14px 4px; padding: 10px 14px; max-width: 80%; }
 
+/* Manual Lookup — responsive detail rows & cards */
+.lookup-detail-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-muted);
+  font-size: 0.8rem;
+}
+.lookup-detail-label {
+  min-width: 140px;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+.lookup-detail-reason {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+.lookup-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  cursor: pointer;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.lookup-card-header-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+.lookup-card-header-info {
+  min-width: 0;
+  flex: 1;
+}
+.lookup-card-title {
+  font-weight: 800;
+  font-size: 1.05rem;
+}
+.lookup-card-subtitle {
+  font-weight: 400;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-left: 10px;
+}
+.lookup-card-metrics {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.lookup-metric-item {
+  text-align: right;
+  font-size: 0.7rem;
+}
+.lookup-stage-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 0.82rem;
+  margin-bottom: 3px;
+}
+.lookup-stage-label {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+@media (max-width: 768px) {
+  .lookup-detail-row { flex-wrap: wrap; }
+  .lookup-detail-label { min-width: 100%; }
+  .lookup-detail-reason { width: 100%; padding-left: 24px; }
+  .lookup-card-header { flex-direction: column; align-items: stretch; }
+  .lookup-card-header-main { flex: none; }
+  .lookup-card-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+  .lookup-card-subtitle { margin-left: 0; flex-basis: 100%; font-size: 0.72rem; }
+  .lookup-card-metrics { justify-content: flex-start; gap: 12px; }
+}
+
 /* Chart cards — responsive container for Recharts */
 .chart-card {
   padding: 20px;
