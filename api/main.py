@@ -1,4 +1,4 @@
-﻿"""
+"""
 FastAPI Backend — Swing Trade AI Dashboard
 Serves as the API layer between Next.js frontend and Python trading engine.
 """
@@ -31,10 +31,12 @@ app = FastAPI(
     version="2.1.0",
 )
 
-# CORS — allow Next.js dev server and production Vercel domain
+# CORS — CORS_ORIGINS env var or "*" for dev
+_cors_origins = _os.environ.get("CORS_ORIGINS", "*")
+_origins = [o.strip() for o in _cors_origins.split(",") if o.strip()] if _cors_origins != "*" else ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten to specific domains in production if needed
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

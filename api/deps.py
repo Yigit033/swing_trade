@@ -14,8 +14,11 @@ CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
 
 @lru_cache(maxsize=1)
 def get_config() -> dict:
+    if not CONFIG_PATH.exists():
+        logger.warning(f"config.yaml not found at {CONFIG_PATH}, using defaults")
+        return {}
     with open(CONFIG_PATH, "r") as f:
-        return yaml.safe_load(f)
+        return yaml.safe_load(f) or {}
 
 
 @lru_cache(maxsize=1)

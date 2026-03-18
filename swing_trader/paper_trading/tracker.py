@@ -441,29 +441,43 @@ class PaperTradeTracker:
         open_trades = self.storage.get_open_trades()  # Includes PENDING
         pending = [t for t in open_trades if t.get('status') == 'PENDING']
         
+        today_str = datetime.now().strftime('%Y-%m-%d')
         for trade in pending:
             ticker = trade['ticker']
             signal_price = trade.get('signal_price') or trade['entry_price']
             signal_date = trade['entry_date'][:10]  # sadece YYYY-MM-DD kısmı
             trade_id = trade['id']
             
-            # Fetch price data after signal date
+            # Fetch price data: wider range to handle weekends, holidays, and signal_date = today
             try:
-                start = datetime.strptime(signal_date, '%Y-%m-%d')
-                price_data = self.fetch_price_history(
-                    ticker, 
-                    signal_date,
-                    (start + timedelta(days=5)).strftime('%Y-%m-%d')
-                )
+                start_dt = datetime.strptime(signal_date, '%Y-%m-%d')
+                fetch_start = (start_dt - timedelta(days=10)).strftime('%Y-%m-%d')
+                fetch_end = (start_dt + timedelta(days=15)).strftime('%Y-%m-%d')
+                price_data = self.fetch_price_history(ticker, fetch_start, fetch_end)
                 
-                if price_data is None or len(price_data) < 2:
-                    # No next-day data yet — keep as PENDING
+                if price_data is None or len(price_data) == 0:
+                    logger.warning(
+                        f"[{ticker}] PENDING kalıyor: yfinance veri döndürmedi "
+                        f"(signal_date={signal_date})"
+                    )
                     trade['confirm_status'] = 'waiting'
                     results.append(trade)
                     continue
                 
-                # Get the next trading day's Open
-                next_day = price_data.iloc[1]
+                # Find first trading day AFTER signal_date (next-day Open)
+                signal_dt = start_dt.date() if hasattr(start_dt, 'date') else start_dt
+                next_days = price_data[price_data['Date'] > signal_dt]
+                
+                if len(next_days) == 0:
+                    logger.info(
+                        f"[{ticker}] PENDING kalıyor: signal_date={signal_date} sonrası henüz işlem günü yok "
+                        f"(bugün son veri: {today_str})"
+                    )
+                    trade['confirm_status'] = 'waiting'
+                    results.append(trade)
+                    continue
+                
+                next_day = next_days.iloc[0]
                 open_price = float(next_day['Open'])
                 entry_date = str(next_day['Date']).split(' ')[0] + f' {NYSE_OPEN_TIME}'  # NYSE open (ET)
                 

@@ -92,7 +92,19 @@ class SignalTrainer:
             f"ROC-AUC: {metrics['roc_auc']:.3f}"
         )
 
-        return {"success": True, **metrics}
+        # JSON NaN desteklemediği için API yanıtında nan → 0.0
+        result = {"success": True, **metrics}
+        return self._sanitize_for_json(result)
+
+    def _sanitize_for_json(self, obj):
+        """Recursively replace nan/inf with 0.0 so JSON serialization works."""
+        if isinstance(obj, dict):
+            return {k: self._sanitize_for_json(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [self._sanitize_for_json(x) for x in obj]
+        if isinstance(obj, float) and (np.isnan(obj) or np.isinf(obj)):
+            return 0.0
+        return obj
 
     # ─────────────────────────────────────────────────────────────────
     # ADIM 1: Veri Yükleme
@@ -250,16 +262,28 @@ class SignalTrainer:
         y_prob = model.predict_proba(X_test)[:, 1]  # WIN olasılıkları
 
         acc = accuracy_score(y_test, y_pred)
-        auc = roc_auc_score(y_test, y_prob)
+        try:
+            auc = roc_auc_score(y_test, y_prob)
+        except ValueError:
+            auc = 0.0  # Tek sınıf varsa ROC-AUC tanımsız
+        if np.isnan(auc):
+            auc = 0.0
         f1 = f1_score(y_test, y_pred, zero_division=0)
         cm = confusion_matrix(y_test, y_pred).tolist()
+
+        cv_mean = float(np.nanmean(cv_scores)) if len(cv_scores) else 0.0
+        cv_std = float(np.nanstd(cv_scores)) if len(cv_scores) else 0.0
+        if np.isnan(cv_mean):
+            cv_mean = 0.0
+        if np.isnan(cv_std):
+            cv_std = 0.0
 
         return {
             "accuracy": round(acc, 4),
             "roc_auc": round(auc, 4),
             "f1": round(f1, 4),
-            "cv_roc_auc_mean": round(float(cv_scores.mean()), 4),
-            "cv_roc_auc_std": round(float(cv_scores.std()), 4),
+            "cv_roc_auc_mean": round(cv_mean, 4),
+            "cv_roc_auc_std": round(cv_std, 4),
             "confusion_matrix": cm,
         }
 
@@ -283,12 +307,12 @@ class SignalTrainer:
         # Model kaydet
         joblib.dump(model, MODEL_PATH)
 
-        # Metadata kaydet
-        meta = {
+        # Metadata kaydet (nan → 0.0, JSON uyumluluğu için)
+        meta = self._sanitize_for_json({
             "trained_at": datetime.now().isoformat(),
             "model_path": str(MODEL_PATH),
             **metrics
-        }
+        })
         with open(META_PATH, "w") as f:
             json.dump(meta, f, indent=2)
 

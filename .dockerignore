@@ -1,32 +1,37 @@
-# Docker için ignore listesi
+# Git
+.git
+.gitignore
+
+# Python
+venv/
+.venv/
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-.Python
-venv/
-env/
+.pytest_cache/
+.mypy_cache/
+
+# Node / Frontend (backend only — deploy frontend to Vercel separately)
+frontend/
+**/node_modules/
+
+# Env & secrets
 .env
-*.env
+.env.*
+!.env.example
 
-# Yerel SQLite DB (PostgreSQL kullanacağız)
+# Data & DB (use DATABASE_URL in prod)
+*.db
+*.sqlite
 data/*.db
-
-# Geliştirme araçları
-.git/
-.gitignore
-*.md
-!README.md
-logs/
-output/
-*.log
-
-# Test dosyaları
-*_test.py
-test_*.py
-tests/
+data/*.csv
+*.pkl
 
 # IDE
 .vscode/
 .idea/
-*.swp
+.cursorrules
+
+# Docs & misc
+*.md
+!README.md
+*.bat

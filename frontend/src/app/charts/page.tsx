@@ -1,5 +1,5 @@
 "use client";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import {
@@ -33,7 +33,7 @@ const CTooltip = ({ active, payload, label }: any) => {
     );
 };
 
-export default function ChartsPage() {
+function ChartsContent() {
     const searchParams = useSearchParams();
     const [ticker, setTicker] = useState(searchParams.get("ticker")?.toUpperCase() || "AAPL");
     const [period, setPeriod] = useState("3mo");
@@ -247,5 +247,13 @@ export default function ChartsPage() {
                 </>
             )}
         </div>
+    );
+}
+
+export default function ChartsPage() {
+    return (
+        <Suspense fallback={<div className="glass-card" style={{ padding: 60, textAlign: "center" }}><span className="spinner" /></div>}>
+            <ChartsContent />
+        </Suspense>
     );
 }

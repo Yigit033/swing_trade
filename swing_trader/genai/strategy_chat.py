@@ -94,10 +94,12 @@ class StrategyChat:
             prompt = build_strategy_chat_prompt(question, context)
 
             # 4. LLM'e gönder
+            # max_tokens: Detaylı analiz/özet için yeterli olmalı (1200 → 3000)
+            # Önceki değer yanıtları "bu tipten gel" gibi yarıda kesiyordu
             answer = self.client.complete(
                 prompt=prompt,
                 system_prompt=STRATEGY_CHAT_SYSTEM,
-                max_tokens=1200,
+                max_tokens=3000,
                 temperature=0.3,   # Düşük — veriyle tutarlı cevap istiyoruz
             )
 

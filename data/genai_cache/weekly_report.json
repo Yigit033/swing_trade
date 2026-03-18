@@ -1,9 +1,9 @@
 {
-  "report": "# 🤖 AI Haftalık Performans Raporu\n*2026-03-03 — 2026-03-10 | Oluşturuldu: 10 Mar 2026 00:37*\n\n---\n\n# Haftalık Performans Raporu (2026-03-03 - 2026-03-10)\n\n## Haftalık Özet\n\nBu hafta (2026-03-03 - 2026-",
-  "generated_at": "2026-03-10 00:37",
+  "report": "# 🤖 AI Haftalık Performans Raporu\n*2026-03-09 — 2026-03-16 | Oluşturuldu: 16 Mar 2026 21:28*\n\n---\n\nProfesyonel Swing Trading Performans Raporu\n\n**Dönem:** 2026-03-09 - 2026-03-16\n\n## Haftalık Özet\n\nBu hafta paper trading sistemi, iki işlemle kapanış yaparak toplam",
+  "generated_at": "2026-03-16 21:28",
   "period": {
-    "start": "2026-03-03",
-    "end": "2026-03-10",
+    "start": "2026-03-09",
+    "end": "2026-03-16",
     "label": "7 günlük dönem"
   },
   "summary": {
@@ -11,10 +11,10 @@
     "wins": 0,
     "losses": 2,
     "win_rate": 0.0,
-    "avg_pnl_pct": -2.08,
-    "total_pnl_pct": -4.15,
+    "avg_pnl_pct": -6.23,
+    "total_pnl_pct": -12.47,
     "avg_win_pct": 0,
-    "avg_loss_pct": -2.08,
+    "avg_loss_pct": -6.23,
     "profit_factor": 0.0
   }
 }
