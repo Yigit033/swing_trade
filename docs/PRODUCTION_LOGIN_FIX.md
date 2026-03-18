@@ -2,9 +2,35 @@
 
 Local'de çalışıyor, production'da (https://swingtrade.vercel.app) giriş sonrası tekrar login'e atıyorsa, aşağıdaki adımları kontrol edin.
 
+## Custom Domain vs Deployment URL
+
+**Belirti:** `https://swing-trade-p7lczngci-yigit033s-projects.vercel.app` üzerinden giriş çalışıyor, ama `https://swingtrade.vercel.app` üzerinden giriş sonrası tekrar login'e atıyor.
+
+**Neden:** İki farklı origin. Cookie'ler domain'e göre izole; deployment URL'de set edilen cookie'ler custom domain'e gönderilmez. Ayrıca Vercel CDN, auth-dependent yanıtları (ör. `/` → `/login` redirect) cache'leyebilir; cookie'siz ilk istek cache'lenirse, cookie'li sonraki istekler aynı redirect'i alır.
+
+**Yapılan düzeltmeler:**
+- Middleware: Tüm auth-dependent yanıtlara `Cache-Control: private, no-store` ve `Vercel-CDN-Cache-Control: max-age=0` eklendi.
+- `next.config.ts`: Root ve korumalı path'ler için no-cache headers tanımlandı.
+
+**Önemli:** Her zaman **custom domain** (`swingtrade.vercel.app`) üzerinden test edin. Deployment URL sadece preview için kullanılır.
+
+---
+
 ## Kod Düzeltmesi (Yapıldı)
 
 Login sonrası `router.push("/")` yerine `window.location.href = "/"` kullanılıyor. Client-side navigation production'da cookie'leri gecikmeli gönderebiliyor; full page redirect ile session kesin sunucuya ulaşır.
+
+---
+
+## Vercel Framework Settings Uyarısı
+
+"Configuration Settings in the current Production deployment differ from your current Project Settings" uyarısı görüyorsan:
+
+1. Vercel Dashboard → Project → **Settings** → **General**
+2. **Framework Preset:** Next.js olmalı
+3. **Build Command:** Override kapalıysa `npm run build` kullanılır
+4. Production Overrides ile proje ayarları uyuşmuyorsa, Overrides'ı kaldır veya proje ayarlarıyla eşleştir
+5. Değişiklikten sonra **Redeploy** yap
 
 ---
 

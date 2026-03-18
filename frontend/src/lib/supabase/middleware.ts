@@ -4,6 +4,13 @@ import { NextResponse, type NextRequest } from "next/server";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
+/** CDN'ın auth-dependent yanıtları cache'lemesini engeller. */
+function noCache(res: NextResponse): NextResponse {
+  res.headers.set("Cache-Control", "private, no-store, must-revalidate");
+  res.headers.set("Vercel-CDN-Cache-Control", "max-age=0");
+  return res;
+}
+
 export async function updateSession(request: NextRequest) {
   if (!supabaseUrl || !supabaseAnonKey) {
     return NextResponse.next();
@@ -32,7 +39,7 @@ export async function updateSession(request: NextRequest) {
 
   // Allow /login even when logged in — user can sign out from there
   if (user && isAuthPage) {
-    return NextResponse.redirect(new URL("/", request.url));
+    return noCache(NextResponse.redirect(new URL("/", request.url)));
   }
 
   if (!user && !isLoginPage && !isAuthPage) {
@@ -41,9 +48,9 @@ export async function updateSession(request: NextRequest) {
       (p) => p === request.nextUrl.pathname || (p !== "/" && request.nextUrl.pathname.startsWith(p))
     );
     if (isProtected) {
-      return NextResponse.redirect(new URL("/login", request.url));
+      return noCache(NextResponse.redirect(new URL("/login", request.url)));
     }
   }
 
-  return response;
+  return noCache(response);
 }
