@@ -3,8 +3,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
     LayoutDashboard, Search, TrendingUp, Clock, BarChart3,
-    LineChart, MessageSquare, Zap, FlaskConical,
+    LineChart, MessageSquare, Zap, FlaskConical, X,
 } from "lucide-react";
+
+interface SidebarProps {
+    isOpen?: boolean;
+    onClose?: () => void;
+    isMobile?: boolean;
+}
 
 const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -18,13 +24,13 @@ const navItems = [
     { href: "/chat", label: "AI Chat", icon: MessageSquare },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen = false, onClose, isMobile = false }: SidebarProps) {
     const pathname = usePathname();
 
     return (
-        <aside className="sidebar">
+        <aside className={`sidebar ${isMobile && isOpen ? "sidebar-open" : ""}`}>
             {/* Logo */}
-            <div style={{ padding: "20px 18px 16px", borderBottom: "1px solid var(--border)" }}>
+            <div style={{ padding: "20px 18px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                     <div style={{
                         width: 36, height: 36, borderRadius: 10,
@@ -41,6 +47,11 @@ export default function Sidebar() {
                         </div>
                     </div>
                 </div>
+                {isMobile && onClose && (
+                    <button type="button" onClick={onClose} aria-label="Close menu" className="sidebar-close-btn">
+                        <X size={20} />
+                    </button>
+                )}
             </div>
 
             {/* Live indicator */}
@@ -56,7 +67,7 @@ export default function Sidebar() {
                 {navItems.map(({ href, label, icon: Icon }) => {
                     const active = pathname === href || (href !== "/" && pathname.startsWith(href));
                     return (
-                        <Link key={href} href={href} className={`sidebar-nav-item ${active ? "active" : ""}`}>
+                        <Link key={href} href={href} className={`sidebar-nav-item ${active ? "active" : ""}`} onClick={isMobile ? onClose : undefined}>
                             <Icon size={16} />
                             <span>{label}</span>
                             {active && (

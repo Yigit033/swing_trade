@@ -285,11 +285,12 @@ export default function BacktestPage() {
 
                             {/* Equity curve */}
                             {eqData.length > 0 && (
-                                <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
+                                <div className="glass-card chart-card">
                                     <div style={{ fontWeight: 700, marginBottom: 14, fontSize: "0.85rem" }}>
                                         📈 Equity Curve (Portföy Değeri)
                                     </div>
-                                    <ResponsiveContainer width="100%" height={260}>
+                                    <div className="chart-container">
+                                    <ResponsiveContainer width="100%" height={260} minHeight={200}>
                                         <ComposedChart data={eqData}>
                                             <defs>
                                                 <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
@@ -305,16 +306,18 @@ export default function BacktestPage() {
                                             <Area type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} fill="url(#eqGrad)" name="Portföy" />
                                         </ComposedChart>
                                     </ResponsiveContainer>
+                                    </div>
                                 </div>
                             )}
 
                             {/* Trade P&L bars */}
                             {tradeData.length > 0 && (
-                                <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
+                                <div className="glass-card chart-card">
                                     <div style={{ fontWeight: 700, marginBottom: 14, fontSize: "0.85rem" }}>
                                         📊 Trade P/L (Son {tradeData.length})
                                     </div>
-                                    <ResponsiveContainer width="100%" height={160}>
+                                    <div className="chart-container">
+                                    <ResponsiveContainer width="100%" height={160} minHeight={140}>
                                         <ComposedChart data={tradeData}>
                                             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                                             <XAxis dataKey="ticker" tick={{ fill: "var(--text-muted)", fontSize: 9 }} />
@@ -328,6 +331,7 @@ export default function BacktestPage() {
                                             </Bar>
                                         </ComposedChart>
                                     </ResponsiveContainer>
+                                    </div>
                                 </div>
                             )}
 

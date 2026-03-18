@@ -4,6 +4,49 @@
 
 ---
 
+## ☁️ Bulut Kullanımı — Cold Start ve Limitler
+
+### Uygulama tam olarak lokaldeki gibi çalışır mı?
+**Evet.** Backend (Fly.io), frontend (Vercel) ve veritabanı (Supabase) birlikte lokaldekiyle aynı işlevselliği sunar.
+
+### Cold start (ilk istek gecikmesi)
+Fly.io'da `min_machines_running = 0` kullanıldığı için makine boşta kalınca durur. İlk istek geldiğinde yeniden başlar:
+
+| Durum | Beklenen süre |
+|-------|----------------|
+| Makine uyandığında ilk API isteği | ~8–15 saniye |
+| Sonraki istekler | Normal (~100–300 ms) |
+
+**Çözüm (cold start’ı kaldırmak):** `fly.toml` içinde `min_machines_running = 1` yap. Bir makine sürekli açık kalır, ek maliyet ~$5–7/ay.
+
+### Maliyet ve "Dolmaması" İçin
+Fly.io artık geleneksel ücretsiz plan sunmuyor; **pay-as-you-go** kullanılıyor. Ancak:
+
+- **$5 altı faturalar iptal edilir** — Aylık kullanım $5'ın altındaysa ücret alınmaz.
+- **Senin kullanımın (min_machines_running = 0):**
+  - Makine boşta: ~$0.15/ay (rootfs)
+  - Çalışırken: shared-cpu-1x 1GB ≈ $0.0082/saat
+  - Örnek: Günde 10 dk kullanım ≈ 5 saat/ay ≈ $0.04
+  - **Toplam: ~$0.20–0.50/ay** → Fatura iptal, ücret yok
+
+**Dolmaması için:**
+- `min_machines_running = 0` kalsın (auto-stop açık)
+- `min_machines_running = 1` yapma (sürekli çalışır, ~$6/ay)
+- Gereksiz makine/volume oluşturma
+- **Vercel:** Ücretsiz plan yeterli
+- **Supabase:** Ücretsiz plan yeterli
+
+### Özet
+| Bileşen | Cold start | Not |
+|---------|------------|-----|
+| Backend (Fly.io) | Var (~8–15 sn) | `min_machines_running = 1` ile kaldırılabilir |
+| Frontend (Vercel) | Yok | Statik/SSR, hızlı |
+| Supabase | Yok | Her zaman açık |
+
+**Cold start'ı kaldırmak için:** `fly.toml` içinde `min_machines_running = 1` yap, sonra `fly deploy`.
+
+---
+
 ## 📌 Venv Ne Zaman Gerekli?
 
 | Adım | Venv gerekli mi? | Neden |

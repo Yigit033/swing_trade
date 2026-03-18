@@ -162,11 +162,12 @@ function ChartsContent() {
                     </div>
 
                     {/* Price + EMA Chart */}
-                    <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
+                    <div className="glass-card chart-card">
                         <div style={{ fontSize: "0.85rem", fontWeight: 700, marginBottom: 14, color: "var(--text-secondary)" }}>
                             📈 {ticker} Price · EMA 20 (blue) / EMA 50 (orange)
                         </div>
-                        <ResponsiveContainer width="100%" height={260}>
+                        <div className="chart-container">
+                        <ResponsiveContainer width="100%" height={260} minHeight={200}>
                             <ComposedChart data={priceData}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                                 <XAxis dataKey="date" tick={{ fill: "var(--text-muted)", fontSize: 10 }} interval="preserveStartEnd" />
@@ -181,14 +182,16 @@ function ChartsContent() {
                                 <Line type="monotone" dataKey="ema50" stroke="#f59e0b" strokeWidth={1.5} dot={false} strokeDasharray="4 2" name="EMA50" />
                             </ComposedChart>
                         </ResponsiveContainer>
+                        </div>
                     </div>
 
                     {/* RSI Chart */}
-                    <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
+                    <div className="glass-card chart-card">
                         <div style={{ fontSize: "0.85rem", fontWeight: 700, marginBottom: 14, color: "var(--text-secondary)" }}>
                             📊 RSI (14) · Overbought: 70 · Oversold: 30
                         </div>
-                        <ResponsiveContainer width="100%" height={150}>
+                        <div className="chart-container">
+                        <ResponsiveContainer width="100%" height={150} minHeight={140}>
                             <ComposedChart data={data.map(d => ({ date: d.date?.slice(5), rsi: d.rsi }))}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                                 <XAxis dataKey="date" tick={{ fill: "var(--text-muted)", fontSize: 10 }} interval="preserveStartEnd" />
@@ -199,14 +202,16 @@ function ChartsContent() {
                                 <Line type="monotone" dataKey="rsi" stroke="#a855f7" strokeWidth={2} dot={false} name="RSI" />
                             </ComposedChart>
                         </ResponsiveContainer>
+                        </div>
                     </div>
 
                     {/* MACD Chart */}
-                    <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
+                    <div className="glass-card chart-card">
                         <div style={{ fontSize: "0.85rem", fontWeight: 700, marginBottom: 14, color: "var(--text-secondary)" }}>
                             📉 MACD (12/26/9) · Signal (orange) · Histogram (bars)
                         </div>
-                        <ResponsiveContainer width="100%" height={150}>
+                        <div className="chart-container">
+                        <ResponsiveContainer width="100%" height={150} minHeight={140}>
                             <ComposedChart data={data.map(d => ({ date: d.date?.slice(5), macd: d.macd, signal: d.macd_signal, hist: d.macd_hist }))}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                                 <XAxis dataKey="date" tick={{ fill: "var(--text-muted)", fontSize: 10 }} interval="preserveStartEnd" />
@@ -243,6 +248,7 @@ function ChartsContent() {
                                 <Line type="monotone" dataKey="vol_ma" stroke="#f59e0b" strokeWidth={1.5} dot={false} name="Vol MA" />
                             </ComposedChart>
                         </ResponsiveContainer>
+                        </div>
                     </div>
                 </>
             )}

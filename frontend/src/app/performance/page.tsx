@@ -178,9 +178,10 @@ export default function PerformancePage() {
                     </div>
 
                     {/* Cumulative PnL curve */}
-                    <div className="glass-card" style={{ padding: 22, marginBottom: 20 }}>
+                    <div className="glass-card chart-card">
                         <h3 style={{ margin: "0 0 20px", fontSize: "0.95rem", fontWeight: 700 }}>📈 Cumulative P&L ($)</h3>
-                        <ResponsiveContainer width="100%" height={220}>
+                        <div className="chart-container">
+                        <ResponsiveContainer width="100%" height={220} minHeight={180}>
                             <LineChart data={pnlCurve}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                                 <XAxis dataKey="date" tick={{ fill: "var(--text-muted)", fontSize: 11 }} />
@@ -190,12 +191,14 @@ export default function PerformancePage() {
                                 <Line type="monotone" dataKey="pnl" stroke="#3b82f6" strokeWidth={2} dot={false} />
                             </LineChart>
                         </ResponsiveContainer>
+                        </div>
                     </div>
 
                     {/* Per-trade P&L % bars */}
-                    <div className="glass-card" style={{ padding: 22, marginBottom: 20 }}>
+                    <div className="glass-card chart-card">
                         <h3 style={{ margin: "0 0 20px", fontSize: "0.95rem", fontWeight: 700 }}>📊 Per-Trade P&L % (Last 20)</h3>
-                        <ResponsiveContainer width="100%" height={200}>
+                        <div className="chart-container">
+                        <ResponsiveContainer width="100%" height={200} minHeight={160}>
                             <BarChart data={tradeBars}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                                 <XAxis dataKey="ticker" tick={{ fill: "var(--text-muted)", fontSize: 10 }} />
@@ -209,6 +212,7 @@ export default function PerformancePage() {
                                 </Bar>
                             </BarChart>
                         </ResponsiveContainer>
+                        </div>
                     </div>
 
                     {/* Closed Trade History */}
