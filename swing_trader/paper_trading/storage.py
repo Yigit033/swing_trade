@@ -74,6 +74,7 @@ def _rows_to_dicts(cursor, rows):
 _CREATE_TABLE_PG = """
 CREATE TABLE IF NOT EXISTS paper_trades (
     id              SERIAL PRIMARY KEY,
+    user_id         UUID,
     ticker          TEXT NOT NULL,
     entry_date      TEXT NOT NULL,
     entry_price     REAL NOT NULL,
@@ -104,6 +105,7 @@ CREATE TABLE IF NOT EXISTS paper_trades (
 _CREATE_TABLE_SQLITE = """
 CREATE TABLE IF NOT EXISTS paper_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT,
     ticker TEXT NOT NULL,
     entry_date TEXT NOT NULL,
     entry_price REAL NOT NULL,
@@ -160,6 +162,10 @@ class PaperTradeStorage:
 
     def _init_db(self):
         """Create table if not exists. Run migrations for both PG and SQLite."""
+        # Auth: user_id for multi-tenant (Supabase Auth)
+        auth_columns = [
+            ('user_id', 'UUID' if _MODE == "pg" and not self._override_path else 'TEXT'),
+        ]
         # v3 columns that may be missing from older schema
         v3_columns = [
             ('trailing_stop', 'REAL'),
@@ -180,6 +186,14 @@ class PaperTradeStorage:
 
             if _MODE == "pg" and not self._override_path:
                 cursor.execute(_CREATE_TABLE_PG)
+                # Auth: user_id column
+                for col_name, col_type in auth_columns:
+                    try:
+                        cursor.execute(
+                            f"ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
+                        )
+                    except Exception:
+                        pass
                 # PostgreSQL migrations for existing tables
                 for col_name, col_type in v3_columns:
                     try:
@@ -213,6 +227,11 @@ class PaperTradeStorage:
                 cursor.execute(_CREATE_TABLE_SQLITE)
                 # SQLite migrations for existing DBs
                 import sqlite3 as _sq
+                for col_name, col_type in auth_columns:
+                    try:
+                        cursor.execute(f"ALTER TABLE paper_trades ADD COLUMN {col_name} {col_type}")
+                    except _sq.OperationalError:
+                        pass
                 for col_name, col_type in v3_columns:
                     try:
                         cursor.execute(f"ALTER TABLE paper_trades ADD COLUMN {col_name} {col_type}")
@@ -248,7 +267,7 @@ class PaperTradeStorage:
 
     # ── CRUD ──────────────────────────────────────────────────────────────────
 
-    def add_trade(self, trade: Dict) -> int:
+    def add_trade(self, trade: Dict, user_id: Optional[str] = None) -> int:
         """Add a new paper trade. Returns trade ID."""
         ph = _ph()
 
@@ -276,23 +295,43 @@ class PaperTradeStorage:
             conn = self._get_conn()
             cursor = conn.cursor()
 
-            _cols = """(ticker, entry_date, entry_price, stop_loss, target,
-                     swing_type, quality_score, position_size, max_hold_days, notes,
-                     trailing_stop, initial_stop, atr, signal_price, status, target_2)"""
-            _vals = ",".join([ph] * 16)
-            _params = (
-                trade['ticker'], trade['entry_date'], trade['entry_price'],
-                trade['stop_loss'], trade['target'],
-                trade.get('swing_type', 'A'), trade.get('quality_score', 0),
-                trade.get('position_size', 100), trade.get('max_hold_days', 7),
-                trade.get('notes', ''),
-                trade.get('trailing_stop', trade['stop_loss']),
-                trade.get('initial_stop', trade['stop_loss']),
-                trade.get('atr', 0),
-                trade.get('signal_price', trade['entry_price']),
-                trade.get('status', 'OPEN'),
-                trade.get('target_2', trade['target']),
-            )
+            if user_id:
+                _cols = """(user_id, ticker, entry_date, entry_price, stop_loss, target,
+                         swing_type, quality_score, position_size, max_hold_days, notes,
+                         trailing_stop, initial_stop, atr, signal_price, status, target_2)"""
+                _vals = ",".join([ph] * 17)
+                _params = (
+                    user_id,
+                    trade['ticker'], trade['entry_date'], trade['entry_price'],
+                    trade['stop_loss'], trade['target'],
+                    trade.get('swing_type', 'A'), trade.get('quality_score', 0),
+                    trade.get('position_size', 100), trade.get('max_hold_days', 7),
+                    trade.get('notes', ''),
+                    trade.get('trailing_stop', trade['stop_loss']),
+                    trade.get('initial_stop', trade['stop_loss']),
+                    trade.get('atr', 0),
+                    trade.get('signal_price', trade['entry_price']),
+                    trade.get('status', 'OPEN'),
+                    trade.get('target_2', trade['target']),
+                )
+            else:
+                _cols = """(ticker, entry_date, entry_price, stop_loss, target,
+                         swing_type, quality_score, position_size, max_hold_days, notes,
+                         trailing_stop, initial_stop, atr, signal_price, status, target_2)"""
+                _vals = ",".join([ph] * 16)
+                _params = (
+                    trade['ticker'], trade['entry_date'], trade['entry_price'],
+                    trade['stop_loss'], trade['target'],
+                    trade.get('swing_type', 'A'), trade.get('quality_score', 0),
+                    trade.get('position_size', 100), trade.get('max_hold_days', 7),
+                    trade.get('notes', ''),
+                    trade.get('trailing_stop', trade['stop_loss']),
+                    trade.get('initial_stop', trade['stop_loss']),
+                    trade.get('atr', 0),
+                    trade.get('signal_price', trade['entry_price']),
+                    trade.get('status', 'OPEN'),
+                    trade.get('target_2', trade['target']),
+                )
 
             if _MODE == "pg" and not self._override_path:
                 cursor.execute(f"INSERT INTO paper_trades {_cols} VALUES ({_vals}) RETURNING id", _params)
@@ -312,17 +351,25 @@ class PaperTradeStorage:
             if conn:
                 conn.close()
 
-    def get_open_trades(self) -> List[Dict]:
+    def get_open_trades(self, user_id: Optional[str] = None) -> List[Dict]:
         """Get all OPEN and PENDING trades."""
+        ph = _ph()
         conn = None
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM paper_trades
-                WHERE status IN ('OPEN', 'PENDING')
-                ORDER BY entry_date DESC
-            """)
+            if user_id:
+                cursor.execute(f"""
+                    SELECT * FROM paper_trades
+                    WHERE status IN ('OPEN', 'PENDING') AND (user_id IS NULL OR user_id = {ph})
+                    ORDER BY entry_date DESC
+                """, (user_id,))
+            else:
+                cursor.execute("""
+                    SELECT * FROM paper_trades
+                    WHERE status IN ('OPEN', 'PENDING')
+                    ORDER BY entry_date DESC
+                """)
             rows = cursor.fetchall()
             return _rows_to_dicts(cursor, rows) if _MODE == "pg" and not self._override_path else [dict(r) for r in rows]
         except Exception as e:
@@ -332,19 +379,27 @@ class PaperTradeStorage:
             if conn:
                 conn.close()
 
-    def get_closed_trades(self, limit: int = 50) -> List[Dict]:
+    def get_closed_trades(self, limit: int = 50, user_id: Optional[str] = None) -> List[Dict]:
         """Get closed trades."""
         ph = _ph()
         conn = None
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT * FROM paper_trades
-                WHERE status NOT IN ('OPEN', 'PENDING')
-                ORDER BY exit_date DESC
-                LIMIT {ph}
-            """, (limit,))
+            if user_id:
+                cursor.execute(f"""
+                    SELECT * FROM paper_trades
+                    WHERE status NOT IN ('OPEN', 'PENDING') AND (user_id IS NULL OR user_id = {ph})
+                    ORDER BY exit_date DESC
+                    LIMIT {ph}
+                """, (user_id, limit))
+            else:
+                cursor.execute(f"""
+                    SELECT * FROM paper_trades
+                    WHERE status NOT IN ('OPEN', 'PENDING')
+                    ORDER BY exit_date DESC
+                    LIMIT {ph}
+                """, (limit,))
             rows = cursor.fetchall()
             return _rows_to_dicts(cursor, rows) if _MODE == "pg" and not self._override_path else [dict(r) for r in rows]
         except Exception as e:
@@ -354,13 +409,21 @@ class PaperTradeStorage:
             if conn:
                 conn.close()
 
-    def get_all_trades(self) -> List[Dict]:
+    def get_all_trades(self, user_id: Optional[str] = None) -> List[Dict]:
         """Get all trades."""
+        ph = _ph()
         conn = None
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM paper_trades ORDER BY entry_date DESC")
+            if user_id:
+                cursor.execute(f"""
+                    SELECT * FROM paper_trades
+                    WHERE user_id IS NULL OR user_id = {ph}
+                    ORDER BY entry_date DESC
+                """, (user_id,))
+            else:
+                cursor.execute("SELECT * FROM paper_trades ORDER BY entry_date DESC")
             rows = cursor.fetchall()
             return _rows_to_dicts(cursor, rows) if _MODE == "pg" and not self._override_path else [dict(r) for r in rows]
         except Exception as e:
@@ -433,14 +496,20 @@ class PaperTradeStorage:
         """
         return self._get_meta("last_price_update")
 
-    def get_trade_by_id(self, trade_id: int) -> Optional[Dict]:
+    def get_trade_by_id(self, trade_id: int, user_id: Optional[str] = None) -> Optional[Dict]:
         """Get a specific trade by ID."""
         ph = _ph()
         conn = None
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
-            cursor.execute(f"SELECT * FROM paper_trades WHERE id = {ph}", (trade_id,))
+            if user_id:
+                cursor.execute(f"""
+                    SELECT * FROM paper_trades
+                    WHERE id = {ph} AND (user_id IS NULL OR user_id = {ph})
+                """, (trade_id, user_id))
+            else:
+                cursor.execute(f"SELECT * FROM paper_trades WHERE id = {ph}", (trade_id,))
             row = cursor.fetchone()
             if row is None:
                 return None
@@ -455,7 +524,7 @@ class PaperTradeStorage:
             if conn:
                 conn.close()
 
-    def update_trade(self, trade_id: int, updates: Dict) -> bool:
+    def update_trade(self, trade_id: int, updates: Dict, user_id: Optional[str] = None) -> bool:
         """Update fields on a trade."""
         if not updates:
             return True
@@ -470,8 +539,11 @@ class PaperTradeStorage:
             set_clauses.append(f"updated_at = {ph}")
             values.append(datetime.now().isoformat())
             values.append(trade_id)
-
-            query = f"UPDATE paper_trades SET {', '.join(set_clauses)} WHERE id = {ph}"
+            if user_id:
+                values.append(user_id)
+                query = f"UPDATE paper_trades SET {', '.join(set_clauses)} WHERE id = {ph} AND (user_id IS NULL OR user_id = {ph})"
+            else:
+                query = f"UPDATE paper_trades SET {', '.join(set_clauses)} WHERE id = {ph}"
             cursor.execute(query, values)
             conn.commit()
             return True
@@ -488,7 +560,8 @@ class PaperTradeStorage:
         exit_price: float,
         exit_date: str,
         status: str,
-        notes: str = ""
+        notes: str = "",
+        user_id: Optional[str] = None,
     ) -> bool:
         """Close a paper trade and calculate P/L.
 
@@ -497,7 +570,7 @@ class PaperTradeStorage:
         combines partial + remaining position performance.
         """
         try:
-            trade = self.get_trade_by_id(trade_id)
+            trade = self.get_trade_by_id(trade_id, user_id)
             if not trade:
                 return False
             entry_price = trade['entry_price']
@@ -528,19 +601,25 @@ class PaperTradeStorage:
                 'realized_pnl': round(pnl, 2),
                 'realized_pnl_pct': round(pnl_pct, 2),
                 'notes': notes,
-            })
+            }, user_id)
         except Exception as e:
             logger.error(f"Error closing trade {trade_id}: {e}")
             return False
 
-    def delete_trade(self, trade_id: int) -> bool:
+    def delete_trade(self, trade_id: int, user_id: Optional[str] = None) -> bool:
         """Delete a trade permanently."""
         ph = _ph()
         conn = None
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
-            cursor.execute(f"DELETE FROM paper_trades WHERE id = {ph}", (trade_id,))
+            if user_id:
+                cursor.execute(f"""
+                    DELETE FROM paper_trades
+                    WHERE id = {ph} AND (user_id IS NULL OR user_id = {ph})
+                """, (trade_id, user_id))
+            else:
+                cursor.execute(f"DELETE FROM paper_trades WHERE id = {ph}", (trade_id,))
             conn.commit()
             logger.info(f"Deleted paper trade ID: {trade_id}")
             return True
@@ -551,18 +630,26 @@ class PaperTradeStorage:
             if conn:
                 conn.close()
 
-    def check_duplicate(self, ticker: str, entry_date: str) -> bool:
+    def check_duplicate(self, ticker: str, entry_date: str, user_id: Optional[str] = None) -> bool:
         """Return True if a PENDING/OPEN trade for this ticker+date already exists."""
         ph = _ph()
         conn = None
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT COUNT(*) FROM paper_trades
-                WHERE ticker = {ph} AND entry_date = {ph}
-                AND status IN ('OPEN', 'PENDING')
-            """, (ticker, entry_date))
+            if user_id:
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM paper_trades
+                    WHERE ticker = {ph} AND entry_date = {ph}
+                    AND status IN ('OPEN', 'PENDING')
+                    AND (user_id IS NULL OR user_id = {ph})
+                """, (ticker, entry_date, user_id))
+            else:
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM paper_trades
+                    WHERE ticker = {ph} AND entry_date = {ph}
+                    AND status IN ('OPEN', 'PENDING')
+                """, (ticker, entry_date))
             count = cursor.fetchone()[0]
             return count > 0
         except Exception as e:

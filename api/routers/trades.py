@@ -10,10 +10,11 @@ POST /api/trades/update-prices - fetch latest prices for all open trades
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from api.deps import get_paper_storage, get_paper_tracker
+from api.auth import get_current_user_id
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -97,9 +98,12 @@ def _enrich_open_trades_inline(trades: list) -> list:
 
 
 @router.get("")
-def list_trades(status: Optional[str] = Query(None)):
+def list_trades(
+    status: Optional[str] = Query(None),
+    user_id: Optional[str] = Depends(get_current_user_id),
+):
     storage = get_paper_storage()
-    all_trades = storage.get_all_trades() or []
+    all_trades = storage.get_all_trades(user_id) or []
     if status:
         all_trades = [t for t in all_trades if t.get("status") == status]
     # Enrich OPEN trades that have no current_price yet
@@ -108,7 +112,7 @@ def list_trades(status: Optional[str] = Query(None)):
 
 
 @router.get("/last-update")
-def last_update():
+def last_update(user_id: Optional[str] = Depends(get_current_user_id)):
     """
     Return the last time paper trades were updated (any field).
     
@@ -121,27 +125,33 @@ def last_update():
 
 
 @router.post("/update-prices")
-def update_prices():
+def update_prices(user_id: Optional[str] = Depends(get_current_user_id)):
     """Fetch latest prices and update all open/pending trades."""
     tracker = get_paper_tracker()
     storage = get_paper_storage()
-    updated = tracker.update_all_open_trades()
+    updated = tracker.update_all_open_trades(user_id)
     # Record that a price refresh was triggered (even if there were no open trades)
     storage.touch_last_price_update()
     return {"message": f"Updated {len(updated) if updated else 0} trades", "trades": updated or []}
 
 
 @router.get("/{trade_id}")
-def get_trade(trade_id: int):
+def get_trade(
+    trade_id: int,
+    user_id: Optional[str] = Depends(get_current_user_id),
+):
     storage = get_paper_storage()
-    trade = storage.get_trade_by_id(trade_id)
+    trade = storage.get_trade_by_id(trade_id, user_id)
     if not trade:
         raise HTTPException(status_code=404, detail="Trade not found")
     return trade
 
 
 @router.post("", status_code=201)
-def add_trade(body: TradeIn):
+def add_trade(
+    body: TradeIn,
+    user_id: Optional[str] = Depends(get_current_user_id),
+):
     storage = get_paper_storage()
     trade_dict = body.dict()
     if trade_dict["trailing_stop"] is None:
@@ -152,33 +162,44 @@ def add_trade(body: TradeIn):
         trade_dict["signal_price"] = trade_dict["entry_price"]
     if trade_dict["atr"] is None:
         trade_dict["atr"] = 0.0
-    trade_id = storage.add_trade(trade_dict)
+    trade_id = storage.add_trade(trade_dict, user_id)
     return {"id": trade_id, "message": "Trade added"}
 
 
 @router.patch("/{trade_id}")
-def update_trade(trade_id: int, updates: dict):
+def update_trade(
+    trade_id: int,
+    updates: dict,
+    user_id: Optional[str] = Depends(get_current_user_id),
+):
     storage = get_paper_storage()
-    ok = storage.update_trade(trade_id, updates)
+    ok = storage.update_trade(trade_id, updates, user_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Trade not found")
     return {"message": "Updated"}
 
 
 @router.delete("/{trade_id}")
-def delete_trade(trade_id: int):
+def delete_trade(
+    trade_id: int,
+    user_id: Optional[str] = Depends(get_current_user_id),
+):
     storage = get_paper_storage()
-    ok = storage.delete_trade(trade_id)
+    ok = storage.delete_trade(trade_id, user_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Trade not found")
     return {"message": "Deleted"}
 
 
 @router.post("/{trade_id}/close")
-def close_trade(trade_id: int, body: CloseTradeIn):
+def close_trade(
+    trade_id: int,
+    body: CloseTradeIn,
+    user_id: Optional[str] = Depends(get_current_user_id),
+):
     """Manually close a trade. Tracker sets status=MANUAL and calculates realized P&L."""
     storage = get_paper_storage()
-    trade = storage.get_trade_by_id(trade_id)
+    trade = storage.get_trade_by_id(trade_id, user_id)
     if not trade:
         raise HTTPException(status_code=404, detail="Trade not found")
 
@@ -187,6 +208,7 @@ def close_trade(trade_id: int, body: CloseTradeIn):
         trade_id,
         exit_price=body.exit_price,
         notes=body.notes or "Manually closed",
+        user_id=user_id,
     )
     if not ok:
         raise HTTPException(status_code=500, detail="Could not close trade")

@@ -7,8 +7,10 @@ Closed trades definition: status NOT IN ('OPEN', 'PENDING')
 """
 
 import logging
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from typing import Optional
 from api.deps import get_paper_storage
+from api.auth import get_current_user_id
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -72,11 +74,11 @@ def _enrich_open_trades(open_trades: list) -> list:
 
 
 @router.get("")
-def get_performance():
+def get_performance(user_id: Optional[str] = Depends(get_current_user_id)):
     storage = get_paper_storage()
-    all_trades   = storage.get_all_trades()  or []
+    all_trades   = storage.get_all_trades(user_id)  or []
 
-    closed_trades  = storage.get_closed_trades(limit=1000)
+    closed_trades  = storage.get_closed_trades(limit=1000, user_id=user_id)
     open_trades    = [t for t in all_trades if t.get("status") == "OPEN"]
     pending_trades = [t for t in all_trades if t.get("status") == "PENDING"]
 

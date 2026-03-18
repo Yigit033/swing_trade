@@ -7,6 +7,48 @@ export const api = axios.create({
     timeout: 120000, // 2 min for scan operations
 });
 
+// Add Supabase JWT to requests when auth is configured
+api.interceptors.request.use(async (config) => {
+    if (typeof window === "undefined") return config;
+    try {
+        const { createSupabaseClient } = await import("@/lib/supabase/client");
+        const supabase = createSupabaseClient();
+        if (supabase) {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.access_token) {
+                config.headers.Authorization = `Bearer ${session.access_token}`;
+            }
+        }
+    } catch {
+        // Ignore — auth not configured or not in browser
+    }
+    return config;
+});
+
+// 401 + token gönderildiyse → token reddedildi, sign out ve login'e yönlendir
+// Token GÖNDERİLMEDİYSE → timing/race (session henüz hazır değil), sign out YAPMA
+api.interceptors.response.use(
+    (res) => res,
+    async (err) => {
+        if (typeof window !== "undefined" && err?.response?.status === 401) {
+            const hadToken = !!err?.config?.headers?.Authorization;
+            if (hadToken) {
+                try {
+                    const { createSupabaseClient } = await import("@/lib/supabase/client");
+                    const supabase = createSupabaseClient();
+                    if (supabase) {
+                        await supabase.auth.signOut();
+                    }
+                } catch {
+                    // ignore
+                }
+                window.location.href = "/login";
+            }
+        }
+        return Promise.reject(err);
+    }
+);
+
 // ---- Types ----
 export interface Trade {
     id: number;

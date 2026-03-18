@@ -219,7 +219,7 @@ class PaperTradeTracker:
             logger.error(f"Error getting current price for {ticker}: {e}")
             return None
     
-    def update_trade_status(self, trade: Dict) -> Dict:
+    def update_trade_status(self, trade: Dict, user_id: Optional[str] = None) -> Dict:
         """
         Update a single trade's status.
         
@@ -263,7 +263,7 @@ class PaperTradeTracker:
                 'current_price': trade['current_price'],
                 'unrealized_pnl': trade['unrealized_pnl'],
                 'unrealized_pnl_pct': trade['unrealized_pnl_pct'],
-            })
+            }, user_id)
             return trade
         
         # Check exit conditions (V3: returns trailing_stop too)
@@ -273,9 +273,9 @@ class PaperTradeTracker:
         
         # Always update trailing stop in storage
         if trailing_stop != (trade.get('trailing_stop') or trade['stop_loss']):
-            self.storage.update_trade(trade_id, {'trailing_stop': trailing_stop})
+            self.storage.update_trade(trade_id, {'trailing_stop': trailing_stop}, user_id)
             trade['trailing_stop'] = trailing_stop
-        
+
         if status == 'T1_PARTIAL':
             # ── v3.1: Partial exit at T1 — sell 50%, keep trade OPEN ──
             target_2 = trade.get('target_2') or trade['target']
@@ -286,7 +286,7 @@ class PaperTradeTracker:
                 'trailing_stop': trade['entry_price'],    # reset trail to breakeven
                 'target': target_2,                       # now targeting T2
                 'notes': reason,
-            })
+            }, user_id)
             trade['partial_exit_price'] = exit_price
             trade['partial_exit_pct'] = 50.0
             trade['stop_loss'] = trade['entry_price']
@@ -304,7 +304,7 @@ class PaperTradeTracker:
         elif status != 'OPEN':
             # Trade should be fully closed
             self.storage.close_trade(
-                trade_id, exit_price, exit_date, status, reason
+                trade_id, exit_price, exit_date, status, reason, user_id
             )
             trade['status'] = status
             trade['exit_price'] = exit_price
@@ -343,7 +343,7 @@ class PaperTradeTracker:
                 'current_price': trade['current_price'],
                 'unrealized_pnl': trade['unrealized_pnl'],
                 'unrealized_pnl_pct': trade['unrealized_pnl_pct'],
-            })
+            }, user_id)
 
             # Calculate days held
             entry_dt = datetime.strptime(entry_date[:10], '%Y-%m-%d').date()
@@ -351,18 +351,18 @@ class PaperTradeTracker:
 
         return trade
     
-    def update_all_open_trades(self) -> List[Dict]:
+    def update_all_open_trades(self, user_id: Optional[str] = None) -> List[Dict]:
         """
         Update all open trades.
         
         Returns:
             List of updated trade dicts
         """
-        open_trades = self.storage.get_open_trades()
+        open_trades = self.storage.get_open_trades(user_id)
         updated_trades = []
         
         for trade in open_trades:
-            updated = self.update_trade_status(trade)
+            updated = self.update_trade_status(trade, user_id)
             updated_trades.append(updated)
         
         return updated_trades
@@ -418,11 +418,11 @@ class PaperTradeTracker:
         
         # Check for duplicate (sadece tarih kısmıyla karşılaştır)
         date_only = trade['entry_date'][:10]
-        if self.storage.check_duplicate(trade['ticker'], date_only):
+        if self.storage.check_duplicate(trade['ticker'], date_only, user_id):
             logger.warning(f"Trade already exists: {trade['ticker']} on {date_only}")
             return -1
         
-        return self.storage.add_trade(trade)
+        return self.storage.add_trade(trade, user_id)
     
     def confirm_pending_trades(self) -> List[Dict]:
         """
@@ -438,7 +438,7 @@ class PaperTradeTracker:
             List of confirmed/rejected trade dicts
         """
         results = []
-        open_trades = self.storage.get_open_trades()  # Includes PENDING
+        open_trades = self.storage.get_open_trades(user_id)  # Includes PENDING
         pending = [t for t in open_trades if t.get('status') == 'PENDING']
         
         today_str = datetime.now().strftime('%Y-%m-%d')
@@ -488,7 +488,8 @@ class PaperTradeTracker:
                     # Gap-up too big — momentum exhausted, reject
                     self.storage.close_trade(
                         trade_id, signal_price, entry_date, 'REJECTED',
-                        f"REJECTED: Gap-up {gap_pct:+.1f}% > {MAX_GAP_UP_PCT}% limit"
+                        f"REJECTED: Gap-up {gap_pct:+.1f}% > {MAX_GAP_UP_PCT}% limit",
+                        user_id
                     )
                     trade['confirm_status'] = 'rejected'
                     trade['reject_reason'] = f"Gap-up {gap_pct:+.1f}%"
@@ -499,7 +500,8 @@ class PaperTradeTracker:
                     # Gap-down too big — bad news, reject
                     self.storage.close_trade(
                         trade_id, signal_price, entry_date, 'REJECTED',
-                        f"REJECTED: Gap-down {gap_pct:+.1f}% > {MAX_GAP_DOWN_PCT}% limit"
+                        f"REJECTED: Gap-down {gap_pct:+.1f}% > {MAX_GAP_DOWN_PCT}% limit",
+                        user_id
                     )
                     trade['confirm_status'] = 'rejected'
                     trade['reject_reason'] = f"Gap-down {gap_pct:+.1f}%"
@@ -545,7 +547,7 @@ class PaperTradeTracker:
                     'target': target,
                     'target_2': target_2,
                     'notes': f"Confirmed at Open ${open_price:.2f} (gap {gap_pct:+.1f}%)"
-                })
+                }, user_id)
                 
                 trade['confirm_status'] = 'confirmed'
                 trade['entry_price'] = open_price
@@ -568,14 +570,15 @@ class PaperTradeTracker:
         self, 
         trade_id: int, 
         exit_price: float = None,
-        notes: str = "Manually closed"
+        notes: str = "Manually closed",
+        user_id: Optional[str] = None,
     ) -> bool:
         """
         Manually close a trade.
         
         If exit_price is None, uses current price.
         """
-        trade = self.storage.get_trade_by_id(trade_id)
+        trade = self.storage.get_trade_by_id(trade_id, user_id)
         if not trade:
             return False
         
@@ -587,5 +590,5 @@ class PaperTradeTracker:
         exit_date = datetime.now().strftime('%Y-%m-%d')
         
         return self.storage.close_trade(
-            trade_id, exit_price, exit_date, 'MANUAL', notes
+            trade_id, exit_price, exit_date, 'MANUAL', notes, user_id
         )

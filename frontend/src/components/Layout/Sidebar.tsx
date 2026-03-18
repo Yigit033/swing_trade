@@ -1,10 +1,11 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
     LayoutDashboard, Search, TrendingUp, Clock, BarChart3,
-    LineChart, MessageSquare, Zap, FlaskConical, X,
+    LineChart, MessageSquare, Zap, FlaskConical, X, LogOut,
 } from "lucide-react";
+import { createSupabaseClient } from "@/lib/supabase/client";
 
 interface SidebarProps {
     isOpen?: boolean;
@@ -26,6 +27,16 @@ const navItems = [
 
 export default function Sidebar({ isOpen = false, onClose, isMobile = false }: SidebarProps) {
     const pathname = usePathname();
+    const router = useRouter();
+    const supabase = createSupabaseClient();
+
+    const handleSignOut = async () => {
+        if (supabase) {
+            await supabase.auth.signOut();
+            router.push("/login");
+            router.refresh();
+        }
+    };
 
     return (
         <aside className={`sidebar ${isMobile && isOpen ? "sidebar-open" : ""}`}>
@@ -82,8 +93,21 @@ export default function Sidebar({ isOpen = false, onClose, isMobile = false }: S
             </nav>
 
             {/* Footer */}
-            <div style={{ padding: "14px 18px", borderTop: "1px solid var(--border)", fontSize: "0.7rem", color: "var(--text-muted)" }}>
-                SmallCap Momentum v2.1
+            <div style={{ padding: "14px 18px", borderTop: "1px solid var(--border)" }}>
+                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: supabase ? 8 : 0 }}>
+                    SmallCap Momentum v2.1
+                </div>
+                {supabase && (
+                    <button
+                        type="button"
+                        onClick={handleSignOut}
+                        className="sidebar-nav-item"
+                        style={{ width: "100%", justifyContent: "flex-start", color: "var(--text-muted)", fontSize: "0.75rem" }}
+                    >
+                        <LogOut size={14} />
+                        <span>Sign Out</span>
+                    </button>
+                )}
             </div>
         </aside>
     );

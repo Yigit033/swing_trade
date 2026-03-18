@@ -1,6 +1,7 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
-import { getPerformance, deleteTrade } from "@/lib/api";
+import { useState } from "react";
+import { usePerformance, useInvalidateQueries } from "@/hooks/useApi";
+import { deleteTrade } from "@/lib/api";
 import type { PerformanceSummary, Trade } from "@/lib/api";
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -64,17 +65,10 @@ const CumTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function PerformancePage() {
-    const [data, setData] = useState<{ summary: PerformanceSummary; open_trades: Trade[]; recent_closed: Trade[] } | null>(null);
-    const [loading, setLoading] = useState(true);
+    const { data, isLoading } = usePerformance();
+    const { invalidatePerformance } = useInvalidateQueries();
     const [deletingId, setDeletingId] = useState<number | null>(null);
     const [msg, setMsg] = useState("");
-
-    const load = useCallback(() => {
-        setLoading(true);
-        getPerformance().then(setData).finally(() => setLoading(false));
-    }, []);
-
-    useEffect(() => { load(); }, [load]);
 
     const handleDelete = async (t: Trade) => {
         if (!confirm(`"${t.ticker}" trade geçmişinden silinsin mi? Bu işlem geri alınamaz.`)) return;
@@ -82,7 +76,7 @@ export default function PerformancePage() {
         try {
             await deleteTrade(t.id);
             setMsg(`✅ ${t.ticker} silindi`);
-            load();
+            invalidatePerformance();
         } catch {
             setMsg("❌ Silinemedi");
         } finally {
@@ -90,7 +84,7 @@ export default function PerformancePage() {
         }
     };
 
-    if (loading) return (
+    if (isLoading && !data) return (
         <div style={{ textAlign: "center", padding: 80 }}><span className="spinner" style={{ width: 40, height: 40 }} /></div>
     );
 
@@ -104,7 +98,7 @@ export default function PerformancePage() {
         return { date: t.exit_date?.slice(5) || "", pnl: cumPnl, trade: t.ticker };
     });
 
-    const tradeBars = closed.slice(0, 20).map(t => ({
+    const tradeBars: { ticker: string; pnlPct: number }[] = closed.slice(0, 20).map((t: Trade) => ({
         ticker: t.ticker,
         pnlPct: t.realized_pnl_pct || 0,
     }));
@@ -114,9 +108,9 @@ export default function PerformancePage() {
         : s && s.avg_loss === 0 && s.wins > 0 ? "∞" : "—";
 
     // Best / worst trade
-    const bestTrade = closed.reduce((best, t) =>
+    const bestTrade = closed.reduce((best: Trade | undefined, t: Trade) =>
         (t.realized_pnl_pct || 0) > (best?.realized_pnl_pct || -Infinity) ? t : best, closed[0]);
-    const worstTrade = closed.reduce((worst, t) =>
+    const worstTrade = closed.reduce((worst: Trade | undefined, t: Trade) =>
         (t.realized_pnl_pct || 0) < (worst?.realized_pnl_pct || Infinity) ? t : worst, closed[0]);
 
     return (

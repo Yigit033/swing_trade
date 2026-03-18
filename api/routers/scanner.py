@@ -10,10 +10,11 @@ import datetime
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from typing import Optional
 from api.deps import get_smallcap_engine, get_paper_tracker, get_fetcher, get_regime_storage
+from api.auth import get_current_user_id
 from api.utils import flatten_yf_df, sanitize_for_json, fetch_ticker_history
 
 router = APIRouter()
@@ -35,7 +36,10 @@ class TrackSignalRequest(BaseModel):
 
 
 @router.post("/track")
-def track_signal(body: TrackSignalRequest):
+def track_signal(
+    body: TrackSignalRequest,
+    user_id: Optional[str] = Depends(get_current_user_id),
+):
     """
     Add a signal to paper trades using the tracker (duplicate-safe).
     Returns: {"status": "added", "trade_id": N} or {"status": "duplicate"}
@@ -54,7 +58,7 @@ def track_signal(body: TrackSignalRequest):
         "atr": body.atr or 0,
         "date": body.date or datetime.date.today().isoformat(),
     }
-    trade_id = tracker.add_trade_from_signal(signal)
+    trade_id = tracker.add_trade_from_signal(signal, user_id)
     if trade_id > 0:
         return sanitize_for_json({"status": "added", "trade_id": trade_id})
     else:

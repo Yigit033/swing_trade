@@ -18,12 +18,14 @@ try:
 except ImportError:
     pass  # python-dotenv not installed; env vars must be set externally
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from api.routers import trades, pending, performance, lookup, scanner, genai, backtest, regime
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Swing Trade AI API",
@@ -31,9 +33,23 @@ app = FastAPI(
     version="2.1.0",
 )
 
-# CORS — CORS_ORIGINS env var or "*" for dev
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """500 hatalarını logla; CORS middleware düzgün yanıt verebilsin."""
+    logger.exception("Unhandled exception: %s", exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error", "type": type(exc).__name__},
+    )
+
+
+# CORS — credentials=true için "*" kullanılamaz, localhost açıkça eklenmeli
 _cors_origins = _os.environ.get("CORS_ORIGINS", "*")
-_origins = [o.strip() for o in _cors_origins.split(",") if o.strip()] if _cors_origins != "*" else ["*"]
+if _cors_origins == "*":
+    _origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+else:
+    _origins = [o.strip() for o in _cors_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,

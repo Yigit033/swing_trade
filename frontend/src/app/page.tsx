@@ -1,6 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
-import { getPerformance, getPending, getCurrentRegime } from "@/lib/api";
+import { usePerformance, usePending, useRegime } from "@/hooks/useApi";
 import type { PerformanceSummary, Trade, RegimeData } from "@/lib/api";
 import { TrendingUp, TrendingDown, Activity, Clock, BarChart2, Target } from "lucide-react";
 
@@ -65,24 +64,13 @@ function fmtDate(d?: string | null) {
 }
 
 export default function DashboardPage() {
-  const [perf, setPerf] = useState<{ summary: PerformanceSummary; open_trades: Trade[]; recent_closed: Trade[] } | null>(null);
-  const [pendingCount, setPendingCount] = useState(0);
-  const [regime, setRegime] = useState<RegimeData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: perf, isLoading: perfLoading } = usePerformance();
+  const { data: pendingCount = 0, isLoading: pendingLoading } = usePending();
+  const { data: regime, isLoading: regimeLoading } = useRegime();
 
-  useEffect(() => {
-    Promise.all([
-      getPerformance().catch(() => null),
-      getPending().catch(() => ({ count: 0 })),
-      getCurrentRegime().catch(() => null),
-    ]).then(([p, pnd, r]) => {
-      setPerf(p);
-      setPendingCount(pnd?.count || 0);
-      setRegime(r);
-    }).finally(() => setLoading(false));
-  }, []);
+  const loading = perfLoading || pendingLoading || regimeLoading;
 
-  if (loading) return (
+  if (loading && !perf) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh", flexDirection: "column", gap: 16 }}>
       <div className="spinner" style={{ width: 40, height: 40 }} />
       <div style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>Loading live portfolio...</div>
@@ -180,7 +168,7 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {openTrades.map(t => {
+                {openTrades.map((t: Trade) => {
                   const cp = t.current_price;
                   const hasLive = cp != null;
                   return (
@@ -233,7 +221,7 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {recentClosed.slice(0, 8).map(t => {
+                {recentClosed.slice(0, 8).map((t: Trade) => {
                   const pct = t.realized_pnl_pct;
                   const win = (t.realized_pnl || 0) > 0;
                   const statusColor =

@@ -1,10 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
 import Sidebar from "./Sidebar";
 import { Menu } from "lucide-react";
+import { QueryProvider } from "@/providers/QueryProvider";
 
 export default function LayoutClient({ children }: { children: React.ReactNode }) {
+    const pathname = usePathname();
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [isMobile, setIsMobile] = useState(false);
 
@@ -16,9 +19,14 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
     }, []);
 
     const closeSidebar = () => setSidebarOpen(false);
+    const isLoginPage = pathname === "/login";
+
+    if (isLoginPage) {
+        return <QueryProvider>{children}</QueryProvider>;
+    }
 
     return (
-        <>
+        <QueryProvider>
             <Sidebar
                 isOpen={sidebarOpen}
                 onClose={closeSidebar}
@@ -49,6 +57,6 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
                     aria-label="Close menu"
                 />
             )}
-        </>
+        </QueryProvider>
     );
 }

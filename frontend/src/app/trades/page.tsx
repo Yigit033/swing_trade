@@ -1,7 +1,8 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
-import { getTrades, closeTrade, deleteTrade, updateTrade, updatePrices, getTradesLastUpdate } from "@/lib/api";
+import { closeTrade, deleteTrade, updateTrade } from "@/lib/api";
 import type { Trade } from "@/lib/api";
+import { useTrades, useTradesLastUpdate, useUpdatePrices, useInvalidateQueries } from "@/hooks/useApi";
 import { RefreshCw, X, CheckSquare, TrendingUp, TrendingDown, Edit2, Search, ChevronLeft, ChevronRight } from "lucide-react";
 
 type FilterStatus = "ALL" | "OPEN" | "CLOSED" | "PENDING";
@@ -189,10 +190,12 @@ const PAGE_SIZE = 10;
 
 /* ─── MAIN PAGE ───────────────────────────────────── */
 export default function TradesPage() {
-    const [trades, setTrades] = useState<Trade[]>([]);
+    const { data: trades = [], isLoading: tradesLoading } = useTrades();
+    const { data: lastUpdate } = useTradesLastUpdate();
+    const updatePricesMutation = useUpdatePrices();
+    const { invalidateTrades, invalidatePerformance } = useInvalidateQueries();
+
     const [filter, setFilter] = useState<FilterStatus>("ALL");
-    const [loading, setLoading] = useState(true);
-    const [updatingPrices, setUpdatingPrices] = useState(false);
     const [search, setSearch] = useState("");
     const [page, setPage] = useState(1);
     const [typeFilter, setTypeFilter] = useState<string>("All Types");
@@ -212,137 +215,44 @@ export default function TradesPage() {
     const [editSaving, setEditSaving] = useState(false);
 
     const [msg, setMsg] = useState("");
+    const [autoUpdateDone, setAutoUpdateDone] = useState(false);
 
-    const [lastUpdate, setLastUpdate] = useState<string | null>(null);
+    const updatingPrices = updatePricesMutation.isPending;
 
-    const fetchLastUpdate = async (): Promise<string | null> => {
-        try {
-            const d = await getTradesLastUpdate();
-            const ts = d.last_update || null;
-            setLastUpdate(ts);
-            return ts;
-        } catch {
-            return null;
-        }
-    };
-
-    const load = () => {
-        setLoading(true);
-        getTrades()
-            .then(async d => {
-                setTrades(d.trades || []);
-                await fetchLastUpdate();
-            })
-            .finally(() => setLoading(false));
-    };
-
+    // Auto-update prices when: open trades + (missing prices OR lastUpdate > 15 min)
+    const { mutate: runUpdatePrices } = updatePricesMutation;
     useEffect(() => {
-        const init = async () => {
-            setLoading(true);
-            try {
-                const d = await getTrades();
-                const tradesData: Trade[] = d.trades || [];
-                setTrades(tradesData);
+        if (autoUpdateDone || trades.length === 0) return;
+        const hasOpen = trades.some(t => t.status === "OPEN" || t.status === "PENDING");
+        if (!hasOpen) return;
 
-                const last = await fetchLastUpdate();
-                const hasOpen = tradesData.some(t => t.status === "OPEN" || t.status === "PENDING");
-
-                // Auto-update if:
-                // 1. There are open/pending trades with missing current_price, OR
-                // 2. Last update is missing or older than 15 minutes
-                // Detect stale prices: null, 0, or same as entry (fallback value)
-                const hasMissingPrices = tradesData.some(
-                    t => (t.status === "OPEN") && (
-                        t.current_price == null
-                        || t.current_price === 0
-                        || t.current_price === t.entry_price
-                    )
-                );
-                const shouldAutoUpdate = () => {
-                    if (!hasOpen) return false;
-                    if (hasMissingPrices) return true; // Always fetch if prices are missing
-                    if (!last) return true;
-                    const dt = new Date(last);
-                    if (isNaN(dt.getTime())) return false;
-                    const now = new Date();
-                    const diffMinutes = (now.getTime() - dt.getTime()) / (1000 * 60);
-                    return diffMinutes > 15; // Reduced from 60 to 15 min
-                };
-
-                if (shouldAutoUpdate()) {
-                    setUpdatingPrices(true);
-                    try {
-                        const upRes = await updatePrices();
-                        // Merge live prices from update response into trades
-                        const updatedMap = new Map<number, Trade>();
-                        if (upRes?.trades) {
-                            for (const ut of upRes.trades) {
-                                if (ut.id) updatedMap.set(ut.id, ut);
-                            }
-                        }
-                        // Re-fetch from DB (which now has persisted values)
-                        const d2 = await getTrades();
-                        const freshTrades: Trade[] = d2.trades || [];
-                        // Overlay any live data from update response onto DB data
-                        const merged = freshTrades.map(t => {
-                            const live = updatedMap.get(t.id);
-                            if (live && t.status === "OPEN") {
-                                return {
-                                    ...t,
-                                    current_price: live.current_price ?? t.current_price,
-                                    unrealized_pnl: live.unrealized_pnl ?? t.unrealized_pnl,
-                                    unrealized_pnl_pct: live.unrealized_pnl_pct ?? t.unrealized_pnl_pct,
-                                };
-                            }
-                            return t;
-                        });
-                        setTrades(merged);
-                        await fetchLastUpdate();
-                    } catch (err) {
-                        console.error("Auto price update failed:", err);
-                    } finally {
-                        setUpdatingPrices(false);
-                    }
-                }
-            } finally {
-                setLoading(false);
-            }
+        const hasMissingPrices = trades.some(
+            t => (t.status === "OPEN") && (
+                t.current_price == null || t.current_price === 0 || t.current_price === t.entry_price
+            )
+        );
+        const shouldAutoUpdate = () => {
+            if (hasMissingPrices) return true;
+            if (!lastUpdate) return true;
+            const dt = new Date(lastUpdate);
+            if (isNaN(dt.getTime())) return false;
+            const diffMinutes = (Date.now() - dt.getTime()) / (1000 * 60);
+            return diffMinutes > 15;
         };
 
-        void init();
-    }, []);
-
-    const handleUpdatePrices = async () => {
-        setUpdatingPrices(true);
-        try {
-            const upRes = await updatePrices();
-            setMsg(`✅ Fiyatlar güncellendi! (${upRes?.trades?.length || 0} trade)`);
-            // Re-fetch enriched trades
-            const d = await getTrades();
-            const freshTrades: Trade[] = d.trades || [];
-            // Merge update response data as overlay
-            const updatedMap = new Map<number, Trade>();
-            if (upRes?.trades) {
-                for (const ut of upRes.trades) {
-                    if (ut.id) updatedMap.set(ut.id, ut);
-                }
-            }
-            const merged = freshTrades.map(t => {
-                const live = updatedMap.get(t.id);
-                if (live && t.status === "OPEN") {
-                    return {
-                        ...t,
-                        current_price: live.current_price ?? t.current_price,
-                        unrealized_pnl: live.unrealized_pnl ?? t.unrealized_pnl,
-                        unrealized_pnl_pct: live.unrealized_pnl_pct ?? t.unrealized_pnl_pct,
-                    };
-                }
-                return t;
+        if (shouldAutoUpdate()) {
+            setAutoUpdateDone(true);
+            runUpdatePrices(undefined, {
+                onError: () => console.error("Auto price update failed"),
             });
-            setTrades(merged);
-            await fetchLastUpdate();
-        } catch { setMsg("❌ Güncelleme başarısız"); }
-        finally { setUpdatingPrices(false); }
+        }
+    }, [trades, lastUpdate, autoUpdateDone, runUpdatePrices]);
+
+    const handleUpdatePrices = () => {
+        updatePricesMutation.mutate(undefined, {
+            onSuccess: (upRes) => setMsg(`✅ Fiyatlar güncellendi! (${upRes?.trades?.length || 0} trade)`),
+            onError: () => setMsg("❌ Güncelleme başarısız"),
+        });
     };
 
     const handleClose = async () => {
@@ -353,7 +263,8 @@ export default function TradesPage() {
             setMsg(`✅ ${closeModal.ticker} kapatıldı!`);
             setCloseModal(null);
             setExitPrice(""); setExitNotes("");
-            load();
+            invalidateTrades();
+            invalidatePerformance();
         } catch { setMsg("❌ Kapatma hatası"); }
         finally { setClosingId(null); }
     };
@@ -363,7 +274,8 @@ export default function TradesPage() {
         try {
             await deleteTrade(id);
             setMsg(`🗑️ ${ticker} silindi.`);
-            load();
+            invalidateTrades();
+            invalidatePerformance();
         } catch { setMsg("❌ Silme hatası"); }
     };
 
@@ -387,7 +299,8 @@ export default function TradesPage() {
             await updateTrade(editModal.id, updates);
             setMsg(`✅ ${editModal.ticker} güncellendi!`);
             setEditModal(null);
-            load();
+            invalidateTrades();
+            invalidatePerformance();
         } catch { setMsg("❌ Güncelleme hatası"); }
         finally { setEditSaving(false); }
     };
@@ -462,7 +375,7 @@ export default function TradesPage() {
         return { date, time };
     }, [lastUpdate]);
 
-    if (loading) return <div style={{ padding: 80, textAlign: "center" }}><span className="spinner" /></div>;
+    if (tradesLoading && trades.length === 0) return <div style={{ padding: 80, textAlign: "center" }}><span className="spinner" /></div>;
 
     return (
         <div>

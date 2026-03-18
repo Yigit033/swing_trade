@@ -103,10 +103,18 @@ fly launch --no-deploy
 # 3. Secrets ayarla (Supabase connection string'ini yapıştır)
 fly secrets set DATABASE_URL="postgresql://postgres:SIFRE@db.PROJE_ID.supabase.co:5432/postgres"
 
-# 4. Opsiyonel: GenAI için
+# 4. Auth (login kullanacaksan — Supabase Dashboard → Settings → API)
+fly secrets set SUPABASE_URL="https://PROJE_ID.supabase.co"
+fly secrets set SUPABASE_ANON_KEY="eyJhbG..."
+fly secrets set SUPABASE_JWT_SECRET="jwt-secret-değeri"
+
+# 5. CORS — Vercel deploy sonrası frontend URL'ini ekle (ADIM 4'te)
+# fly secrets set CORS_ORIGINS="https://swing-trade-xxx.vercel.app"
+
+# 6. Opsiyonel: GenAI için
 fly secrets set OPENAI_API_KEY="sk-..."
 
-# 5. Deploy
+# 7. Deploy
 fly deploy
 ```
 
