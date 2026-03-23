@@ -1,67 +1,95 @@
 # 🚀 SmallCap Swing Trade — Günlük Kullanım Akışı
 
-## Hızlı Başlatma
+Modern stack: **Next.js dashboard** + **FastAPI backend** (Streamlit yerine web uygulaması). İstersen **Supabase ile giriş**; yapılandırılmadıysa uygulama girişsiz de çalışır (`docs/AUTH_SETUP.md`).
+
+---
+
+## Hızlı başlatma (lokal)
 
 ```bash
-# Virtual environment aktifleştir (Windows)
-venv\Scripts\activate
+# 1) Backend (ayrı terminal)
+cd swing_trade
+venv\Scripts\activate          # Windows
+uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 
-# Dashboard'u başlat
-streamlit run swing_trader/dashboard/app.py
+# 2) Frontend (ayrı terminal)
+cd frontend
+npm install   # ilk sefer
+npm run dev   # http://localhost:3000
 ```
 
----
-
-## 📋 Günlük Akış (5 Adım)
-
-### 1. 📥 Veri Güncelle
-- **Settings** → **Download Data** tıkla
-- İlk kez: tam indirme (~2 dk)
-- Sonraki: sadece günlük güncelleme
-
-### 2. 🔍 Tarama Yap
-- **SmallCap Momentum** sayfasına git
-- **Run Scan** tıkla
-- Sistem otomatik tarar: Finviz → Filtreler → Sinyaller
-
-### 3. 📊 Sinyalleri İncele
-Her sinyal için gösterilir:
-- **Swing Type** (A/B/C/S) + kalite skoru
-- **Entry:** Giriş fiyatı
-- **Stop Loss:** Zarar kes seviyesi
-- **Target:** Hedef fiyat
-- **Hold Days:** Tutma süresi (min-max)
-
-### 4. 📌 Paper Trading'e Ekle
-- Beğendiğin sinyalde **"📌 Track"** butonuna tıkla
-- Trade **PENDING** olarak kaydedilir
-- Ertesi gün **"🔄 Update Prices"** tıkla:
-  - ✅ Gap normal → Açılış fiyatından **OPEN** olur
-  - ❌ Gap >5%↑ veya >3%↓ → Otomatik **REJECTED**
-- Stop/target ATR ile ertesi gün açılışa göre yeniden hesaplanır
-
-### 5. 📈 Takip Et
-- **Paper Trading Tracker** sayfasından açık pozisyonları izle
-- Sistem otomatik kontrol eder:
-  - 🔴 **Stop Loss** → Otomatik kapanır (gap-down slippage dahil)
-  - 🔒 **Trailing Stop** → Kâr koruması (ATR bazlı, otomatik yükselir)
-  - 🎯 **Target** → Hedef vurulunca kapanır
-  - ⏰ **Timeout** → Max gün dolunca kapanır
-- İstersen **Manual Close** ile kendin kapatabilirsin
+`.env` / `frontend/.env.local` içinde **`NEXT_PUBLIC_API_URL`** (örn. `http://localhost:8000`) tanımlı olmalı. Üretimde Vercel + Fly benzeri URL’ler kullanılır.
 
 ---
 
-## 📊 Performans Takibi
+## 📋 Günlük akış (5 adım)
 
-**Paper Trading Tracker → Performance** sekmesinde:
-- Win Rate, Profit Factor, Toplam P/L
-- En iyi / En kötü trade
-- Kapanmış trade geçmişi
+### 1. 📥 Veri güncelle
+- Arayüzde “tek tık indir” yok; günlük/haftalık veri için CLI kullan:
+  ```bash
+  python main.py --download-data --days=250
+  ```
+- Özet: `QUICK_START.md` — ilk kurulum daha uzun, sonrası artımlı güncelleme.
+
+### 2. 🔍 Tarama yap
+- Soldan **Scanner** → **Run Scan** (veya eşdeğer tarama butonu).
+- Tarama **arka planda job** olarak çalışır; üstte **ScannerScanBanner** ilerlemeyi gösterir.
+- **Job id** `localStorage`’da tutulur: tarama sürerken **yeni sekmede** aynı siteyi açsan da polling devam eder (aynı tarayıcı / origin).
+- Akış: Finviz → filtreler → sinyaller (backend’deki scanner pipeline).
+
+### 3. 📊 Sinyalleri incele
+Her sinyalde tipik olarak:
+- **Swing type** (A/B/C/S) + kalite skoru  
+- **Entry / Stop / Target**  
+- **Hold days** (min–max)
+
+### 4. 📌 Paper trading’e ekle
+- Beğendiğin sinyalde **Track** (veya listedeki ekleme aksiyonu).
+- Trade **Pending** olarak kaydolur → **Pending** sayfasından yönet.
+- Ertesi gün **fiyat güncelleme** akışı (gap kuralları):
+  - ✅ Gap makul → açılıştan **OPEN**
+  - ❌ Gap çok yukarı/aşağı → **REJECTED** (eşikler backend stratejisine göre)
+- Stop/target ATR ile bir sonraki oturuma göre yeniden hesaplanabilir.
+
+### 5. 📈 Takip et
+- **Paper Trades**: açık pozisyonlar ve geçmiş.
+- Sistem mantığı (özet):
+  - 🔴 **Stop** → kapanış (gap-down slippage dahil edilebilir)
+  - 🔒 **Trailing stop** → ATR bazlı kâr koruması
+  - 🎯 **Target** → hedefe ulaşınca kapanış
+  - ⏰ **Timeout** → max gün dolunca kapanış
+- İstersen **manuel kapatma** (UI’deki close aksiyonu).
 
 ---
 
-## 🔧 Opsiyonel
+## 📊 Performans ve görünürlük
 
-- **Tek Hisse Analizi:** SmallCap sayfasında ticker gir → detaylı analiz al
-- **Backtest:** `python test_backtest.py` ile geçmiş performansı test et
-- **Manuel Trade Ekle:** Paper Trading → "➕ Manually Add Trade"
+| Ne | Nerede |
+|----|--------|
+| Özet metrikler (win rate, P/L, vb.) | **Performance** |
+| Günlük özet / portföy özeti | **Dashboard** (`/`) |
+| Grafikler | **Charts** |
+
+---
+
+## 🔧 Opsiyonel (aynı sidebar)
+
+| Özellik | Sayfa |
+|---------|--------|
+| Tek hisse hızlı analiz | **Manual Lookup** |
+| Strateji geçmişi testi | **Backtest** |
+| Strateji / piyasa sohbeti | **AI Chat** |
+
+CLI backtest: `python test_backtest.py` (projede varsa).
+
+---
+
+## 🔐 Giriş (opsiyonel)
+
+Supabase açıksa: `/login` → oturum; **Paper Trades** RLS ile kullanıcıya özel olabilir. Auth yoksa eski davranış: tek kullanıcı / ortak veri (kurulumuna bağlı).
+
+---
+
+## Eski Streamlit notu
+
+Eski **Streamlit** dashboard (`streamlit run swing_trader/dashboard/app.py`) hâlâ repoda olabilir; günlük kullanım için **tercih edilen yüz** bu Next.js uygulamasıdır.

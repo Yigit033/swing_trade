@@ -36,13 +36,14 @@ class SmallCapRisk:
     }
     MAX_STOP_PERCENT = 0.10  # Default fallback
     
-    # ── TYPE-SPECIFIC T1/T2 PROFIT TARGETS (v3.0 — realistic) ──
-    # Format: (T1_percent, T2_percent)
+    # ── TYPE-SPECIFIC T1/T2 PROFIT TARGETS (v4.0 — hit-rate optimized) ──
+    # V3 targets were 15-25% T1 / 28-45% T2 — almost never hit in 7-14 day window.
+    # V4: achievable within swing timeframe; still > 1.5R minimum.
     TYPE_TARGETS = {
-        'S': (0.25, 0.45),   # 🔥 Squeeze:  T1 +25%, T2 +45% (was 30/60 — too greedy)
-        'B': (0.20, 0.38),   # 🚀 Momentum: T1 +20%, T2 +38% (was 30/50 — hit rate too low)
-        'C': (0.15, 0.28),   # ⭐ Erken:     T1 +15%, T2 +28% (was 18/30 — slightly tighter)
-        'A': (0.20, 0.35),   # 🐢 Devam:     T1 +20%, T2 +35% (was 25/40 — better hit rate)
+        'S': (0.12, 0.22),   # Squeeze:  T1 +12%, T2 +22%
+        'B': (0.10, 0.18),   # Momentum: T1 +10%, T2 +18%
+        'C': (0.08, 0.15),   # Early:    T1  +8%, T2 +15%
+        'A': (0.10, 0.18),   # Continuation: T1 +10%, T2 +18%
     }
     
     # ── TYPE-SPECIFIC POSITION CAPS (max % of portfolio per position) ──
@@ -135,9 +136,8 @@ class SmallCapRisk:
         target_1 = entry_price * (1 + t1_pct)
         target_2 = entry_price * (1 + t2_pct)
         
-        # Safety: T1 must be above entry, T2 must be above T1
         risk = entry_price - stop_loss
-        min_target = entry_price + (risk * 2.0)  # Minimum 2R for T1
+        min_target = entry_price + (risk * 1.5)  # Minimum 1.5R for T1 (was 2R — pushed targets too high)
         
         if target_1 < min_target:
             target_1 = min_target

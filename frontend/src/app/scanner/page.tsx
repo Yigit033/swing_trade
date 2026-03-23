@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
-import { runSmallcapScan, trackSignal, addTrade } from "@/lib/api";
+import { trackSignal, addTrade } from "@/lib/api";
+import { useScannerJob, SCAN_COMPLETE_EVENT } from "@/providers/ScannerJobProvider";
 import type { Signal } from "@/lib/api";
 import { Search, Plus, TrendingUp, AlertTriangle, Settings, ChevronDown, ChevronUp, Star, Zap, Shield, Target, BarChart2 } from "lucide-react";
 
@@ -291,6 +292,8 @@ function loadScanResults(): { signals: Signal[]; stats: Record<string, unknown>;
 
 /* ───── PAGE ───── */
 export default function ScannerPage() {
+    const { isScanning, poll, scanError: jobScanError, startBackgroundScan, dismissScanFeedback } = useScannerJob();
+
     // Scan params
     const [minQuality, setMinQuality] = useState(65);
     const [topN, setTopN] = useState(10);
@@ -302,7 +305,6 @@ export default function ScannerPage() {
     const [autoTrackOpen, setAutoTrackOpen] = useState(false);
 
     // Results
-    const [loading, setLoading] = useState(false);
     const [result, setResult] = useState<{ signals: Signal[]; stats: Record<string, unknown>; market_regime: string } | null>(null);
     const [error, setError] = useState("");
     const [adding, setAdding] = useState<string | null>(null);
@@ -331,50 +333,62 @@ export default function ScannerPage() {
         } catch { /* ignore */ }
     }, [autoTrackEnabled, autoTrackMinQuality]);
 
-    const runAutoTrack = async (signals: Signal[]) => {
-        setAutoTrackResult(null);
-        const qualifying = signals.filter(s => (s.original_quality_score ?? s.quality_score) >= autoTrackMinQuality);
-        if (!qualifying.length) return;
+    // Arka planda biten scan — sonuç + isteğe bağlı auto-track
+    useEffect(() => {
+        const onComplete = (e: Event) => {
+            const detail = (e as CustomEvent<{ signals: Signal[]; stats: Record<string, unknown>; market_regime: string }>).detail;
+            if (!detail) return;
+            setResult(detail);
+            saveScanResults(detail);
+            setMsg("");
+            setError("");
 
-        const tracked: string[] = [];
-        const skipped: string[] = [];
-
-        await Promise.all(qualifying.map(async (s) => {
+            let enabled = true;
+            let mq = 65;
             try {
-                const res = await trackSignal(s);
-                if (res?.status === "added") tracked.push(s.ticker);
-                else skipped.push(s.ticker);
-            } catch {
-                skipped.push(s.ticker);
-            }
-        }));
+                const raw = localStorage.getItem("autoTrack");
+                if (raw) {
+                    const j = JSON.parse(raw) as { enabled?: boolean; minQuality?: number };
+                    if (j.enabled === false) enabled = false;
+                    if (j.minQuality != null) mq = j.minQuality;
+                }
+            } catch { /* ignore */ }
 
-        setAutoTrackResult({ tracked, skipped });
-    };
+            if (!enabled || !detail.signals?.length) return;
+            const qualifying = detail.signals.filter(
+                (s) => (s.original_quality_score ?? s.quality_score) >= mq
+            );
+            if (!qualifying.length) return;
+
+            void (async () => {
+                const tracked: string[] = [];
+                const skipped: string[] = [];
+                await Promise.all(
+                    qualifying.map(async (s) => {
+                        try {
+                            const res = await trackSignal(s);
+                            if (res?.status === "added") tracked.push(s.ticker);
+                            else skipped.push(s.ticker);
+                        } catch {
+                            skipped.push(s.ticker);
+                        }
+                    })
+                );
+                setAutoTrackResult({ tracked, skipped });
+            })();
+        };
+        window.addEventListener(SCAN_COMPLETE_EVENT, onComplete);
+        return () => window.removeEventListener(SCAN_COMPLETE_EVENT, onComplete);
+    }, []);
 
     const scan = async () => {
-        setLoading(true); setError(""); setMsg(""); setAutoTrackResult(null);
-        try {
-            const data = await runSmallcapScan({ min_quality: minQuality, top_n: topN, portfolio_value: portfolioValue });
-            setResult(data);
-            saveScanResults(data); // Persist to sessionStorage
-
-            if (autoTrackEnabled && data?.signals?.length > 0) {
-                await runAutoTrack(data.signals);
-            }
-        } catch (err: any) {
-            if (err?.code === "ECONNABORTED" || err?.message?.includes("timeout")) {
-                setError("Scan timed out — 200 hisse taraması 10 dakikaya kadar sürebilir. Tekrar deneyin veya Top N'i azaltın.");
-            } else if (err?.response) {
-                setError(`Scan failed (HTTP ${err.response.status}): ${err.response.data?.error || "Server error"}`);
-            } else if (err?.request) {
-                setError("API'ye ulaşılamıyor. Uvicorn'un port 8000'de çalıştığından emin olun.");
-            } else {
-                setError("Scan failed. Make sure the API is running.");
-            }
-        } finally {
-            setLoading(false);
-        }
+        setError(""); setMsg(""); setAutoTrackResult(null);
+        dismissScanFeedback();
+        await startBackgroundScan({
+            min_quality: minQuality,
+            top_n: topN,
+            portfolio_value: portfolioValue,
+        });
     };
 
     const handleTrack = async (s: Signal) => {
@@ -428,11 +442,28 @@ export default function ScannerPage() {
                     </label>
                     <input className="input" type="number" value={portfolioValue} onChange={e => setPortfolioValue(+e.target.value)} style={{ maxWidth: 140 }} />
                 </div>
-                <button className="btn-primary" onClick={scan} disabled={loading}>
-                    {loading ? <span className="spinner" /> : <Search size={15} />}
-                    {loading ? "Scanning..." : "Run Scan"}
+                <button className="btn-primary" onClick={scan} disabled={isScanning}>
+                    {isScanning ? <span className="spinner" /> : <Search size={15} />}
+                    {isScanning ? "Scanning…" : "Run Scan"}
                 </button>
             </div>
+
+            {isScanning && poll && (
+                <div className="glass-card" style={{ padding: 16, marginBottom: 16 }}>
+                    <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginBottom: 8 }}>
+                        Tarama arka planda sürüyor — başka sayfaya gidebilirsiniz.
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+                        <div style={{ flex: 1, height: 8, borderRadius: 4, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: `${Math.round(poll.progress)}%`, background: "var(--accent)", transition: "width 0.3s ease" }} />
+                        </div>
+                        <span style={{ fontWeight: 700, color: "var(--accent)", minWidth: 40 }}>{Math.round(poll.progress)}%</span>
+                    </div>
+                    {poll.message ? (
+                        <div style={{ fontSize: "0.78rem", color: "var(--text-secondary)" }}>{poll.message}</div>
+                    ) : null}
+                </div>
+            )}
 
             {/* Auto-Track Ayarları */}
             <div className="glass-card" style={{ marginBottom: 24, overflow: "hidden" }}>
@@ -514,9 +545,9 @@ export default function ScannerPage() {
             </div>
 
             {/* Error */}
-            {error && (
+            {(error || jobScanError) && (
                 <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "12px 18px", color: "var(--red)", marginBottom: 16, display: "flex", gap: 10, alignItems: "center" }}>
-                    <AlertTriangle size={16} /> {error}
+                    <AlertTriangle size={16} /> {error || jobScanError}
                 </div>
             )}
 
@@ -543,19 +574,8 @@ export default function ScannerPage() {
                 </div>
             )}
 
-            {/* Loading indicator with progress */}
-            {loading && (
-                <div className="glass-card" style={{ padding: 48, textAlign: "center" }}>
-                    <div className="spinner" style={{ width: 48, height: 48, margin: "0 auto 16px" }} />
-                    <h3 style={{ color: "var(--text-secondary)", marginBottom: 8 }}>Taranıyor...</h3>
-                    <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
-                        200 hisse taranıyor, bu işlem 5-10 dakika sürebilir. Lütfen bekleyin.
-                    </p>
-                </div>
-            )}
-
-            {/* Results */}
-            {result && !loading && (
+            {/* Results (önceki tarama görünür kalır; yeni tarama sürerken üstte progress var) */}
+            {result && (
                 <>
                     {/* Stats bar */}
                     <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
@@ -619,7 +639,7 @@ export default function ScannerPage() {
             )}
 
             {/* Empty state */}
-            {!result && !loading && (
+            {!result && !isScanning && (
                 <div className="glass-card" style={{ padding: 60, textAlign: "center" }}>
                     <Search size={56} style={{ color: "var(--text-muted)", marginBottom: 16 }} />
                     <h3 style={{ color: "var(--text-secondary)", marginBottom: 8 }}>Ready to scan</h3>

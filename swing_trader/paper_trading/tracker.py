@@ -1,11 +1,15 @@
 """
 Paper Trading Tracker - Position tracking and exit detection logic.
 
-V3 Improvements:
-- Trailing stop (activates after 50% hold + 2 ATR gain)
-- Gap-down slippage (exit at Open if Open < stop)
-- PENDING state → confirm at next-day Open with gap filter
-- ATR-based stop/target recalculation at actual entry
+V4 Improvements (over V3):
+- Stop at confirmation: 1.5 ATR with type-specific caps (was 1.0 ATR / flat 15%)
+- Target at confirmation: 2R (was 3R — unrealistic for swing timeframe)
+- Trailing stop: activates after 1 ATR gain, no half-hold gate (was 2 ATR + 50% hold)
+- Same-bar ordering: check stop BEFORE updating trail (was inverted)
+- Timeout uses trading days (was calendar days including weekends)
+- initial_stop updated to entry on T1 partial (was stale)
+- Gap-down slippage (exit at Open if Open < stop) — unchanged
+- PENDING state → confirm at next-day Open with gap filter — unchanged
 """
 
 import logging
@@ -27,9 +31,20 @@ logger = logging.getLogger(__name__)
 _NYSE_TZ = ZoneInfo("America/New_York")
 NYSE_OPEN_TIME = "09:30"  # NYSE opens 09:30 ET (= 16:30 Turkey time in winter)
 
-# V3 Constants (match backtest engine)
+# V4 Constants
 MAX_GAP_UP_PCT = 5.0     # Skip if gap-up > 5%
 MAX_GAP_DOWN_PCT = 3.0   # Skip if gap-down > 3%
+
+CONFIRM_ATR_MULTIPLIER = 1.5   # Stop distance at confirmation (aligned with signal generator)
+CONFIRM_TARGET_R = 2.0         # Target = entry + R × this (was 3.0 — too greedy)
+
+MAX_STOP_BY_TYPE = {
+    'C': 0.08,   # Early entry — lower volatility expected
+    'A': 0.10,   # Continuation
+    'B': 0.10,   # Momentum
+    'S': 0.12,   # Squeeze — wider swings normal
+}
+MAX_STOP_DEFAULT = 0.10
 
 
 class PaperTradeTracker:
@@ -112,13 +127,14 @@ class PaperTradeTracker:
         """
         Check if trade should be closed.
 
-        V3.1: Includes trailing stop, gap-down slippage, AND partial T1/T2 exit.
+        V4: Correct bar ordering, earlier trailing stop, trading-day timeout.
 
-        Exit priority per bar:
-        1. Stop loss (with gap-down slippage)
-        2. T1 partial exit — sell 50%, move stop to breakeven, target T2
-        3. T2 full exit — sell remaining 50%
-        4. Timeout — close at market
+        Per-bar priority:
+        1. Stop loss / trailing stop (with gap-down slippage) — checked BEFORE trail update
+        2. T1 partial exit — sell 50 %, move stop to breakeven, target T2
+        3. T2 full exit — sell remaining 50 %
+        4. Trailing stop update — using Close (after stop/target checks)
+        5. Timeout — close at market (trading days, not calendar)
 
         Returns:
             Tuple of (status, exit_price, exit_date, reason, trailing_stop)
@@ -127,7 +143,7 @@ class PaperTradeTracker:
         entry_price = trade['entry_price']
         stop_loss = trade['stop_loss']
         initial_stop = trade.get('initial_stop') or stop_loss
-        target = trade['target']  # T1 initially; becomes T2 after partial
+        target = trade['target']
         target_2 = trade.get('target_2') or target
         max_hold_days = trade.get('max_hold_days', 7)
         entry_date = datetime.strptime(trade['entry_date'][:10], '%Y-%m-%d').date()
@@ -138,28 +154,19 @@ class PaperTradeTracker:
         if len(price_history) <= 1:
             return ('OPEN', 0, '', '', trailing_stop)
 
+        trading_days_held = 0
+
         for _, row in price_history.iloc[1:].iterrows():
             current_date = row['Date']
             today_open = row['Open']
             low = row['Low']
             high = row['High']
             close = row['Close']
-            days_held = (current_date - entry_date).days
+            trading_days_held += 1
 
             active_stop = trailing_stop
 
-            # ── TRAILING STOP UPDATE ──
-            if atr > 0 and close > entry_price and days_held >= max_hold_days * 0.5:
-                unrealized_gain = close - entry_price
-                atr_gain = unrealized_gain / atr
-                if atr_gain >= 2.0:
-                    atr_steps = int(atr_gain) - 1
-                    new_trail = initial_stop + (atr_steps * atr)
-                    if new_trail > trailing_stop:
-                        trailing_stop = round(new_trail, 2)
-                        active_stop = trailing_stop
-
-            # ── CHECK STOP LOSS (with gap-down slippage) ──
+            # ── 1. CHECK STOP LOSS first (before trail update — correct temporal order) ──
             if low <= active_stop:
                 if today_open <= active_stop:
                     exit_price = today_open
@@ -177,8 +184,7 @@ class PaperTradeTracker:
                     reason = f"Stop hit at ${exit_price:.2f} ({pnl_pct:+.1f}%)"
                     return ('STOPPED', exit_price, exit_date, reason, trailing_stop)
 
-            # ── CHECK T1 PARTIAL EXIT (v3.1) ──
-            # Fire only if: no partial taken yet AND T2 is meaningfully above T1
+            # ── 2. CHECK T1 PARTIAL EXIT ──
             if not has_partial and target_2 > target * 1.01 and high >= target:
                 exit_date = str(current_date)
                 pnl_pct = ((target / entry_price) - 1) * 100
@@ -188,7 +194,7 @@ class PaperTradeTracker:
                 )
                 return ('T1_PARTIAL', target, exit_date, reason, trailing_stop)
 
-            # ── CHECK TARGET (T2 after partial, or T1 if no T2) ──
+            # ── 3. CHECK TARGET (T2 after partial, or T1 if no T2) ──
             if high >= target:
                 exit_price = target
                 exit_date = str(current_date)
@@ -197,12 +203,22 @@ class PaperTradeTracker:
                 reason = f"{label} hit at ${exit_price:.2f} ({pnl_pct:+.1f}%)"
                 return ('TARGET', exit_price, exit_date, reason, trailing_stop)
 
-            # ── CHECK TIMEOUT ──
-            if days_held >= max_hold_days:
+            # ── 4. TRAILING STOP UPDATE (using Close — AFTER stop/target checks) ──
+            if atr > 0 and close > entry_price:
+                unrealized_gain = close - entry_price
+                atr_gain = unrealized_gain / atr
+                if atr_gain >= 1.0:
+                    atr_steps = int(atr_gain)
+                    new_trail = initial_stop + (atr_steps * atr)
+                    if new_trail > trailing_stop:
+                        trailing_stop = round(new_trail, 2)
+
+            # ── 5. CHECK TIMEOUT (trading days, not calendar) ──
+            if trading_days_held >= max_hold_days:
                 exit_price = close
                 exit_date = str(current_date)
                 pnl_pct = ((exit_price / entry_price) - 1) * 100
-                reason = f"Timeout after {days_held} days at ${exit_price:.2f} ({pnl_pct:+.1f}%)"
+                reason = f"Timeout after {trading_days_held} trading days at ${exit_price:.2f} ({pnl_pct:+.1f}%)"
                 return ('TIMEOUT', exit_price, exit_date, reason, trailing_stop)
 
         return ('OPEN', 0, '', '', trailing_stop)
@@ -277,23 +293,23 @@ class PaperTradeTracker:
             trade['trailing_stop'] = trailing_stop
 
         if status == 'T1_PARTIAL':
-            # ── v3.1: Partial exit at T1 — sell 50%, keep trade OPEN ──
             target_2 = trade.get('target_2') or trade['target']
             self.storage.update_trade(trade_id, {
                 'partial_exit_price': exit_price,
                 'partial_exit_pct': 50.0,
-                'stop_loss': trade['entry_price'],       # breakeven
-                'trailing_stop': trade['entry_price'],    # reset trail to breakeven
-                'target': target_2,                       # now targeting T2
+                'stop_loss': trade['entry_price'],
+                'trailing_stop': trade['entry_price'],
+                'initial_stop': trade['entry_price'],   # V4: anchor trail math to breakeven
+                'target': target_2,
                 'notes': reason,
             }, user_id)
             trade['partial_exit_price'] = exit_price
             trade['partial_exit_pct'] = 50.0
             trade['stop_loss'] = trade['entry_price']
             trade['trailing_stop'] = trade['entry_price']
+            trade['initial_stop'] = trade['entry_price']
             trade['target'] = target_2
             trade['notes'] = reason
-            # Keep status OPEN — remaining 50% still in play
             trade['status'] = 'OPEN'
 
             logger.info(
@@ -367,7 +383,7 @@ class PaperTradeTracker:
         
         return updated_trades
     
-    def add_trade_from_signal(self, signal: Dict) -> int:
+    def add_trade_from_signal(self, signal: Dict, user_id: Optional[str] = None) -> int:
         """
         Add a paper trade from a SmallCap signal.
         
@@ -376,6 +392,7 @@ class PaperTradeTracker:
         
         Args:
             signal: Signal dict from SmallCapEngine
+            user_id: Supabase auth user id when logged in (RLS / per-user duplicates)
         
         Returns:
             Trade ID
@@ -510,17 +527,16 @@ class PaperTradeTracker:
                 
                 # Recalculate stop/target based on actual entry (Open)
                 atr = trade.get('atr') or 0
+                swing_type = trade.get('swing_type', 'A')
                 if atr > 0:
-                    # ATR-based stop/target
-                    stop_loss = round(open_price - (atr * 1.0), 2)
-                    # Cap stop at MAX_STOP_PERCENT (15%)
-                    max_stop = open_price * 0.85
+                    stop_loss = round(open_price - (atr * CONFIRM_ATR_MULTIPLIER), 2)
+                    max_stop_pct = MAX_STOP_BY_TYPE.get(swing_type, MAX_STOP_DEFAULT)
+                    max_stop = open_price * (1 - max_stop_pct)
                     if stop_loss < max_stop:
                         stop_loss = round(max_stop, 2)
 
-                    # Target = entry + 3 × risk distance
                     risk_distance = open_price - stop_loss
-                    target = round(open_price + (risk_distance * 3), 2)
+                    target = round(open_price + (risk_distance * CONFIRM_TARGET_R), 2)
                 else:
                     # Fallback: use percentage-based from original signal
                     orig_stop_pct = (signal_price - trade['stop_loss']) / signal_price

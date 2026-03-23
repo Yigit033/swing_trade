@@ -235,6 +235,14 @@ class SmallCapFilters:
         if signal_date is None:
             signal_date = datetime.now()
         
+        # 0. Price range ($3–$200)
+        if df is not None and len(df) > 0:
+            last_close = float(df['Close'].iloc[-1])
+            passed, reason = self.check_price(last_close)
+            results['filters']['price'] = {'passed': passed, 'reason': reason, 'value': last_close}
+            if not passed:
+                return False, results
+        
         # 1. Market Cap
         market_cap = stock_info.get('marketCap', 0) or stock_info.get('market_cap', 0)
         passed, reason = self.check_market_cap(market_cap)

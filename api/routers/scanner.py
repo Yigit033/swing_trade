@@ -1,21 +1,32 @@
 """
 SmallCap Scanner router.
-GET  /api/scanner/chart     - OHLCV + indicators for any ticker
-POST /api/scanner/smallcap  - run SmallCap momentum scan
-POST /api/scanner/track     - add a signal to paper trades via tracker (duplicate-safe)
+GET  /api/scanner/chart          - OHLCV + indicators for any ticker
+POST /api/scanner/smallcap       - run SmallCap scan (sync, legacy)
+POST /api/scanner/smallcap/start - queue background scan → { job_id }
+GET  /api/scanner/smallcap/job/{job_id} - poll status + result when done
+POST /api/scanner/track          - add a signal to paper trades via tracker (duplicate-safe)
 """
 
 import logging
+import threading
 import datetime
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Callable, Optional
+
 from api.deps import get_smallcap_engine, get_paper_tracker, get_fetcher, get_regime_storage
 from api.auth import get_current_user_id
 from api.utils import flatten_yf_df, sanitize_for_json, fetch_ticker_history
+from api.scanner_jobs import (
+    create_exclusive_scan_job,
+    get_job_public,
+    run_scan_worker,
+    current_scan_job_id,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -137,72 +148,146 @@ class ScanRequest(BaseModel):
     top_n: int = 10
 
 
-@router.post("/smallcap")
-def run_smallcap_scan(body: ScanRequest):
-    """Run the SmallCap Momentum Scanner."""
+def _execute_smallcap_scan(
+    body: ScanRequest,
+    on_progress: Optional[Callable[[int, str, str], None]] = None,
+) -> dict:
+    """Core scan logic; optional on_progress(percent, phase, message)."""
+    def prog(pct: int, phase: str, message: str) -> None:
+        if on_progress:
+            on_progress(pct, phase, message)
+
     engine = get_smallcap_engine()
     fetcher = get_fetcher()
+
+    prog(2, "universe", "Fetching small-cap universe…")
+    tickers = engine.get_small_cap_universe(use_finviz=True, max_tickers=200)
+    logger.info(f"SmallCap universe: {len(tickers)} tickers")
+    prog(6, "universe", f"Universe: {len(tickers)} tickers")
+
+    data_dict: dict[str, pd.DataFrame] = {}
+    n = len(tickers)
+    for i, ticker in enumerate(tickers):
+        try:
+            df = fetcher.fetch_stock_data(ticker, period="3mo")
+            if df is not None and len(df) >= 20:
+                data_dict[ticker] = df
+        except Exception:
+            continue
+        if n > 0 and (i % 2 == 0 or i == n - 1):
+            pct = 8 + int(75 * (i + 1) / n)
+            prog(pct, "fetch", f"Price data {i + 1}/{n} ({ticker})…")
+
+    if not data_dict:
+        return {"signals": [], "stats": {"reason": "no_data"}, "market_regime": "UNKNOWN"}
+
+    prog(84, "scan", "Running momentum engine…")
+    signals = engine.scan_universe(
+        tickers=list(data_dict.keys()),
+        data_dict=data_dict,
+        portfolio_value=body.portfolio_value,
+    )
+
+    prog(90, "filter", "Filtering signals…")
+
+    actual_regime = "BULL"
+    regime_multiplier = 1.0
+    regime_confidence = "CONFIRMED"
+    if signals:
+        actual_regime = signals[0].get("market_regime", "BULL")
+        regime_multiplier = signals[0].get("regime_multiplier", 1.0)
+        regime_confidence = signals[0].get("regime_confidence", "CONFIRMED")
+
+    effective_min_quality = body.min_quality
+    effective_top_n = body.top_n
+    if actual_regime == "BEAR":
+        effective_min_quality = max(body.min_quality, 85)
+        effective_top_n = min(body.top_n, 3)
+        logger.info(f"BEAR regime: raised min_quality to {effective_min_quality}, top_n to {effective_top_n}")
+    elif actual_regime == "CAUTION":
+        effective_min_quality = max(body.min_quality, 75)
+        effective_top_n = min(body.top_n, 5)
+        logger.info(f"CAUTION regime: raised min_quality to {effective_min_quality}, top_n to {effective_top_n}")
+
+    filtered = [
+        s for s in signals
+        if s.get("original_quality_score", s.get("quality_score", 0)) >= effective_min_quality
+    ]
+    filtered = filtered[: effective_top_n]
+
     try:
-        tickers = engine.get_small_cap_universe(use_finviz=True, max_tickers=200)
-        logger.info(f"SmallCap universe: {len(tickers)} tickers")
+        regime_data = getattr(engine, "_last_regime", None)
+        if regime_data:
+            get_regime_storage().save_regime(regime_data)
+    except Exception:
+        logger.debug("Regime save skipped (non-critical)")
 
-        # Use fetcher.fetch_stock_data (same as Streamlit) instead of yf.download
-        # This ensures identical data pipeline: yf.Ticker().history(), same validation,
-        # same period (3mo), same column format → identical technical indicators → identical scores
-        data_dict: dict[str, pd.DataFrame] = {}
-        for ticker in tickers:
-            try:
-                df = fetcher.fetch_stock_data(ticker, period='3mo')
-                if df is not None and len(df) >= 20:
-                    data_dict[ticker] = df
-            except Exception:
-                continue
+    stats = {
+        "stocks_scanned": len(tickers),
+        "stocks_with_data": len(data_dict),
+        "raw_signals": len(signals),
+        "filtered_signals": len(filtered),
+        "reason": "success" if filtered else "no_qualifying",
+        "regime_multiplier": regime_multiplier,
+        "regime_confidence": regime_confidence,
+        "effective_min_quality": effective_min_quality,
+        "effective_top_n": effective_top_n,
+    }
+    prog(97, "finalize", "Done")
+    return sanitize_for_json({"signals": filtered, "stats": stats, "market_regime": actual_regime})
 
-        if not data_dict:
-            return {"signals": [], "stats": {"reason": "no_data"}, "market_regime": "UNKNOWN"}
 
-        signals = engine.scan_universe(
-            tickers=list(data_dict.keys()),
-            data_dict=data_dict,
-            portfolio_value=body.portfolio_value,
+@router.post("/smallcap/start")
+def start_smallcap_scan(body: ScanRequest):
+    """
+    Start scan in a background thread. Returns immediately with job_id.
+    Poll GET /api/scanner/smallcap/job/{job_id} until status is completed|failed.
+    """
+    job_id = create_exclusive_scan_job()
+    if not job_id:
+        active = current_scan_job_id()
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "A scan is already running",
+                "active_job_id": active,
+            },
         )
 
-        # Filter on ORIGINAL quality score (before regime penalty) so users see
-        # fundamentally good signals even in BEAR/CAUTION markets.
-        # The regime-adjusted score is still displayed for risk awareness.
-        filtered = [s for s in signals if s.get("original_quality_score", s.get("quality_score", 0)) >= body.min_quality]
-        filtered = filtered[:body.top_n]
+    def _run(body_inner: ScanRequest, progress_cb: Callable[[int, str, str], None]) -> dict:
+        return _execute_smallcap_scan(body_inner, progress_cb)
 
-        # v4.0: Get actual market regime from signals (engine sets it per-signal)
-        actual_regime = "BULL"
-        regime_multiplier = 1.0
-        regime_confidence = "CONFIRMED"
-        source = filtered if filtered else signals
-        if source:
-            actual_regime = source[0].get("market_regime", "BULL")
-            regime_multiplier = source[0].get("regime_multiplier", 1.0)
-            regime_confidence = source[0].get("regime_confidence", "CONFIRMED")
+    thread = threading.Thread(
+        target=run_scan_worker,
+        args=(job_id, body, _run),
+        daemon=True,
+        name=f"smallcap-scan-{job_id[:8]}",
+    )
+    thread.start()
+    return {"job_id": job_id, "status": "queued"}
 
-        # v4.0: Persist regime to DB (auto-log on every scan)
-        try:
-            regime_data = getattr(engine, '_last_regime', None)
-            if regime_data:
-                get_regime_storage().save_regime(regime_data)
-        except Exception:
-            logger.debug("Regime save skipped (non-critical)")
 
-        stats = {
-            "stocks_scanned":  len(tickers),
-            "stocks_with_data": len(data_dict),
-            "raw_signals":     len(signals),
-            "filtered_signals": len(filtered),
-            "reason": "success" if filtered else "no_qualifying",
-            "regime_multiplier": regime_multiplier,
-            "regime_confidence": regime_confidence,
-        }
-        return sanitize_for_json({"signals": filtered, "stats": stats, "market_regime": actual_regime})
+@router.get("/smallcap/job/{job_id}")
+def get_smallcap_scan_job(job_id: str):
+    """Poll scan progress / fetch result when completed."""
+    data = get_job_public(job_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Unknown job_id")
+    return data
 
+
+@router.post("/smallcap")
+def run_smallcap_scan(body: ScanRequest):
+    """Synchronous scan (legacy / scripts). Prefer POST /smallcap/start for UI."""
+    try:
+        return _execute_smallcap_scan(body, on_progress=None)
     except Exception as e:
         logger.exception("SmallCap scan failed")
-        return sanitize_for_json({"signals": [], "stats": {"reason": "error", "error": str(e)},
-                "market_regime": "UNKNOWN", "error": str(e)})
+        return sanitize_for_json(
+            {
+                "signals": [],
+                "stats": {"reason": "error", "error": str(e)},
+                "market_regime": "UNKNOWN",
+                "error": str(e),
+            }
+        )

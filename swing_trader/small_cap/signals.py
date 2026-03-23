@@ -419,9 +419,10 @@ class SmallCapSignals:
     
     def check_atr_percent(self, atr_pct: float) -> Tuple[bool, str]:
         """Check if ATR% meets signal trigger threshold."""
+        threshold_pct = self.MIN_ATR_PERCENT_TRIGGER * 100
         if atr_pct >= self.MIN_ATR_PERCENT_TRIGGER:
-            return True, f"ATR% {atr_pct*100:.1f}% >= 4%"
-        return False, f"ATR% {atr_pct*100:.1f}% < 4%"
+            return True, f"ATR% {atr_pct*100:.1f}% >= {threshold_pct:.1f}%"
+        return False, f"ATR% {atr_pct*100:.1f}% < {threshold_pct:.1f}%"
     
     def check_all_triggers(self, df: pd.DataFrame) -> Tuple[bool, Dict]:
         """
@@ -445,14 +446,14 @@ class SmallCapSignals:
         
         # Store all metrics
         details['triggers']['volume_surge'] = {
-            'passed': volume_surge >= 1.0,  # At least average volume
-            'reason': f"Volume surge {volume_surge:.1f}x",
+            'passed': volume_surge >= 1.8,
+            'reason': f"Volume surge {volume_surge:.1f}x (need 1.8x)",
             'value': volume_surge
         }
         
         details['triggers']['atr_percent'] = {
-            'passed': atr_pct >= 0.02,  # At least 2% ATR
-            'reason': f"ATR% {atr_pct*100:.1f}%",
+            'passed': atr_pct >= 0.035,
+            'reason': f"ATR% {atr_pct*100:.1f}% (need 3.5%)",
             'value': atr_pct
         }
         
@@ -462,10 +463,8 @@ class SmallCapSignals:
             'optional': True
         }
         
-        # ALWAYS trigger if we have minimum thresholds
-        # Let the quality score determine ranking
-        min_vol_ok = volume_surge >= 1.3    # v2.3: At least 30% above average (was 1.0x)
-        min_atr_ok = atr_pct >= 0.02        # At least 2% volatility
+        min_vol_ok = volume_surge >= 1.8    # V4: 80% above average (was 1.3x — too loose)
+        min_atr_ok = atr_pct >= 0.035       # V4: aligned with SmallCapFilters.MIN_ATR_PERCENT (was 2% — too loose)
         
         # ALWAYS store values for display (even if not triggered)
         details['volume_surge'] = volume_surge
@@ -525,25 +524,26 @@ class SmallCapSignals:
     
     def check_higher_lows(self, df: pd.DataFrame) -> Tuple[bool, str]:
         """
-        Check for higher lows pattern in last 3-5 days.
-        Strong sign of accumulation and continuation.
+        V4: Proper 3-bar ascending lows staircase over the last 5 days.
+        Each of the last 3 lows must be strictly higher than the previous.
         """
-        if df is None or len(df) < 4:
+        if df is None or len(df) < 5:
             return False, "Insufficient data"
-        
+
         try:
-            low_today = df['Low'].iloc[-1]
-            low_2_days_ago = df['Low'].iloc[-3]
-            low_3_days_ago = df['Low'].iloc[-4]
-            
-            # Pattern: Recent low > Earlier low
-            higher_low = low_today > low_3_days_ago or low_today > low_2_days_ago
-            
-            if higher_low:
-                return True, "Higher lows pattern detected"
-            else:
-                return False, "No higher lows"
-                
+            lows = df['Low'].iloc[-5:].values
+            # Need at least 3 consecutively higher lows in the 5-bar window
+            ascending_count = 0
+            for i in range(1, len(lows)):
+                if lows[i] > lows[i - 1]:
+                    ascending_count += 1
+                else:
+                    ascending_count = 0
+                if ascending_count >= 3:
+                    return True, "3+ consecutive higher lows (strong accumulation)"
+
+            return False, "No consistent higher lows"
+
         except Exception as e:
             logger.error(f"Error checking higher lows: {e}")
             return False, str(e)

@@ -168,16 +168,16 @@ class SmallCapUniverse:
         df['rvol_score'] = np.clip((df['rel_vol'] - 1.0) / 4.0 * 100, 0, 100)
 
         # ============================================================
-        # COMPONENT 2: Price Change Score (30% weight)
-        # Favor UP moves, penalize extreme moves (chasing risk)
+        # COMPONENT 2: Price Change Score (25% weight — reduced from 30%)
+        # Sweet spot: +2% to +10% (early entry zone)
+        # V4: steeper chasing penalties — don't rank "already pumped" at top
         # ============================================================
-        # Sweet spot: +2% to +12% (early entry zone)
-        # >15% = chasing penalty, negative = not ideal but shows volatility
-        change_abs = df['change_pct'].abs()
-        up_bias = (df['change_pct'] > 0).astype(float) * 1.5 + 0.5  # 2x for up, 0.5x for down
+        change_pct = df['change_pct']
+        change_abs = change_pct.abs()
+        up_bias = (change_pct > 0).astype(float) * 1.5 + 0.5
         df['change_score'] = np.clip(change_abs * up_bias * 5, 0, 100)
-        # Penalize extreme moves (>15% today = chasing risk)
-        chase_penalty = np.where(df['change_pct'] > 15, 30, 0)
+        chase_penalty = np.where(change_pct > 15, 50,
+                        np.where(change_pct > 10, 25, 0))
         df['change_score'] = np.clip(df['change_score'] - chase_penalty, 0, 100)
 
         # ============================================================
@@ -203,13 +203,14 @@ class SmallCapUniverse:
         )
 
         # ============================================================
-        # COMPOSITE SCORE (weighted sum)
+        # COMPOSITE SCORE (V4 rebalanced — less chasing, more liquidity)
+        # RVOL 30% (was 40%), Change 25% (was 30%), Volume 25% (was 20%), MCap 20% (was 10%)
         # ============================================================
         df['composite_score'] = (
-            df['rvol_score'] * 0.40 +
-            df['change_score'] * 0.30 +
-            df['vol_score'] * 0.20 +
-            df['mcap_score'] * 0.10
+            df['rvol_score'] * 0.30 +
+            df['change_score'] * 0.25 +
+            df['vol_score'] * 0.25 +
+            df['mcap_score'] * 0.20
         )
 
         return df

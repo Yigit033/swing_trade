@@ -226,7 +226,17 @@ export const getPerformance = () =>
 export const getWeeklyReport = () =>
     api.get("/api/performance/weekly-report").then((r) => r.data);
 
-// Scanner
+// Scanner — background job (sayfa değiştirsen de scan sürer)
+export const startSmallcapScanJob = (params: {
+    min_quality?: number;
+    top_n?: number;
+    portfolio_value?: number;
+}) => api.post("/api/scanner/smallcap/start", params, { timeout: 60000 }).then((r) => r.data);
+
+export const getSmallcapScanJob = (jobId: string) =>
+    api.get(`/api/scanner/smallcap/job/${encodeURIComponent(jobId)}`, { timeout: 20000 }).then((r) => r.data);
+
+/** Senkron scan (script / legacy); UI için startSmallcapScanJob kullan */
 export const runSmallcapScan = (params: {
     min_quality?: number;
     top_n?: number;

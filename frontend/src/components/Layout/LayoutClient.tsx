@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import Sidebar from "./Sidebar";
 import { Menu } from "lucide-react";
 import { QueryProvider } from "@/providers/QueryProvider";
+import { ScannerJobProvider } from "@/providers/ScannerJobProvider";
+import ScannerScanBanner from "@/components/ScannerScanBanner";
 
 export default function LayoutClient({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
@@ -27,12 +29,14 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
 
     return (
         <QueryProvider>
+            <ScannerJobProvider>
             <Sidebar
                 isOpen={sidebarOpen}
                 onClose={closeSidebar}
                 isMobile={isMobile}
             />
             <main className="main-content">
+                <ScannerScanBanner />
                 {/* Mobile hamburger — only visible on small screens */}
                 {isMobile && (
                     <button
@@ -57,6 +61,7 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
                     aria-label="Close menu"
                 />
             )}
+            </ScannerJobProvider>
         </QueryProvider>
     );
 }

@@ -251,9 +251,10 @@ class SmallCapScoring:
         risk_score_raw = self.score_risk_control(df, atr_percent)
 
         # Normalize each to 0-100, then apply weights (v3.0)
+        # V4: float_score allows negative values so large-float penalty actually bites
         volume_score = (max(volume_score_raw, 0) / self.MAX_VOLUME_SCORE) * 100 * self.WEIGHT_VOLUME
         volatility_score = (max(volatility_score_raw, 0) / self.MAX_VOLATILITY_SCORE) * 100 * self.WEIGHT_VOLATILITY
-        float_score = (max(float_score_raw, 0) / self.MAX_FLOAT_SCORE) * 100 * self.WEIGHT_FLOAT
+        float_score = (float_score_raw / self.MAX_FLOAT_SCORE) * 100 * self.WEIGHT_FLOAT
         momentum_score = (max(momentum_score_raw, 0) / self.MAX_MOMENTUM_SCORE) * 100 * self.WEIGHT_MOMENTUM
         risk_score = (max(risk_score_raw, 0) / self.MAX_RISK_SCORE) * 100 * self.WEIGHT_RISK
 

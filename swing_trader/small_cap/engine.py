@@ -413,34 +413,22 @@ class SmallCapEngine:
             macd_data = self.signals.calculate_macd(df)
             boosters['macd_bullish'] = macd_data['bullish_cross'] or (macd_data['above_zero'] and macd_data['expanding'])
             
-            quality_score = self.scoring.calculate_quality_score(
-                df, volume_surge, atr_percent, float_shares, boosters
-            )
-            
-            # Create signal with enhanced info
-            entry_price = float(df['Close'].iloc[-1])
-            
             # Get swing metrics for display
+            entry_price = float(df['Close'].iloc[-1])
             five_day_return = swing_details.get('five_day_momentum', {}).get('return', 0)
             ma20_distance = swing_details.get('above_ma20', {}).get('distance', 0)
             rsi = boosters.get('rsi', 50)
             overext = swing_details.get('overextension', {})
             higher_lows = boosters.get('higher_lows', False)
             
-            # Calculate close position (where in day's range did it close)
             today_high = float(df['High'].iloc[-1])
             today_low = float(df['Low'].iloc[-1])
             today_close = float(df['Close'].iloc[-1])
             day_range = today_high - today_low
             close_position = (today_close - today_low) / day_range if day_range > 0 else 0.5
             
-            # ============================================================
-            # SWING TYPE CLASSIFICATION (OPTIMIZED)
-            # Type C: Early Stage (2-4 days) - check first
-            # Type B: Momentum (2-5 days) - RSI-based duration
-            # Type A: Continuation (4-8 days) - default
-            # ============================================================
-            # Pass all available data to classify (catalyst/divergence were missing before)
+            # ── CLASSIFY SWING TYPE *BEFORE* SCORING ──
+            # This way scoring penalties use the correct type-specific RSI bands.
             has_any_catalyst = (
                 boosters.get('has_recent_news', False) or
                 boosters.get('is_squeeze_candidate', False) or
@@ -458,7 +446,27 @@ class SmallCapEngine:
                 macd_bullish=boosters.get('macd_bullish', False)
             )
             
-            # Swing type labels
+            # V4 hard RSI gate: reject overbought signals before they become trades
+            if rsi > 70 and swing_type != 'S':
+                logger.debug(f"{ticker}: RSI {rsi:.0f} > 70 — rejected (overbought, not squeeze)")
+                return None
+
+            # V4: Hard overextension gate — reject late entries
+            overext_details = overext.get('details', {})
+            five_day_total = overext_details.get('five_day_total', five_day_return)
+            if five_day_total > 25 and rsi > 65:
+                logger.debug(
+                    f"{ticker}: Late entry rejected — 5d={five_day_total:+.0f}%, RSI={rsi:.0f}"
+                )
+                return None
+
+            # Inject swing_type into boosters so scoring uses correct RSI penalty bands
+            boosters['swing_type'] = swing_type
+
+            quality_score = self.scoring.calculate_quality_score(
+                df, volume_surge, atr_percent, float_shares, boosters
+            )
+
             type_labels = {
                 'S': 'Short Squeeze',
                 'A': 'Continuation',

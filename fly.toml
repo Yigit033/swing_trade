@@ -16,6 +16,17 @@ primary_region = 'iad'
   min_machines_running = 0
   processes = ['app']
 
+  # soft_limit=1: 1+ istek = makine "meşgul", scan sırasında excess capacity ile durdurulmaz
+  # min_machines_running=0: Boşta makine durur → maliyet yok. İstek gelince auto_start ile açılır.
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 1
+    hard_limit = 10
+
+  # Scan 10dk sürebilir — bağlantı timeout önlemi
+  [http_service.http_options]
+    idle_timeout = 660
+
   [[http_service.checks]]
     interval = '30s'
     timeout = '10s'
