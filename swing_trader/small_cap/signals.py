@@ -37,7 +37,7 @@ class SmallCapSignals:
     
     # SENIOR TRADER SIGNAL CONSTANTS
     MIN_VOLUME_SURGE = 1.2            # 1.2x (was 1.8x — audit showed most stocks rejected at 1.3-1.5x)
-    MIN_ATR_PERCENT_TRIGGER = 0.035   # 3.5%
+    MIN_ATR_PERCENT_TRIGGER = 0.03    # 3.0% (aligned with SmallCapFilters)
     ATR_PERIOD = 10                   # 10-period ATR (faster)
     GAP_THRESHOLD = 0.03              # 3% gap for catalyst boost
     
@@ -446,14 +446,14 @@ class SmallCapSignals:
         
         # Store all metrics
         details['triggers']['volume_surge'] = {
-            'passed': volume_surge >= 1.8,
-            'reason': f"Volume surge {volume_surge:.1f}x (need 1.8x)",
+            'passed': volume_surge >= 1.5,
+            'reason': f"Volume surge {volume_surge:.1f}x (need 1.5x)",
             'value': volume_surge
         }
         
         details['triggers']['atr_percent'] = {
-            'passed': atr_pct >= 0.035,
-            'reason': f"ATR% {atr_pct*100:.1f}% (need 3.5%)",
+            'passed': atr_pct >= 0.03,
+            'reason': f"ATR% {atr_pct*100:.1f}% (need 3.0%)",
             'value': atr_pct
         }
         
@@ -463,8 +463,8 @@ class SmallCapSignals:
             'optional': True
         }
         
-        min_vol_ok = volume_surge >= 1.8    # V4: 80% above average (was 1.3x — too loose)
-        min_atr_ok = atr_pct >= 0.035       # V4: aligned with SmallCapFilters.MIN_ATR_PERCENT (was 2% — too loose)
+        min_vol_ok = volume_surge >= 1.5    # V4.1: 50% above average (1.8x killed all signals; 1.3x was too loose)
+        min_atr_ok = atr_pct >= 0.03        # V4.1: 3% (3.5% matched filter but double-filtered; 2% was too loose)
         
         # ALWAYS store values for display (even if not triggered)
         details['volume_surge'] = volume_surge
@@ -678,8 +678,10 @@ class SmallCapSignals:
         rsi = self.calculate_rsi(df)
         details['rsi'] = rsi
         
-        # SWING READY if required conditions met
-        details['swing_ready'] = passed_5d and passed_ma
+        # SWING READY: 5d momentum required; MA20 proximity accepted (within 3% below)
+        ma20_distance = details['above_ma20'].get('distance', 0)
+        ma20_ok = passed_ma or ma20_distance >= -3.0
+        details['swing_ready'] = passed_5d and ma20_ok
         
         return details['swing_ready'], details
     

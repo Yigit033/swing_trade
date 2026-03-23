@@ -451,10 +451,10 @@ class SmallCapEngine:
                 logger.debug(f"{ticker}: RSI {rsi:.0f} > 70 — rejected (overbought, not squeeze)")
                 return None
 
-            # V4: Hard overextension gate — reject late entries
+            # V4: Hard overextension gate — reject late entries (except squeeze candidates)
             overext_details = overext.get('details', {})
             five_day_total = overext_details.get('five_day_total', five_day_return)
-            if five_day_total > 25 and rsi > 65:
+            if five_day_total > 30 and rsi > 65 and swing_type != 'S':
                 logger.debug(
                     f"{ticker}: Late entry rejected — 5d={five_day_total:+.0f}%, RSI={rsi:.0f}"
                 )

@@ -37,7 +37,7 @@ class SmallCapFilters:
     MIN_MARKET_CAP = 250_000_000      # $250M (was $300M)
     MAX_MARKET_CAP = 2_500_000_000    # $2.5B (was $3B)
     MIN_AVG_VOLUME = 750_000          # 750K shares (was 1M)
-    MIN_ATR_PERCENT = 0.035           # 3.5% minimum
+    MIN_ATR_PERCENT = 0.03            # 3.0% minimum (was 3.5% — too restrictive in low-vol regimes)
     MAX_FLOAT = 150_000_000            # 150M shares (was 80M - raised based on data analysis)
     IDEAL_FLOAT = 60_000_000          # 60M - main filter for explosion potential
     MIN_PRICE = 3.00                  # $3 (avoid penny stocks)
@@ -118,7 +118,7 @@ class SmallCapFilters:
     def check_atr_percent(self, atr_pct: float) -> Tuple[bool, str]:
         """Check if ATR% meets volatility threshold."""
         if atr_pct < self.MIN_ATR_PERCENT:
-            return False, f"ATR% too low ({atr_pct*100:.1f}% < 3.5%)"
+            return False, f"ATR% too low ({atr_pct*100:.1f}% < {self.MIN_ATR_PERCENT*100:.1f}%)"
         return True, f"ATR% OK ({atr_pct*100:.1f}%)"
     
     def check_float(self, float_shares: float) -> Tuple[bool, str]:

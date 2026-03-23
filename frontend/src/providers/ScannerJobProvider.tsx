@@ -152,7 +152,7 @@ export function ScannerJobProvider({ children }: { children: ReactNode }) {
         };
 
         void tick();
-        const interval = setInterval(() => void tick(), 1500);
+        const interval = setInterval(() => void tick(), 5000);
         return () => {
             cancelled = true;
             clearInterval(interval);
