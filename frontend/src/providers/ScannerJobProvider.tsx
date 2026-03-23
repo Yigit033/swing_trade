@@ -110,11 +110,13 @@ export function ScannerJobProvider({ children }: { children: ReactNode }) {
         writeStoredJobId(jobId);
 
         let cancelled = false;
+        let consecutiveErrors = 0;
 
         const tick = async () => {
             try {
                 const d = await getSmallcapScanJob(jobId);
                 if (cancelled) return;
+                consecutiveErrors = 0;
                 setPoll({
                     status: d.status,
                     progress: d.progress ?? 0,
@@ -144,8 +146,21 @@ export function ScannerJobProvider({ children }: { children: ReactNode }) {
                             : d.error || d.message || "Scan failed"
                     );
                 }
-            } catch {
-                if (!cancelled && jobIdRef.current === jobId) {
+            } catch (err: unknown) {
+                if (cancelled) return;
+                const ax = err as { response?: { status?: number } };
+                if (ax?.response?.status === 404) {
+                    clearStoredJobId();
+                    setJobId(null);
+                    setPoll(null);
+                    setScanError(null);
+                    return;
+                }
+                consecutiveErrors++;
+                if (consecutiveErrors >= 5 && jobIdRef.current === jobId) {
+                    clearStoredJobId();
+                    setJobId(null);
+                    setPoll(null);
                     setScanError("Durum alınamadı — ağ veya oturum kontrol edin.");
                 }
             }
