@@ -14,6 +14,8 @@ import yfinance as yf
 
 from .engine import SmallCapEngine
 from .risk import SmallCapRisk
+from .regime_logic import regime_from_spy_close, regime_unknown
+from .thresholds import effective_scan_thresholds
 
 logger = logging.getLogger(__name__)
 
@@ -21,16 +23,22 @@ logger = logging.getLogger(__name__)
 class SmallCapBacktester:
     """
     Walk-forward backtest for SmallCap momentum system.
-    
+
     Scans stocks day by day using historical data windows,
     opens simulated trades on signals, and tracks outcomes.
-    Uses proper ATR-based stops and dynamic position sizing.
+
+    Live parity notes (scan_stock backtest_mode=True still differs from full live):
+    - Earnings filter is skipped; catalyst / short / insider / news bonuses are zero;
+      sector RS uses SPY proxy when benchmark window exists.
+    - Execution: optional slippage + commission below; live API does not model fills.
     """
-    
-    # Backtest parameters
-    MIN_QUALITY_SCORE = 5.0      # Minimum signal quality to enter
+
+    # Backtest parameters (aligned with live SmallCapRisk: 1.5% risk + TYPE_POSITION_CAPS)
     COOLDOWN_DAYS = 3            # Days to wait after stop-out before re-entering same ticker
-    RISK_PER_TRADE_PCT = 0.005   # 0.5% of portfolio risked per trade
+    # Adverse slippage vs mid/OHLC quote: buy worse, sell worse (0 = same as raw bar prices)
+    SLIPPAGE_BPS_PER_SIDE = 5
+    # Per-dollar fee on each leg (entry notional + exit notional); 0 = typical US zero-commission
+    COMMISSION_BPS_PER_SIDE = 0
     MAX_GAP_UP_PCT = 5.0         # Skip entry if gap-up > 5% (momentum exhausted)
     MAX_GAP_DOWN_PCT = 3.0       # Skip entry if gap-down > 3% (bad news)
     MAX_ENTRY_RSI = 70           # Don't enter if RSI > 70 (overbought)
@@ -46,7 +54,12 @@ class SmallCapBacktester:
         self.capital = self.initial_capital
         self.cooldowns = {}  # ticker -> date when cooldown expires
         self.pending_signals = []  # Signals waiting for next-day entry
-    
+        self._spy_df: Optional[pd.DataFrame] = None
+        self._vix_df: Optional[pd.DataFrame] = None
+        self.min_quality = 65
+        self.top_n = 10
+        self._max_concurrent = 3
+
     def run_backtest(
         self,
         tickers: List[str],
@@ -54,24 +67,22 @@ class SmallCapBacktester:
         end_date: str,
         initial_capital: float = 10000,
         max_concurrent: int = 3,
-        progress_callback=None
+        min_quality: int = 65,
+        top_n: int = 10,
+        progress_callback=None,
     ) -> Dict:
         """
-        Run walk-forward backtest.
-        
+        Run walk-forward backtest (aligned with live scanner: regime, effective thresholds,
+        scan_universe-style ranking, backtest_mode scan_stock).
+
         Args:
-            tickers: List of tickers to scan
-            start_date: Backtest start (YYYY-MM-DD)
-            end_date: Backtest end (YYYY-MM-DD)
-            initial_capital: Starting capital
-            max_concurrent: Max simultaneous open trades
-            progress_callback: Callback for progress updates
-        
-        Returns:
-            Dict with trades, equity_curve, and metrics
+            min_quality / top_n: same meaning as POST /api/scanner/smallcap ScanRequest.
         """
         self.initial_capital = initial_capital
         self.capital = initial_capital
+        self.min_quality = min_quality
+        self.top_n = top_n
+        self._max_concurrent = max_concurrent
         self.trades = []
         self.open_trades = []
         self.equity_curve = []
@@ -107,6 +118,8 @@ class SmallCapBacktester:
         
         if not data_dict:
             return self._empty_results()
+
+        self._spy_df, self._vix_df = self._fetch_benchmarks(warmup_start, end_plus)
         
         if progress_callback:
             progress_callback(30, f"Data ready: {len(data_dict)} stocks. Starting simulation...")
@@ -124,18 +137,35 @@ class SmallCapBacktester:
             # 2b: Process pending signals from YESTERDAY (next-day-open entry)
             if self.pending_signals and len(self.open_trades) < max_concurrent:
                 self._process_pending_entries(current_date_dt, data_dict, max_concurrent)
+
+            regime, eff_min, eff_top, spy_rs = self._daily_regime_bundle(current_date_dt)
             
-            # 2c: Record equity
+            # 2c: Record equity (+ daily regime / thresholds for UI)
             portfolio_value = self._calculate_portfolio_value(current_date_dt, data_dict)
             self.equity_curve.append({
                 'date': current_date_dt.strftime('%Y-%m-%d'),
                 'portfolio_value': round(portfolio_value, 2),
-                'open_trades': len(self.open_trades)
+                'open_trades': len(self.open_trades),
+                'market_regime': regime.get('regime', 'UNKNOWN'),
+                'regime_confidence': regime.get('confidence', ''),
+                'regime_multiplier': regime.get('score_multiplier', 1.0),
+                'effective_min_quality': eff_min,
+                'effective_top_n': eff_top,
+                'request_min_quality': self.min_quality,
+                'request_top_n': self.top_n,
             })
             
             # 2d: Scan for new signals → queue as PENDING (enter tomorrow)
             if len(self.open_trades) < max_concurrent:
-                self._scan_for_signals(current_date_dt, data_dict, max_concurrent)
+                self._scan_for_signals(
+                    current_date_dt,
+                    data_dict,
+                    max_concurrent,
+                    regime,
+                    eff_min,
+                    eff_top,
+                    spy_rs,
+                )
             
             if progress_callback and day_idx % 5 == 0:
                 pct = 30 + int((day_idx / total_days) * 65)  # 30-95%
@@ -157,57 +187,183 @@ class SmallCapBacktester:
             'equity_curve': self.equity_curve,
             'metrics': metrics,
             'data_stocks': len(data_dict),
-            'period': f"{start_date} to {end_date}"
+            'period': f"{start_date} to {end_date}",
+            'params': {
+                'min_quality': self.min_quality,
+                'top_n': self.top_n,
+                'max_concurrent': self._max_concurrent,
+                'slippage_bps_per_side': self.SLIPPAGE_BPS_PER_SIDE,
+                'commission_bps_per_side': self.COMMISSION_BPS_PER_SIDE,
+            },
         }
-    
-    def _scan_for_signals(self, current_date: datetime, data_dict: Dict, max_concurrent: int):
-        """Scan all stocks — signals are QUEUED for next-day entry (not instant)."""
-        open_tickers = {t['ticker'] for t in self.open_trades}
-        pending_tickers = {s['signal']['ticker'] for s in self.pending_signals}
-        
-        for ticker, full_df in data_dict.items():
+
+    def _entry_fill_price(self, quoted: float) -> float:
+        b = self.SLIPPAGE_BPS_PER_SIDE / 10000.0
+        return round(quoted * (1.0 + b), 2)
+
+    def _exit_fill_price(self, quoted: float) -> float:
+        if quoted <= 0:
+            return quoted
+        b = self.SLIPPAGE_BPS_PER_SIDE / 10000.0
+        return round(quoted * (1.0 - b), 2)
+
+    def _commission_dollars(self, entry_px: float, exit_px: float, shares: int) -> float:
+        b = self.COMMISSION_BPS_PER_SIDE / 10000.0
+        if b <= 0 or shares <= 0:
+            return 0.0
+        return entry_px * shares * b + exit_px * shares * b
+
+    def _normalize_benchmark_df(self, raw: Optional[pd.DataFrame]) -> pd.DataFrame:
+        if raw is None or len(raw) == 0:
+            return pd.DataFrame()
+        d = raw.reset_index()
+        date_col = "Date" if "Date" in d.columns else d.columns[0]
+        d = d.rename(columns={date_col: "Date"})
+        col = pd.to_datetime(d["Date"])
+        if getattr(col.dt, "tz", None) is not None:
+            col = col.dt.tz_convert("UTC")
+        d["Date"] = pd.to_datetime(col.dt.strftime("%Y-%m-%d"))
+        return d
+
+    def _fetch_benchmarks(self, start_s: str, end_s: str) -> tuple:
+        """Load SPY + VIX for point-in-time regime (same rules as live)."""
+        spy_df = pd.DataFrame()
+        vix_df = pd.DataFrame()
+        try:
+            sh = yf.Ticker("SPY").history(start=start_s, end=end_s)
+            spy_df = self._normalize_benchmark_df(sh)
+        except Exception as e:
+            logger.warning("Backtest: SPY benchmark fetch failed: %s", e)
+        try:
+            vh = yf.Ticker("^VIX").history(start=start_s, end=end_s)
+            vix_df = self._normalize_benchmark_df(vh)
+        except Exception as e:
+            logger.debug("Backtest: VIX fetch failed: %s", e)
+        return spy_df, vix_df
+
+    def _daily_regime_bundle(self, current_date: datetime):
+        """Regime from SPY/VIX as of current_date + effective thresholds + SPY slice for RS."""
+        if self._spy_df is None or len(self._spy_df) == 0:
+            r = regime_unknown("no_spy_benchmark")
+            eff_min, eff_top = effective_scan_thresholds(
+                r["regime"], r["confidence"], float(r["score_multiplier"]), self.min_quality, self.top_n
+            )
+            return r, eff_min, eff_top, pd.DataFrame()
+
+        m = self._spy_df[self._spy_df["Date"] <= current_date]
+        if len(m) < 50:
+            r = regime_unknown("insufficient_spy_history")
+            eff_min, eff_top = effective_scan_thresholds(
+                r["regime"], r["confidence"], float(r["score_multiplier"]), self.min_quality, self.top_n
+            )
+            return r, eff_min, eff_top, m.tail(60) if len(m) >= 6 else m
+
+        spy_regime = m.tail(252)
+        vx = None
+        if self._vix_df is not None and len(self._vix_df) > 0:
+            vm = self._vix_df[self._vix_df["Date"] <= current_date]
+            if len(vm) > 0:
+                vx = float(vm["Close"].iloc[-1])
+
+        r = regime_from_spy_close(spy_regime["Close"], vx)
+        eff_min, eff_top = effective_scan_thresholds(
+            r.get("regime", "UNKNOWN"),
+            r.get("confidence", "TENTATIVE"),
+            float(r.get("score_multiplier", 1.0)),
+            self.min_quality,
+            self.top_n,
+        )
+        spy_rs = m.tail(60)
+        return r, eff_min, eff_top, spy_rs
+
+    def _scan_for_signals(
+        self,
+        current_date: datetime,
+        data_dict: Dict,
+        max_concurrent: int,
+        regime: Dict,
+        eff_min: int,
+        eff_top: int,
+        spy_rs: pd.DataFrame,
+    ):
+        """
+        Full-universe day scan: backtest_mode scan_stock, regime multiplier,
+        original_quality_score filter (live parity), sort, top_n, then queue pending.
+        """
+        open_tickers = {t["ticker"] for t in self.open_trades}
+        pending_tickers = {s["signal"]["ticker"] for s in self.pending_signals}
+        slots = max_concurrent - len(self.open_trades) - len(self.pending_signals)
+        if slots <= 0:
+            return
+
+        candidates: List[Dict] = []
+
+        for ticker in sorted(data_dict.keys()):
             if ticker in open_tickers or ticker in pending_tickers:
                 continue
-            if len(self.open_trades) + len(self.pending_signals) >= max_concurrent:
-                break
-            
-            # Check cooldown
+
             if ticker in self.cooldowns:
                 if current_date < self.cooldowns[ticker]:
                     continue
-                else:
-                    del self.cooldowns[ticker]
-            
-            # Slice data up to current date
-            mask = full_df['Date'] <= current_date
+                del self.cooldowns[ticker]
+
+            full_df = data_dict[ticker]
+            mask = full_df["Date"] <= current_date
             df_window = full_df[mask].copy()
-            
             if len(df_window) < 50:
                 continue
-            
+
             try:
-                signal = self.engine.scan_stock(ticker, df_window)
-                if signal and signal.get('quality_score', 0) >= self.MIN_QUALITY_SCORE:
-                    # ── ADIM 2: RSI filter — don't queue if RSI too high ──
-                    signal_rsi = signal.get('rsi', 50)
-                    if signal_rsi > self.MAX_ENTRY_RSI:
-                        logger.debug(f"{ticker}: RSI {signal_rsi:.0f} > {self.MAX_ENTRY_RSI} — skipped")
-                        continue
-                    
-                    # Apply risk management (ATR stops, targets, sizing)
-                    signal = self.risk.add_risk_management(
-                        signal, df_window, portfolio_value=self.capital
-                    )
-                    
-                    # ── ADIM 1: Queue for NEXT DAY entry (don't enter today) ──
-                    self.pending_signals.append({
-                        'signal': signal,
-                        'signal_date': current_date,
-                        'signal_close': float(df_window['Close'].iloc[-1]),
-                        'df_window': df_window
-                    })
+                signal = self.engine.scan_stock(
+                    ticker,
+                    df_window,
+                    backtest_mode=True,
+                    portfolio_value=self.capital,
+                    spy_df_window=spy_rs if len(spy_rs) >= 6 else None,
+                )
+                if not signal:
+                    continue
+
+                orig = float(signal["quality_score"])
+                signal["original_quality_score"] = orig
+                mult = float(regime.get("score_multiplier", 1.0))
+                signal["market_regime"] = regime.get("regime", "UNKNOWN")
+                signal["regime_multiplier"] = mult
+                signal["regime_confidence"] = regime.get("confidence", "CONFIRMED")
+                if mult < 1.0:
+                    signal["quality_score"] = round(orig * mult, 1)
+
+                signal_rsi = signal.get("rsi", 50)
+                if signal_rsi > self.MAX_ENTRY_RSI:
+                    continue
+
+                candidates.append(
+                    {"ticker": ticker, "signal": signal, "df_window": df_window}
+                )
             except Exception as e:
                 logger.debug(f"Scan error {ticker}: {e}")
+
+        candidates.sort(key=lambda x: x["signal"].get("quality_score", 0), reverse=True)
+        filtered = [
+            c
+            for c in candidates
+            if c["signal"].get("original_quality_score", c["signal"]["quality_score"]) >= eff_min
+        ][:eff_top]
+
+        for item in filtered:
+            if len(self.open_trades) + len(self.pending_signals) >= max_concurrent:
+                break
+            sig = item["signal"]
+            t = item["ticker"]
+            df_window = item["df_window"]
+            self.pending_signals.append(
+                {
+                    "signal": sig,
+                    "signal_date": current_date,
+                    "signal_close": float(df_window["Close"].iloc[-1]),
+                    "df_window": df_window,
+                }
+            )
     
     def _process_pending_entries(self, current_date: datetime, data_dict: Dict, max_concurrent: int):
         """Process pending signals: enter at today's Open with gap/confirmation filters."""
@@ -257,41 +413,24 @@ class SmallCapBacktester:
                     logger.debug(f"{ticker}: TipC confirmation FAILED (Open ${today_open:.2f} <= Close ${signal_close:.2f})")
                     continue
             
-            # ── All filters passed: Enter at today's Open ──
-            # Recalculate stop/target based on actual entry price
-            entry_price = today_open
-            signal['entry_price'] = round(entry_price, 2)
-            
-            # Recalculate ATR-based stop from entry (v2.3: type-specific cap)
+            # ── All filters passed: Enter at today's Open (+ adverse slippage) ──
+            # Live parity: stop/target/sizing from SmallCapRisk.add_risk_management using
+            # signal-day df (same as scan_stock), entry_price = fill at open.
+            entry_price = self._entry_fill_price(today_open)
             df_window = pending['df_window']
-            swing_type = signal.get('swing_type', 'A')
-            atr = self.risk.calculate_atr(df_window)
-            stop_loss = entry_price - (self.risk.STOP_ATR_MULTIPLIER * atr)
-            max_stop_pct = self.risk.MAX_STOP_BY_TYPE.get(swing_type, self.risk.MAX_STOP_PERCENT)
-            max_stop = entry_price * (1 - max_stop_pct)
-            stop_loss = max(stop_loss, max_stop)
-            signal['stop_loss'] = round(stop_loss, 2)
-            
-            # ── ADIM 3: Type-specific T1/T2 targets (v2.3) ──
-            t1_pct, t2_pct = self.risk.TYPE_TARGETS.get(swing_type, (0.25, 0.40))
-            target_1 = entry_price * (1 + t1_pct)
-            target_2 = entry_price * (1 + t2_pct)
-            # Safety floor: T1 must be at least 2R
-            risk_amount = entry_price - stop_loss
-            if risk_amount > 0 and (target_1 - entry_price) < (2 * risk_amount):
-                target_1 = entry_price + (2 * risk_amount)
-            signal['target_1'] = round(target_1, 2)
-            signal['target_2'] = round(target_2, 2)
-            
-            # Determine stop method label
-            atr_stop_val = entry_price - (self.risk.STOP_ATR_MULTIPLIER * atr)
-            if stop_loss > atr_stop_val:
-                signal['stop_method'] = f"Max Stop ({max_stop_pct*100:.0f}%)"
-            else:
-                atr_pct = ((entry_price - stop_loss) / entry_price) * 100
-                signal['stop_method'] = f"ATR Stop ({atr_pct:.1f}%)"
-            
-            self._open_trade(signal, current_date, df_today)
+            sig = signal.copy()
+            sig['entry_price'] = entry_price
+            try:
+                self.risk.add_risk_management(sig, df_window, portfolio_value=self.capital)
+            except Exception as e:
+                logger.debug(f"{ticker}: add_risk_management failed on entry: {e}")
+                continue
+            if int(sig.get('position_size') or 0) < 1:
+                continue
+            sl = float(sig.get('stop_loss') or 0)
+            if sl <= 0 or sl >= entry_price:
+                continue
+            self._open_trade(sig, current_date, df_today)
         
         # Expire all pending signals (1-day validity)
         self.pending_signals = []
@@ -311,20 +450,22 @@ class SmallCapBacktester:
         target = signal.get('target_1', 0)
         if target <= entry_price:
             risk_amount = entry_price - stop_loss
-            target = entry_price + (risk_amount * self.risk.MIN_RR_RATIO)
+            target = entry_price + (risk_amount * 2.0)  # fallback min ~2R if target_1 missing
         
         # Validate
         if entry_price <= 0 or stop_loss <= 0 or stop_loss >= entry_price:
             return
         
-        # Dynamic position sizing: risk 0.5% of capital per trade
-        risk_per_share = entry_price - stop_loss
-        max_risk_dollar = self.capital * self.RISK_PER_TRADE_PCT
-        shares = max(1, int(max_risk_dollar / risk_per_share))
-        
-        # Cap at 10% of capital in single position
-        max_shares_by_capital = int((self.capital * 0.10) / entry_price)
-        shares = min(shares, max(1, max_shares_by_capital))
+        swing_type = signal.get('swing_type', 'A')
+        ps = int(signal.get('position_size') or 0)
+        if ps >= 1:
+            shares = ps
+        else:
+            shares, _ = self.risk.calculate_position_size(
+                self.capital, entry_price, stop_loss, swing_type
+            )
+        if shares < 1:
+            return
         
         # Get max hold from signal
         max_hold = signal.get('hold_days_max', self.risk.MAX_HOLDING_DAYS)
@@ -350,7 +491,7 @@ class SmallCapBacktester:
             'target_pct': round(target_pct, 1),
             'shares': shares,
             'atr': round(atr, 4),
-            'swing_type': signal.get('swing_type', 'A'),
+            'swing_type': swing_type,
             'quality_score': signal.get('quality_score', 0),
             'stop_method': signal.get('stop_method', 'ATR'),
             'max_hold_days': max_hold,
@@ -421,7 +562,7 @@ class SmallCapBacktester:
                     # Intraday dip to stop — exit at stop price
                     exit_price = active_stop
                 is_trail = active_stop > trade['initial_stop']
-                trade['exit_price'] = round(exit_price, 2)
+                trade['exit_price'] = self._exit_fill_price(exit_price)
                 trade['exit_date'] = current_date.strftime('%Y-%m-%d')
                 trade['exit_reason'] = 'Trailing Stop' if is_trail else 'Stop Loss'
                 trade['status'] = 'TRAILED' if is_trail else 'STOPPED'
@@ -433,7 +574,7 @@ class SmallCapBacktester:
             
             # Check target (high touches target)
             if current_high >= trade['target']:
-                trade['exit_price'] = trade['target']
+                trade['exit_price'] = self._exit_fill_price(float(trade['target']))
                 trade['exit_date'] = current_date.strftime('%Y-%m-%d')
                 trade['exit_reason'] = 'Target Hit'
                 trade['status'] = 'TARGET'
@@ -443,7 +584,7 @@ class SmallCapBacktester:
             
             # Check timeout
             if days_held >= trade['max_hold_days']:
-                trade['exit_price'] = round(current_close, 2)
+                trade['exit_price'] = self._exit_fill_price(current_close)
                 trade['exit_date'] = current_date.strftime('%Y-%m-%d')
                 trade['exit_reason'] = f'Timeout ({days_held}d)'
                 trade['status'] = 'TIMEOUT'
@@ -460,9 +601,11 @@ class SmallCapBacktester:
         entry = trade['entry_price']
         exit_p = trade['exit_price']
         shares = trade.get('shares', 100)
+        fee = self._commission_dollars(entry, exit_p, shares)
+        trade['commission_dollar'] = round(fee, 2)
         
         pnl_pct = ((exit_p / entry) - 1) * 100
-        pnl_dollar = (exit_p - entry) * shares
+        pnl_dollar = (exit_p - entry) * shares - fee
         
         trade['pnl_pct'] = round(pnl_pct, 2)
         trade['pnl_dollar'] = round(pnl_dollar, 2)
@@ -485,13 +628,13 @@ class SmallCapBacktester:
                 # CRITICAL: If last close is below stop, cap at stop price
                 # In real trading, stop would have fired before reaching this price
                 if stop_loss > 0 and last_close < stop_loss:
-                    trade['exit_price'] = round(stop_loss, 2)
+                    trade['exit_price'] = self._exit_fill_price(stop_loss)
                     trade['exit_reason'] = 'Backtest End (Stop Capped)'
                 else:
-                    trade['exit_price'] = round(last_close, 2)
+                    trade['exit_price'] = self._exit_fill_price(last_close)
                     trade['exit_reason'] = 'Backtest End'
             else:
-                trade['exit_price'] = trade['entry_price']
+                trade['exit_price'] = self._exit_fill_price(trade['entry_price'])
                 trade['exit_reason'] = 'Backtest End'
             
             entry_date = datetime.strptime(trade['entry_date'], '%Y-%m-%d')
@@ -616,7 +759,14 @@ class SmallCapBacktester:
             'equity_curve': [],
             'metrics': self._empty_metrics(),
             'data_stocks': 0,
-            'period': ''
+            'period': '',
+            'params': {
+                'min_quality': getattr(self, 'min_quality', 65),
+                'top_n': getattr(self, 'top_n', 10),
+                'max_concurrent': getattr(self, '_max_concurrent', 3),
+                'slippage_bps_per_side': self.SLIPPAGE_BPS_PER_SIDE,
+                'commission_bps_per_side': self.COMMISSION_BPS_PER_SIDE,
+            },
         }
     
     def _empty_metrics(self):

@@ -212,11 +212,12 @@ class SmallCapFilters:
             return True, "Earnings check skipped"
     
     def apply_all_filters(
-        self, 
-        ticker: str, 
-        df: pd.DataFrame, 
+        self,
+        ticker: str,
+        df: pd.DataFrame,
         stock_info: Dict,
-        signal_date = None
+        signal_date=None,
+        backtest_mode: bool = False,
     ) -> Tuple[bool, Dict]:
         """
         Apply all hard filters to a stock.
@@ -245,6 +246,8 @@ class SmallCapFilters:
         
         # 1. Market Cap
         market_cap = stock_info.get('marketCap', 0) or stock_info.get('market_cap', 0)
+        if backtest_mode and (market_cap is None or market_cap <= 0):
+            market_cap = int(self.MIN_MARKET_CAP * 1.2)
         passed, reason = self.check_market_cap(market_cap)
         results['filters']['market_cap'] = {'passed': passed, 'reason': reason, 'value': market_cap}
         if not passed:
@@ -266,16 +269,21 @@ class SmallCapFilters:
         
         # 4. Float
         float_shares = stock_info.get('floatShares', 0) or stock_info.get('float_shares', 0)
+        if backtest_mode and (float_shares is None or float_shares <= 0):
+            float_shares = 45_000_000
         passed, reason = self.check_float(float_shares)
         results['filters']['float'] = {'passed': passed, 'reason': reason, 'value': float_shares}
         if not passed:
             return False, results
         
-        # 5. Earnings
-        passed, reason = self.check_earnings(ticker, signal_date)
-        results['filters']['earnings'] = {'passed': passed, 'reason': reason}
-        if not passed:
-            return False, results
+        # 5. Earnings (live API only — not point-in-time in backtest)
+        if backtest_mode:
+            results['filters']['earnings'] = {'passed': True, 'reason': 'Backtest mode (skipped)'}
+        else:
+            passed, reason = self.check_earnings(ticker, signal_date)
+            results['filters']['earnings'] = {'passed': passed, 'reason': reason}
+            if not passed:
+                return False, results
         
         results['passed'] = True
         results['atr_percent'] = atr_pct

@@ -17,7 +17,7 @@ def get_current_regime():
     latest = storage.get_latest()
 
     if latest:
-        return {
+        out = {
             "regime": latest["regime"],
             "confidence": latest["confidence"],
             "score_multiplier": latest["score_multiplier"],
@@ -28,6 +28,10 @@ def get_current_regime():
             "spy_5d_return": latest.get("spy_5d_return"),
             "detected_at": latest.get("detected_at"),
         }
+        de = latest.get("detect_error")
+        if de:
+            out["detect_error"] = de
+        return out
 
     # No history yet — detect live
     try:
@@ -35,7 +39,7 @@ def get_current_regime():
         signals = SmallCapSignals()
         result = signals.detect_market_regime()
         storage.save_regime(result)
-        return {
+        out = {
             "regime": result["regime"],
             "confidence": result["confidence"],
             "score_multiplier": result["score_multiplier"],
@@ -46,6 +50,9 @@ def get_current_regime():
             "spy_5d_return": result.get("spy_5d_return"),
             "detected_at": "just_detected",
         }
+        if result.get("detect_error"):
+            out["detect_error"] = result["detect_error"]
+        return out
     except Exception as e:
         logger.error(f"Live regime detection failed: {e}")
         return {
@@ -53,6 +60,7 @@ def get_current_regime():
             "confidence": "TENTATIVE",
             "score_multiplier": 1.0,
             "detected_at": None,
+            "detect_error": str(e)[:500],
         }
 
 

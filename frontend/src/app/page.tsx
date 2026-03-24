@@ -1,6 +1,6 @@
 "use client";
 import { usePerformance, usePending, useRegime } from "@/hooks/useApi";
-import type { PerformanceSummary, Trade, RegimeData } from "@/lib/api";
+import type { PerformanceSummary, Trade } from "@/lib/api";
 import { TrendingUp, TrendingDown, Activity, Clock, BarChart2, Target } from "lucide-react";
 
 function MetricCard({
@@ -90,34 +90,69 @@ export default function DashboardPage() {
       </div>
 
       {/* Market Regime Banner */}
-      {regime && (
+      {regime && (() => {
+        const rr = regime.regime;
+        const isUnknown = rr === "UNKNOWN";
+        const border =
+          rr === "BULL" ? "var(--green)"
+          : rr === "BEAR" ? "var(--red)"
+          : rr === "CAUTION" ? "var(--yellow)"
+          : "var(--text-muted)";
+        const pillBg =
+          rr === "BULL" ? "rgba(34,197,94,0.12)"
+          : rr === "BEAR" ? "rgba(239,68,68,0.12)"
+          : rr === "CAUTION" ? "rgba(245,158,11,0.12)"
+          : "rgba(148,163,184,0.12)";
+        const pillColor =
+          rr === "BULL" ? "var(--green)"
+          : rr === "BEAR" ? "var(--red)"
+          : rr === "CAUTION" ? "var(--yellow)"
+          : "var(--text-muted)";
+        const pillText =
+          rr === "BULL" ? "BULL"
+          : rr === "BEAR" ? "BEAR"
+          : rr === "CAUTION" ? "CAUTION"
+          : "BİLİNMİYOR";
+        return (
         <div className="glass-card" style={{
           padding: "14px 22px", marginBottom: 20,
           display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap",
-          borderLeft: `3px solid ${regime.regime === "BULL" ? "var(--green)" : regime.regime === "BEAR" ? "var(--red)" : "var(--yellow)"}`,
+          borderLeft: `3px solid ${border}`,
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{
-              fontSize: "0.8rem", fontWeight: 800, letterSpacing: "0.05em",
-              padding: "4px 12px", borderRadius: 6,
-              background: regime.regime === "BULL" ? "rgba(34,197,94,0.12)" : regime.regime === "BEAR" ? "rgba(239,68,68,0.12)" : "rgba(245,158,11,0.12)",
-              color: regime.regime === "BULL" ? "var(--green)" : regime.regime === "BEAR" ? "var(--red)" : "var(--yellow)",
-            }}>
-              {regime.regime === "BULL" ? "BULL" : regime.regime === "BEAR" ? "BEAR" : "CAUTION"}
-            </span>
-            {regime.confidence === "TENTATIVE" && (
-              <span style={{ fontSize: "0.68rem", color: "var(--text-muted)", background: "rgba(255,255,255,0.06)", padding: "2px 8px", borderRadius: 4 }}>
-                Unconfirmed
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{
+                fontSize: "0.8rem", fontWeight: 800, letterSpacing: "0.05em",
+                padding: "4px 12px", borderRadius: 6,
+                background: pillBg,
+                color: pillColor,
+              }}>
+                {pillText}
               </span>
-            )}
-            {regime.score_multiplier < 1 && (
-              <span style={{ fontSize: "0.72rem", color: "var(--text-secondary)" }}>
-                x{regime.score_multiplier}
+              {isUnknown ? (
+                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
+                  Piyasa rejimi okunamadı; skor çarpanı nötr (×1).
+                </span>
+              ) : regime.confidence === "TENTATIVE" ? (
+                <span style={{ fontSize: "0.68rem", color: "var(--text-muted)", background: "rgba(255,255,255,0.06)", padding: "2px 8px", borderRadius: 4 }}>
+                  Unconfirmed
+                </span>
+              ) : null}
+              {!isUnknown && regime.score_multiplier < 1 && (
+                <span style={{ fontSize: "0.72rem", color: "var(--text-secondary)" }}>
+                  x{regime.score_multiplier}
+                </span>
+              )}
+            </div>
+            {isUnknown && regime.detect_error ? (
+              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", wordBreak: "break-word" }}>
+                {regime.detect_error.length > 160 ? `${regime.detect_error.slice(0, 160)}…` : regime.detect_error}
               </span>
-            )}
+            ) : null}
           </div>
+          {!isUnknown ? (
           <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", display: "flex", gap: 14, flexWrap: "wrap" }}>
-            {regime.spy_price != null && <span>SPY ${regime.spy_price.toFixed(2)}</span>}
+            {regime.spy_price != null && regime.spy_price > 0 && <span>SPY ${regime.spy_price.toFixed(2)}</span>}
             {regime.vix != null && regime.vix > 0 && (
               <span style={{ color: regime.vix > 25 ? "var(--red)" : "var(--text-muted)" }}>
                 VIX {regime.vix.toFixed(1)}
@@ -129,8 +164,10 @@ export default function DashboardPage() {
               </span>
             )}
           </div>
+          ) : null}
         </div>
-      )}
+        );
+      })()}
 
       {/* Metrics */}
       <div className="metrics-grid">

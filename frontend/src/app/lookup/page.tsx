@@ -339,8 +339,18 @@ function ResultCard({ r, onAdd, adding }: { r: AnalysisResult; onAdd: (r: Analys
                                     </span>
                                 )}
                                 {r.market_regime && r.market_regime !== "BULL" && (
-                                    <span style={{ fontSize: "0.75rem", background: r.market_regime === "BEAR" ? "rgba(239,68,68,0.12)" : "rgba(234,179,8,0.12)", color: r.market_regime === "BEAR" ? "var(--red)" : "var(--yellow)", padding: "3px 10px", borderRadius: 6, fontWeight: 600 }}>
-                                        {r.market_regime === "BEAR" ? "🐻" : "⚠️"} {r.market_regime}
+                                    <span style={{
+                                        fontSize: "0.75rem",
+                                        background: r.market_regime === "BEAR" ? "rgba(239,68,68,0.12)"
+                                            : r.market_regime === "UNKNOWN" ? "rgba(148,163,184,0.12)"
+                                            : "rgba(234,179,8,0.12)",
+                                        color: r.market_regime === "BEAR" ? "var(--red)"
+                                            : r.market_regime === "UNKNOWN" ? "var(--text-muted)"
+                                            : "var(--yellow)",
+                                        padding: "3px 10px", borderRadius: 6, fontWeight: 600,
+                                    }}>
+                                        {r.market_regime === "BEAR" ? "🐻" : r.market_regime === "UNKNOWN" ? "?" : "⚠️"}{" "}
+                                        {r.market_regime === "UNKNOWN" ? "BİLİNMİYOR" : r.market_regime}
                                     </span>
                                 )}
                             </div>

@@ -148,6 +148,49 @@ class ScanRequest(BaseModel):
     top_n: int = 10
 
 
+def _scan_regime_and_thresholds(
+    engine,
+    body: ScanRequest,
+    signals: list,
+) -> tuple[str, float, str, int, int]:
+    """
+    Resolve regime for API response (including 0-signal scans via _last_regime)
+    and compute effective_min_quality / effective_top_n from regime+confidence,
+    then lift min_quality by regime_multiplier so filters are not blind to the penalty.
+    """
+    last = getattr(engine, "_last_regime", None) or {}
+    if signals:
+        actual_regime = signals[0].get("market_regime", "UNKNOWN")
+        regime_multiplier = float(signals[0].get("regime_multiplier", 1.0))
+        regime_confidence = signals[0].get("regime_confidence", "CONFIRMED")
+    else:
+        actual_regime = last.get("regime", "UNKNOWN")
+        regime_multiplier = float(last.get("score_multiplier", 1.0))
+        regime_confidence = last.get("confidence", "CONFIRMED")
+
+    from swing_trader.small_cap.thresholds import effective_scan_thresholds
+
+    eff_min, eff_top = effective_scan_thresholds(
+        actual_regime,
+        regime_confidence,
+        regime_multiplier,
+        body.min_quality,
+        body.top_n,
+    )
+    logger.info(
+        "Effective thresholds: regime=%s conf=%s mult=%s → min_quality=%s top_n=%s (request %s/%s)",
+        actual_regime,
+        regime_confidence,
+        regime_multiplier,
+        eff_min,
+        eff_top,
+        body.min_quality,
+        body.top_n,
+    )
+
+    return actual_regime, regime_multiplier, regime_confidence, eff_min, eff_top
+
+
 def _execute_smallcap_scan(
     body: ScanRequest,
     on_progress: Optional[Callable[[int, str, str], None]] = None,
@@ -190,24 +233,9 @@ def _execute_smallcap_scan(
 
     prog(90, "filter", "Filtering signals…")
 
-    actual_regime = "BULL"
-    regime_multiplier = 1.0
-    regime_confidence = "CONFIRMED"
-    if signals:
-        actual_regime = signals[0].get("market_regime", "BULL")
-        regime_multiplier = signals[0].get("regime_multiplier", 1.0)
-        regime_confidence = signals[0].get("regime_confidence", "CONFIRMED")
-
-    effective_min_quality = body.min_quality
-    effective_top_n = body.top_n
-    if actual_regime == "BEAR":
-        effective_min_quality = max(body.min_quality, 85)
-        effective_top_n = min(body.top_n, 3)
-        logger.info(f"BEAR regime: raised min_quality to {effective_min_quality}, top_n to {effective_top_n}")
-    elif actual_regime == "CAUTION":
-        effective_min_quality = max(body.min_quality, 75)
-        effective_top_n = min(body.top_n, 5)
-        logger.info(f"CAUTION regime: raised min_quality to {effective_min_quality}, top_n to {effective_top_n}")
+    actual_regime, regime_multiplier, regime_confidence, effective_min_quality, effective_top_n = (
+        _scan_regime_and_thresholds(engine, body, signals)
+    )
 
     filtered = [
         s for s in signals
@@ -232,7 +260,13 @@ def _execute_smallcap_scan(
         "regime_confidence": regime_confidence,
         "effective_min_quality": effective_min_quality,
         "effective_top_n": effective_top_n,
+        "request_min_quality": body.min_quality,
+        "request_top_n": body.top_n,
     }
+    rd = getattr(engine, "_last_regime", None) or {}
+    err = rd.get("detect_error")
+    if err:
+        stats["regime_detect_error"] = err
     prog(97, "finalize", "Done")
     return sanitize_for_json({"signals": filtered, "stats": stats, "market_regime": actual_regime})
 

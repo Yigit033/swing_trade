@@ -15,12 +15,42 @@ const PERIOD_OPTIONS = [
     { label: "6 Ay", days: 180 },
 ];
 
-const EXIT_LABELS: Record<string, string> = {
-    STOPPED: "🛑 Stop Loss",
-    TARGET: "🎯 Target Hit",
-    TIMEOUT: "⏰ Timeout",
-    FORCED: "🔚 Backtest Sonu",
+/** Trade.status from walk-forward engine (preferred for display) */
+const STATUS_LABELS: Record<string, string> = {
+    STOPPED: "🛑 Stop",
+    TRAILED: "📍 Trailing stop",
+    TARGET: "🎯 Hedef",
+    TIMEOUT: "⏰ Süre doldu",
+    FORCED: "🔚 Backtest sonu",
 };
+
+/** YYYY-MM-DD → gün.ay.yıl (timezone kayması yok) */
+function formatTradeDate(iso?: string): string {
+    if (!iso) return "—";
+    const t = new Date(`${iso}T12:00:00`);
+    if (Number.isNaN(t.getTime())) return iso;
+    return t.toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function TradePxDateCell({ date, price }: { date?: string; price?: number }) {
+    return (
+        <td>
+            <div style={{ fontWeight: 600, fontSize: "0.82rem" }}>{formatTradeDate(date)}</div>
+            <div style={{ color: "var(--text-muted)", fontSize: "0.78rem", marginTop: 2 }}>
+                {price != null && !Number.isNaN(price) ? `$${price.toFixed(2)}` : "—"}
+            </div>
+        </td>
+    );
+}
+
+function formatApiError(e: unknown): string {
+    const err = e as { response?: { data?: { detail?: unknown } }; message?: string };
+    const d = err?.response?.data?.detail;
+    if (Array.isArray(d))
+        return d.map((x: { msg?: string }) => x.msg || JSON.stringify(x)).join("; ");
+    if (typeof d === "string") return d;
+    return err?.message || "İstek başarısız";
+}
 
 function MetricBox({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
     return (
@@ -51,6 +81,8 @@ export default function BacktestPage() {
     const [periodDays, setPeriodDays] = useState(90);
     const [capital, setCapital] = useState(10000);
     const [maxConcurrent, setMaxConcurrent] = useState(3);
+    const [minQuality, setMinQuality] = useState(65);
+    const [topN, setTopN] = useState(10);
     const [tickerInput, setTickerInput] = useState("AEHR,AXTI,VELO,FSLY,NMRA,NVCR,SGRY,MLTX,FJET,WIN");
     const [useFinviz, setUseFinviz] = useState(false);
     const [result, setResult] = useState<BacktestResult | null>(null);
@@ -62,6 +94,15 @@ export default function BacktestPage() {
         setError("");
         setResult(null);
         try {
+            if (!useFinviz) {
+                const parsed = tickerInput.split(",").map(t => t.trim().toUpperCase()).filter(Boolean);
+                if (parsed.length === 0) {
+                    setError("En az bir hisse sembolü girin veya Finviz universe seçin.");
+                    setLoading(false);
+                    return;
+                }
+            }
+
             const tickers = useFinviz
                 ? undefined
                 : tickerInput.split(",").map(t => t.trim().toUpperCase()).filter(Boolean);
@@ -70,6 +111,8 @@ export default function BacktestPage() {
                 period_days: periodDays,
                 initial_capital: capital,
                 max_concurrent: maxConcurrent,
+                min_quality: minQuality,
+                top_n: topN,
                 tickers,
             });
 
@@ -80,17 +123,56 @@ export default function BacktestPage() {
         } finally {
             setLoading(false);
         }
-    }, [periodDays, capital, maxConcurrent, tickerInput, useFinviz]);
+    }, [periodDays, capital, maxConcurrent, minQuality, topN, tickerInput, useFinviz]);
 
-    const m: BacktestMetrics | undefined = result?.metrics;
+    const m = result?.metrics;
     const winRatePct = m ? (m.win_rate * 100).toFixed(1) : null;
     const returnPct = m ? (m.total_return * 100).toFixed(1) : null;
 
-    // Equity curve chart data
-    const eqData = result?.equity_curve?.map(e => ({
-        date: e.date?.slice(5),           // MM-DD
-        value: e.portfolio_value,
-    })) ?? [];
+    // Equity curve (extra fields for tooltip — walk-forward regime / thresholds)
+    const eqData =
+        result?.equity_curve?.map((e) => ({
+            date: e.date?.slice(5),
+            fullDate: e.date,
+            value: e.portfolio_value,
+            regime: e.market_regime,
+            effMin: e.effective_min_quality,
+            effTop: e.effective_top_n,
+            openTrades: e.open_trades,
+        })) ?? [];
+
+    const EqTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ payload: Record<string, unknown> }> }) => {
+        if (!active || !payload?.[0]?.payload) return null;
+        const p = payload[0].payload;
+        return (
+            <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 14px", fontSize: "0.78rem", maxWidth: 280 }}>
+                <div style={{ color: "var(--text-muted)", fontWeight: 600, marginBottom: 6 }}>{String(p.fullDate ?? p.date)}</div>
+                <div style={{ color: "var(--accent)" }}>
+                    Portföy:{" "}
+                    <strong>
+                        $
+                        {typeof p.value === "number"
+                            ? p.value.toFixed(2)
+                            : String(p.value ?? "—")}
+                    </strong>
+                </div>
+                {p.openTrades != null && (
+                    <div style={{ color: "var(--text-secondary)", marginTop: 4 }}>Açık pozisyon: {String(p.openTrades)}</div>
+                )}
+                {typeof p.regime === "string" && p.regime.length > 0 ? (
+                    <div style={{ color: "var(--text-secondary)", marginTop: 4 }}>
+                        Rejim: <strong>{p.regime}</strong>
+                        {p.effMin != null && p.effTop != null && (
+                            <span>
+                                {" "}
+                                · eşik ≥{String(p.effMin)}, top {String(p.effTop)}
+                            </span>
+                        )}
+                    </div>
+                ) : null}
+            </div>
+        );
+    };
 
     // Trade P&L bar data (last 20)
     const tradeData = result?.trades?.slice(-20).map(t => ({
@@ -102,7 +184,9 @@ export default function BacktestPage() {
     return (
         <div>
             <h1 className="page-title gradient-text">SmallCap Backtest</h1>
-            <p className="page-subtitle">Walk-forward geçmiş simülasyon · Gerçek SmallCap sinyalleri</p>
+            <p className="page-subtitle">
+                Walk-forward simülasyon · Scanner ile aynı rejim, ham skor eşiği ve top N seçimi (backtest_mode: canlı haber/SI yok, tarihsel SPY/RS)
+            </p>
 
             {/* Params */}
             <div className="glass-card" style={{ padding: 20, marginBottom: 20 }}>
@@ -139,6 +223,17 @@ export default function BacktestPage() {
                         <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 6 }}>MAKS EŞ ZAMANLI</label>
                         <input className="input" type="number" min={1} max={10} value={maxConcurrent}
                             onChange={e => setMaxConcurrent(Number(e.target.value))} />
+                    </div>
+
+                    <div style={{ minWidth: 100 }}>
+                        <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 6 }}>MIN KALİTE</label>
+                        <input className="input" type="number" min={30} max={100} value={minQuality}
+                            onChange={e => setMinQuality(Number(e.target.value))} />
+                    </div>
+                    <div style={{ minWidth: 90 }}>
+                        <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 6 }}>TOP N</label>
+                        <input className="input" type="number" min={1} max={30} value={topN}
+                            onChange={e => setTopN(Number(e.target.value))} />
                     </div>
 
                     {/* Run button */}
@@ -187,16 +282,60 @@ export default function BacktestPage() {
             )}
 
             {/* Results */}
-            {result && m && (
+            {result && m != null && (
                 <>
                     {/* Period info */}
                     <div style={{ fontSize: "0.82rem", color: "var(--text-muted)", marginBottom: 16 }}>
-                        📅 {result.start_date} → {result.end_date} · {result.tickers_used.length} hisse · ${result.initial_capital.toLocaleString()} başlangıç
+                        📅 {result.start_date} → {result.end_date} · {result.tickers_used?.length ?? 0} sembol ·
+                        {result.data_stocks != null && ` veri yüklenen: ${result.data_stocks} ·`}
+                        {" "}
+                        ${result.initial_capital.toLocaleString()} başlangıç
+                        {(result.min_quality != null || result.top_n != null) && (
+                            <span style={{ display: "block", marginTop: 6 }}>
+                                İstek: ham skor ≥ {result.min_quality ?? "—"}, en fazla {result.top_n ?? "—"} aday/gün; rejim günlük sıkılaştırması equity grafiği ipucunda.
+                            </span>
+                        )}
+                        {(result.params?.slippage_bps_per_side != null || result.params?.commission_bps_per_side != null) && (
+                            <span style={{ display: "block", marginTop: 6 }}>
+                                Simülasyon sürtünme: slip {result.params?.slippage_bps_per_side ?? "—"} bps/kenar, komisyon {result.params?.commission_bps_per_side ?? "—"} bps/kenar (nominal üzerinden). Canlı API fiyatları slip içermez; backtest_mode taramada kazanç/earnings yok.
+                            </span>
+                        )}
                     </div>
+
+                    {eqData.length > 0 && (
+                        <div className="glass-card chart-card" style={{ marginBottom: 20 }}>
+                            <div style={{ fontWeight: 700, marginBottom: 14, fontSize: "0.85rem" }}>
+                                📈 Equity curve (günlük · rejim / eşik ipucu)
+                            </div>
+                            <div className="chart-container">
+                                <ResponsiveContainer width="100%" height={260} minHeight={200}>
+                                    <ComposedChart data={eqData}>
+                                        <defs>
+                                            <linearGradient id="eqGradWf" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                                                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.02} />
+                                            </linearGradient>
+                                        </defs>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                                        <XAxis dataKey="date" tick={{ fill: "var(--text-muted)", fontSize: 10 }} interval="preserveStartEnd" />
+                                        <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} tickFormatter={(v) => `$${v.toLocaleString()}`} domain={["auto", "auto"]} />
+                                        <Tooltip content={<EqTooltip />} />
+                                        <ReferenceLine y={capital} stroke="rgba(255,255,255,0.2)" strokeDasharray="4 2" label={{ value: "Başlangıç", fill: "var(--text-muted)", fontSize: 10 }} />
+                                        <Area type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} fill="url(#eqGradWf)" name="Portföy" />
+                                    </ComposedChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                    )}
 
                     {m.total_trades === 0 ? (
                         <div className="glass-card" style={{ padding: 40, textAlign: "center", color: "var(--text-secondary)" }}>
-                            ⚠️ Bu dönemde hiç sinyal üretilmedi. Daha uzun periyot veya farklı hisseler deneyin.
+                            ⚠️ Bu dönemde kapanan trade yok (eşikler veya veri nedeniyle giriş oluşmadı). Periyot, hisse listesi veya min kaliteyi gözden geçirin.
+                            {result.data_stocks === 0 && (
+                                <div style={{ marginTop: 12, fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                                    Hiçbir sembolde yeterli bar yok — yfinance / rate limit de olabilir.
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <>
@@ -254,7 +393,7 @@ export default function BacktestPage() {
                                     <div style={{ fontWeight: 700, marginBottom: 12, fontSize: "0.85rem" }}>🚪 Çıkış Analizi</div>
                                     {m.exit_stats && Object.entries(m.exit_stats).map(([reason, stats]) => (
                                         <div key={reason} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", marginBottom: 8 }}>
-                                            <span style={{ color: "var(--text-secondary)" }}>{EXIT_LABELS[reason] || reason}</span>
+                                            <span style={{ color: "var(--text-secondary)" }}>{STATUS_LABELS[reason] || reason}</span>
                                             <span>
                                                 <strong>{stats.count}</strong>
                                                 <span style={{ color: stats.avg_pnl >= 0 ? "var(--green)" : "var(--red)", marginLeft: 8, fontSize: "0.78rem" }}>
@@ -283,33 +422,6 @@ export default function BacktestPage() {
                                 </div>
                             </div>
 
-                            {/* Equity curve */}
-                            {eqData.length > 0 && (
-                                <div className="glass-card chart-card">
-                                    <div style={{ fontWeight: 700, marginBottom: 14, fontSize: "0.85rem" }}>
-                                        📈 Equity Curve (Portföy Değeri)
-                                    </div>
-                                    <div className="chart-container">
-                                    <ResponsiveContainer width="100%" height={260} minHeight={200}>
-                                        <ComposedChart data={eqData}>
-                                            <defs>
-                                                <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                                                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.02} />
-                                                </linearGradient>
-                                            </defs>
-                                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                                            <XAxis dataKey="date" tick={{ fill: "var(--text-muted)", fontSize: 10 }} interval="preserveStartEnd" />
-                                            <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} tickFormatter={v => `$${v.toLocaleString()}`} domain={["auto", "auto"]} />
-                                            <Tooltip content={<CTooltip />} />
-                                            <ReferenceLine y={capital} stroke="rgba(255,255,255,0.2)" strokeDasharray="4 2" label={{ value: "Başlangıç", fill: "var(--text-muted)", fontSize: 10 }} />
-                                            <Area type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} fill="url(#eqGrad)" name="Portföy" />
-                                        </ComposedChart>
-                                    </ResponsiveContainer>
-                                    </div>
-                                </div>
-                            )}
-
                             {/* Trade P&L bars */}
                             {tradeData.length > 0 && (
                                 <div className="glass-card chart-card">
@@ -337,16 +449,30 @@ export default function BacktestPage() {
 
                             {/* Trade log */}
                             <div className="glass-card" style={{ overflow: "hidden" }}>
-                                <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                    <div style={{ fontWeight: 700, fontSize: "0.9rem" }}>📝 Trade Geçmişi</div>
+                                <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "space-between", alignItems: "center" }}>
+                                    <div>
+                                        <div style={{ fontWeight: 700, fontSize: "0.9rem" }}>📝 Trade Geçmişi</div>
+                                        <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 4, maxWidth: 520, lineHeight: 1.45 }}>
+                                            Her satır simüle edilmiş bir pozisyon. Terminalde yalnızca günlük tarama logları görünür; alış/satış tarihi ve fiyat burada ve API JSON yanıtında.
+                                        </div>
+                                    </div>
                                     <span className="badge badge-blue">{result.trades.length} trade</span>
                                 </div>
                                 <div style={{ overflowX: "auto" }}>
                                     <table className="data-table">
                                         <thead>
                                             <tr>
-                                                <th>Hisse</th><th>Tip</th><th>Giriş</th><th>Çıkış</th>
-                                                <th>P/L %</th><th>P/L $</th><th>Çıkış Nedeni</th><th>Süre</th>
+                                                <th>Hisse</th>
+                                                <th>Tip</th>
+                                                <th>Alış</th>
+                                                <th>Satış</th>
+                                                <th>Lot</th>
+                                                <th>Q</th>
+                                                <th title="Sinyaldeki üst süre; bu gün sayısına ulaşınca timeout çıkışı">Max</th>
+                                                <th>P/L %</th>
+                                                <th>P/L $</th>
+                                                <th>Çıkış</th>
+                                                <th title="Alış ve satış tarihleri arasındaki takvim günü (hafta sonu dahil)">Süre</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -356,8 +482,15 @@ export default function BacktestPage() {
                                                     <tr key={i}>
                                                         <td><strong style={{ color: "var(--accent)" }}>{t.ticker}</strong></td>
                                                         <td><span className="badge badge-blue">{t.swing_type || "—"}</span></td>
-                                                        <td>${t.entry_price?.toFixed(2)}</td>
-                                                        <td>${t.exit_price?.toFixed(2)}</td>
+                                                        <TradePxDateCell date={t.entry_date} price={t.entry_price} />
+                                                        <TradePxDateCell date={t.exit_date} price={t.exit_price} />
+                                                        <td style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>{t.shares ?? "—"}</td>
+                                                        <td style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>
+                                                            {t.quality_score != null ? Math.round(t.quality_score) : "—"}
+                                                        </td>
+                                                        <td style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>
+                                                            {t.max_hold_days != null ? `${t.max_hold_days}g` : "—"}
+                                                        </td>
                                                         <td style={{ color: win ? "var(--green)" : "var(--red)", fontWeight: 700 }}>
                                                             {win ? "+" : ""}{t.pnl_pct?.toFixed(1)}%
                                                         </td>
@@ -365,11 +498,19 @@ export default function BacktestPage() {
                                                             {win ? "+" : ""}${t.pnl_dollar?.toFixed(0)}
                                                         </td>
                                                         <td>
-                                                            <span className={`badge ${t.exit_reason === "TARGET" ? "badge-green" : t.exit_reason === "STOPPED" ? "badge-red" : "badge-yellow"}`}>
-                                                                {EXIT_LABELS[t.exit_reason || ""] || t.exit_reason || "—"}
+                                                            <span
+                                                                className={`badge ${
+                                                                    t.status === "TARGET"
+                                                                        ? "badge-green"
+                                                                        : t.status === "STOPPED" || t.status === "TRAILED"
+                                                                          ? "badge-red"
+                                                                          : "badge-yellow"
+                                                                }`}
+                                                            >
+                                                                {STATUS_LABELS[t.status || ""] || t.exit_reason || "—"}
                                                             </span>
                                                         </td>
-                                                        <td style={{ color: "var(--text-muted)" }}>{t.hold_days ?? "—"} gün</td>
+                                                        <td style={{ color: "var(--text-muted)" }}>{t.days_held ?? t.hold_days ?? "—"} gün</td>
                                                     </tr>
                                                 );
                                             })}

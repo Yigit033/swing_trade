@@ -16,10 +16,11 @@ from .signals import SmallCapSignals
 from .scoring import SmallCapScoring
 from .risk import SmallCapRisk
 from .universe import SmallCapUniverse
-from .sector_rs import SectorRS, get_sector_rs_bonus
-from .catalysts import CatalystDetector, get_catalyst_bonus
+from .sector_rs import SectorRS
+from .catalysts import CatalystDetector
 from .narrative import generate_signal_narrative
 from .technical_levels import calculate_technical_levels
+from .regime_logic import rs_bonus_vs_spy
 
 logger = logging.getLogger(__name__)
 
@@ -302,24 +303,38 @@ class SmallCapEngine:
             return {'ticker': ticker, 'marketCap': 0, 'floatShares': 0}
     
     def scan_stock(
-        self, 
-        ticker: str, 
+        self,
+        ticker: str,
         df: pd.DataFrame,
-        stock_info: Dict = None
+        stock_info: Dict = None,
+        *,
+        backtest_mode: bool = False,
+        portfolio_value: float = 10000,
+        spy_df_window: Optional[pd.DataFrame] = None,
     ) -> Optional[Dict]:
         """
         Scan a single stock for small-cap momentum signal.
-        
-        Returns signal dict if triggered, None otherwise.
+
+        backtest_mode: skip live yfinance fundamentals, earnings API, catalysts
+        (short/insider/news bonuses zero; earnings filter skipped); optional
+        spy_df_window for point-in-time RS vs SPY; skip narrative/LLM.
         """
         if df is None or len(df) < 20:
             logger.debug(f"{ticker}: Insufficient data")
             return None
         
         try:
-            # Get stock info if not provided
             if stock_info is None:
-                stock_info = self.get_stock_info(ticker)
+                if backtest_mode:
+                    stock_info = {
+                        "ticker": ticker,
+                        "marketCap": int(self.filters.MIN_MARKET_CAP * 1.2),
+                        "floatShares": 45_000_000,
+                        "shortName": ticker,
+                        "sector": "Unknown",
+                    }
+                else:
+                    stock_info = self.get_stock_info(ticker)
             
             # Get signal date - handle both index-based and column-based Date
             try:
@@ -342,7 +357,7 @@ class SmallCapEngine:
             
             # Step 1: Apply universe filters
             filter_passed, filter_results = self.filters.apply_all_filters(
-                ticker, df, stock_info, signal_date_dt
+                ticker, df, stock_info, signal_date_dt, backtest_mode=backtest_mode
             )
             
             if not filter_passed:
@@ -386,23 +401,50 @@ class SmallCapEngine:
             # ============================================================
             # SECTOR RS & CATALYST DATA (Senior Trader v2.1)
             # ============================================================
-            # Sector Relative Strength
-            sector_rs_data = SectorRS.calculate_sector_rs(ticker, sector, five_day_return_prelim)
-            boosters['sector_rs_bonus'] = sector_rs_data['bonus']
-            boosters['sector_rs_score'] = sector_rs_data['rs_score']
-            boosters['is_sector_leader'] = sector_rs_data['is_leader']
-            
-            # Catalyst Data (Short Interest, Insider, News)
-            catalyst_data = CatalystDetector.get_all_catalysts(ticker)
-            boosters['short_interest_bonus'] = catalyst_data['short_interest']['bonus']
-            boosters['short_percent'] = catalyst_data['short_interest']['short_percent']
-            boosters['days_to_cover'] = catalyst_data['short_interest']['days_to_cover']
-            boosters['is_squeeze_candidate'] = catalyst_data['short_interest']['is_squeeze_candidate']
-            boosters['insider_bonus'] = catalyst_data['insider']['bonus']
-            boosters['has_insider_buying'] = catalyst_data['insider']['has_insider_buying']
-            boosters['news_bonus'] = catalyst_data['news']['bonus']
-            boosters['has_recent_news'] = catalyst_data['news']['has_recent_news']
-            boosters['total_catalyst_bonus'] = catalyst_data['total_catalyst_bonus']
+            if backtest_mode:
+                if (
+                    spy_df_window is not None
+                    and len(spy_df_window) >= 6
+                    and "Close" in spy_df_window.columns
+                    and len(df) >= 6
+                ):
+                    sector_rs_data = rs_bonus_vs_spy(df["Close"], spy_df_window["Close"])
+                else:
+                    sector_rs_data = {
+                        "bonus": 0,
+                        "rs_score": 0.0,
+                        "is_leader": False,
+                        "ticker_5d": 0.0,
+                        "sector_5d": 0.0,
+                        "sector_etf": "SPY",
+                    }
+                boosters["sector_rs_bonus"] = sector_rs_data.get("bonus", 0)
+                boosters["sector_rs_score"] = sector_rs_data.get("rs_score", 0.0)
+                boosters["is_sector_leader"] = sector_rs_data.get("is_leader", False)
+                boosters["short_interest_bonus"] = 0
+                boosters["short_percent"] = 0.0
+                boosters["days_to_cover"] = 0.0
+                boosters["is_squeeze_candidate"] = False
+                boosters["insider_bonus"] = 0
+                boosters["has_insider_buying"] = False
+                boosters["news_bonus"] = 0
+                boosters["has_recent_news"] = False
+                boosters["total_catalyst_bonus"] = 0
+            else:
+                sector_rs_data = SectorRS.calculate_sector_rs(ticker, sector, five_day_return_prelim)
+                boosters["sector_rs_bonus"] = sector_rs_data["bonus"]
+                boosters["sector_rs_score"] = sector_rs_data["rs_score"]
+                boosters["is_sector_leader"] = sector_rs_data["is_leader"]
+                catalyst_data = CatalystDetector.get_all_catalysts(ticker)
+                boosters["short_interest_bonus"] = catalyst_data["short_interest"]["bonus"]
+                boosters["short_percent"] = catalyst_data["short_interest"]["short_percent"]
+                boosters["days_to_cover"] = catalyst_data["short_interest"]["days_to_cover"]
+                boosters["is_squeeze_candidate"] = catalyst_data["short_interest"]["is_squeeze_candidate"]
+                boosters["insider_bonus"] = catalyst_data["insider"]["bonus"]
+                boosters["has_insider_buying"] = catalyst_data["insider"]["has_insider_buying"]
+                boosters["news_bonus"] = catalyst_data["news"]["bonus"]
+                boosters["has_recent_news"] = catalyst_data["news"]["has_recent_news"]
+                boosters["total_catalyst_bonus"] = catalyst_data["total_catalyst_bonus"]
             
             # RSI Divergence (already in signals but ensure it's in boosters)
             rsi_div = self.signals.detect_rsi_divergence(df, lookback=14)
@@ -554,7 +596,7 @@ class SmallCapEngine:
             # ============================================================
             try:
                 risk_signal = self.risk.add_risk_management(
-                    signal.copy(), df, portfolio_value=10000
+                    signal.copy(), df, portfolio_value=portfolio_value
                 )
                 signal['stop_loss'] = risk_signal.get('stop_loss', 0)
                 signal['target_1'] = risk_signal.get('target_1', 0)
@@ -593,28 +635,34 @@ class SmallCapEngine:
                 f"Q:{quality_score:.0f} | 5d:{five_day_return:+.0f}% | RSI:{rsi:.0f} {safe_status}"
             )
             
-            # Generate narrative analysis (Cuma Çevik style)
-            # Calculate technical levels for professional narrative
-            try:
-                tech_levels = calculate_technical_levels(
-                    df, signal['entry_price'], signal.get('volume_surge', 1.0)
-                )
-                signal['technical_levels'] = tech_levels
-            except Exception as e:
-                logger.debug(f"Could not calculate technical levels for {ticker}: {e}")
-                signal['technical_levels'] = None
-            
-            try:
-                narrative = generate_signal_narrative(signal, language='tr')
-                signal['narrative'] = narrative
-                signal['narrative_text'] = narrative.get('full_text', '')
-                signal['narrative_headline'] = narrative.get('headline', f"{ticker} - {swing_type}")
-            except Exception as e:
-                logger.warning(f"Could not generate narrative for {ticker}: {e}")
-                signal['narrative'] = None
-                signal['narrative_text'] = ''
-                signal['narrative_headline'] = f"{ticker} - Type {swing_type}"
-            
+            if backtest_mode:
+                signal["technical_levels"] = None
+                signal["narrative"] = None
+                signal["narrative_text"] = ""
+                signal["narrative_headline"] = f"{ticker} - Type {swing_type}"
+            else:
+                try:
+                    tech_levels = calculate_technical_levels(
+                        df, signal["entry_price"], signal.get("volume_surge", 1.0)
+                    )
+                    signal["technical_levels"] = tech_levels
+                except Exception as e:
+                    logger.debug(f"Could not calculate technical levels for {ticker}: {e}")
+                    signal["technical_levels"] = None
+
+                try:
+                    narrative = generate_signal_narrative(signal, language="tr")
+                    signal["narrative"] = narrative
+                    signal["narrative_text"] = narrative.get("full_text", "")
+                    signal["narrative_headline"] = narrative.get(
+                        "headline", f"{ticker} - {swing_type}"
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not generate narrative for {ticker}: {e}")
+                    signal["narrative"] = None
+                    signal["narrative_text"] = ""
+                    signal["narrative_headline"] = f"{ticker} - Type {swing_type}"
+
             return signal
             
         except Exception as e:

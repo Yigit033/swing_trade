@@ -268,6 +268,8 @@ export interface RegimeData {
     vix?: number;
     spy_5d_return?: number;
     detected_at?: string;
+    /** Present when regime is UNKNOWN (e.g. rate limit, insufficient data). */
+    detect_error?: string;
 }
 
 export const getCurrentRegime = (): Promise<RegimeData> =>
@@ -336,9 +338,31 @@ export interface BacktestTrade {
     pnl_pct: number;
     pnl_dollar: number;
     exit_reason?: string;
+    /** Engine exit bucket (STOPPED, TARGET, …) — preferred for UI labels */
+    status?: string;
     entry_date?: string;
     exit_date?: string;
+    /** Actual bars/days held at exit (SmallCap backtest) */
+    days_held?: number;
+    /** Legacy alias — prefer days_held */
     hold_days?: number;
+    shares?: number;
+    max_hold_days?: number;
+    quality_score?: number;
+    commission_dollar?: number;
+}
+
+export interface BacktestEquityPoint {
+    date: string;
+    portfolio_value: number;
+    open_trades?: number;
+    market_regime?: string;
+    regime_confidence?: string;
+    regime_multiplier?: number;
+    effective_min_quality?: number;
+    effective_top_n?: number;
+    request_min_quality?: number;
+    request_top_n?: number;
 }
 
 export interface BacktestResult {
@@ -347,8 +371,19 @@ export interface BacktestResult {
     end_date: string;
     tickers_used: string[];
     initial_capital: number;
+    min_quality?: number;
+    top_n?: number;
+    /** Tickers with enough bars to participate in simulation */
+    data_stocks?: number;
+    params?: {
+        min_quality: number;
+        top_n: number;
+        max_concurrent: number;
+        slippage_bps_per_side?: number;
+        commission_bps_per_side?: number;
+    };
     metrics: BacktestMetrics;
-    equity_curve: { date: string; portfolio_value: number }[];
+    equity_curve: BacktestEquityPoint[];
     trades: BacktestTrade[];
     error?: string;
 }
@@ -358,6 +393,8 @@ export const runBacktest = (params: {
     period_days: number;
     initial_capital: number;
     max_concurrent: number;
+    min_quality?: number;
+    top_n?: number;
     tickers?: string[];
 }) =>
     api.post<BacktestResult>("/api/backtest/smallcap", params, { timeout: 300000 })

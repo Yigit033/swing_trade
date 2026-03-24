@@ -775,12 +775,14 @@ class SmallCapSignals:
         - 5-day confirmation window prevents whipsaw around MA lines
         - 1y data for real MA200 calculation (was 6mo → MA200 was fake)
         - VIX-based fear adjustment (>30 = forced BEAR)
-        - Confidence level (CONFIRMED vs TENTATIVE)
+        - Confidence level (CONFIRMED vs TENTATIVE) — drives API min_quality/top_n
+        - BEAR TENTATIVE: 3/5 days below MA200 (between CAUTION and BEAR)
+        - CAUTION CONFIRMED: above MA200 but 2+ of last 5 below MA200
         - BEAR multiplier 0.65 → 0.75 (less aggressive)
 
         Returns:
             {
-                'regime': str,           # 'BULL', 'CAUTION', 'BEAR'
+                'regime': str,           # 'BULL', 'CAUTION', 'BEAR', 'UNKNOWN'
                 'confidence': str,       # 'CONFIRMED', 'TENTATIVE'
                 'spy_above_ma50': bool,
                 'spy_above_ma200': bool,
@@ -791,127 +793,45 @@ class SmallCapSignals:
                 'ma200': float,
                 'vix': float,
             }
+            When detection fails, regime is UNKNOWN and detect_error explains why.
         """
-        result = {
-            'regime': 'BULL',
-            'confidence': 'TENTATIVE',
-            'spy_above_ma50': True,
-            'spy_above_ma200': True,
-            'spy_5d_return': 0.0,
-            'score_multiplier': 1.0,
-            'spy_price': 0.0,
-            'ma50': 0.0,
-            'ma200': 0.0,
-            'vix': 0.0,
-        }
+        from .regime_logic import regime_from_spy_close, regime_unknown
 
         try:
             import yfinance as yf
 
-            # 1y data so MA200 is real (6mo only had ~126 bars → MA200 was MA50 fallback)
-            spy = yf.Ticker('SPY')
-            hist = spy.history(period='1y')
-
+            spy = yf.Ticker("SPY")
+            hist = spy.history(period="1y")
             if hist is None or len(hist) < 50:
-                return result
+                r = regime_unknown("insufficient_spy_history")
+                logger.warning("Market regime unavailable: %s", r.get("detect_error"))
+                return r
 
-            close = hist['Close']
-            current = float(close.iloc[-1])
-            ma50_val = float(close.rolling(50).mean().iloc[-1])
-            has_ma200 = len(close) >= 200
-            ma200_val = float(close.rolling(200).mean().iloc[-1]) if has_ma200 else ma50_val
-
-            result['spy_price'] = round(current, 2)
-            result['ma50'] = round(ma50_val, 2)
-            result['ma200'] = round(ma200_val, 2)
-            result['spy_above_ma50'] = current > ma50_val
-            result['spy_above_ma200'] = current > ma200_val
-
-            # 5-day return
-            if len(close) >= 6:
-                result['spy_5d_return'] = round(((current / float(close.iloc[-6])) - 1) * 100, 2)
-
-            # ----------------------------------------------------------
-            # VIX check — extreme fear overrides everything
-            # ----------------------------------------------------------
-            vix_val = 0.0
+            close = hist["Close"]
+            vix_val: float = 0.0
             try:
-                vix = yf.Ticker('^VIX')
-                vix_hist = vix.history(period='5d')
+                vix = yf.Ticker("^VIX")
+                vix_hist = vix.history(period="5d")
                 if vix_hist is not None and len(vix_hist) > 0:
-                    vix_val = float(vix_hist['Close'].iloc[-1])
-                    result['vix'] = round(vix_val, 2)
+                    vix_val = float(vix_hist["Close"].iloc[-1])
             except Exception:
-                pass  # VIX fetch fail is non-fatal
+                pass
 
-            # VIX > 30 = panic mode → forced BEAR regardless of MA
-            if vix_val > 30:
-                result['regime'] = 'BEAR'
-                result['confidence'] = 'CONFIRMED'
-                result['score_multiplier'] = 0.70  # Panic discount
-                logger.info(
-                    f"Market Regime: BEAR (VIX PANIC {vix_val:.1f}) | "
-                    f"Multiplier: 0.70"
-                )
-                return result
-
-            # ----------------------------------------------------------
-            # 5-Day Confirmation — anti-whipsaw
-            # ----------------------------------------------------------
-            ma50_series = close.rolling(50).mean()
-            ma200_series = close.rolling(200).mean() if has_ma200 else ma50_series
-
-            last_5_close = close.tail(5)
-            last_5_ma50 = ma50_series.tail(5)
-            last_5_ma200 = ma200_series.tail(5)
-
-            # Count days meeting each condition over last 5 trading days
-            bull_days = int(((last_5_close > last_5_ma50) & (last_5_close > last_5_ma200)).sum())
-            bear_days = int((last_5_close < last_5_ma200).sum())
-
-            # ----------------------------------------------------------
-            # Regime Decision (confirmation-based)
-            # ----------------------------------------------------------
-            if bull_days >= 4:
-                # 4+ of 5 days above both MAs = strong BULL
-                result['regime'] = 'BULL'
-                result['confidence'] = 'CONFIRMED'
-                result['score_multiplier'] = 1.0
-            elif bear_days >= 4:
-                # 4+ of 5 days below MA200 = confirmed BEAR
-                result['regime'] = 'BEAR'
-                result['confidence'] = 'CONFIRMED'
-                result['score_multiplier'] = 0.75
-            elif current > ma200_val:
-                # Above MA200 today but mixed signals → CAUTION (above)
-                result['regime'] = 'CAUTION'
-                result['confidence'] = 'TENTATIVE'
-                result['score_multiplier'] = 0.85
+            result = regime_from_spy_close(close, vix_val)
+            if result.get("detect_error"):
+                logger.warning("Market regime unavailable: %s", result.get("detect_error"))
             else:
-                # Below MA200 today but not yet confirmed bear → CAUTION (below)
-                result['regime'] = 'CAUTION'
-                result['confidence'] = 'TENTATIVE'
-                result['score_multiplier'] = 0.80
-
-            # ----------------------------------------------------------
-            # VIX micro-adjustment (elevated but not panic)
-            # ----------------------------------------------------------
-            if vix_val > 25 and result['regime'] != 'BEAR':
-                # Elevated fear: nudge multiplier down slightly
-                result['score_multiplier'] = round(result['score_multiplier'] - 0.05, 2)
-
-            logger.info(
-                f"Market Regime: {result['regime']} ({result['confidence']}) | "
-                f"SPY ${current:.2f} vs MA50 ${ma50_val:.2f} / MA200 ${ma200_val:.2f} | "
-                f"Bull days: {bull_days}/5, Bear days: {bear_days}/5 | "
-                f"VIX: {vix_val:.1f} | Multiplier: {result['score_multiplier']}"
-            )
-
+                logger.info(
+                    f"Market Regime: {result['regime']} ({result['confidence']}) | "
+                    f"SPY ${result['spy_price']:.2f} vs MA50 ${result['ma50']:.2f} / MA200 ${result['ma200']:.2f} | "
+                    f"VIX: {result['vix']:.1f} | Multiplier: {result['score_multiplier']}"
+                )
             return result
 
         except Exception as e:
-            logger.warning(f"Market regime detection failed: {e}")
-            return result
+            r = regime_unknown(str(e))
+            logger.warning("Market regime unavailable: %s", r.get("detect_error"))
+            return r
 
     # Optional Boosters
     def check_boosters(self, df: pd.DataFrame) -> Dict:

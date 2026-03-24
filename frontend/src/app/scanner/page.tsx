@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { trackSignal, addTrade } from "@/lib/api";
 import { useScannerJob, SCAN_COMPLETE_EVENT } from "@/providers/ScannerJobProvider";
 import type { Signal } from "@/lib/api";
-import { Search, Plus, TrendingUp, AlertTriangle, Settings, ChevronDown, ChevronUp, Star, Zap, Shield, Target, BarChart2 } from "lucide-react";
+import { Search, Plus, TrendingUp, AlertTriangle, Settings, ChevronDown, ChevronUp, Star, Zap, Shield, Target, BarChart2, SlidersHorizontal, Sparkles } from "lucide-react";
 
 /* ───── helpers ───── */
 function QualityBadge({ score }: { score: number }) {
@@ -277,6 +277,251 @@ function SignalCard({ s, onTrack, tracking }: { s: Signal; onTrack: (s: Signal) 
 const STORAGE_KEY = "scannerResults";
 const STORAGE_STATS_KEY = "scannerStats";
 
+/** Bu taramada sunucunun uyguladığı ham skor eşiği + top_n + rejim özeti */
+function AppliedThresholdPanel({
+    stats,
+    regimeLabel,
+    regimeColor,
+    regimeConfidence,
+    regimeMultiplier,
+    regimeDetectError,
+    requestedMin,
+    requestedTop,
+}: {
+    stats: Record<string, unknown>;
+    regimeLabel: string;
+    regimeColor: string;
+    regimeConfidence: string;
+    regimeMultiplier: number | undefined;
+    regimeDetectError?: string;
+    requestedMin: number;
+    requestedTop: number;
+}) {
+    const reqMin =
+        typeof stats.request_min_quality === "number" && Number.isFinite(stats.request_min_quality as number)
+            ? (stats.request_min_quality as number)
+            : requestedMin;
+    const reqTop =
+        typeof stats.request_top_n === "number" && Number.isFinite(stats.request_top_n as number)
+            ? (stats.request_top_n as number)
+            : requestedTop;
+
+    const effMin = stats.effective_min_quality;
+    const effTop = stats.effective_top_n;
+    const hasNumeric =
+        typeof effMin === "number" && Number.isFinite(effMin) && typeof effTop === "number" && Number.isFinite(effTop);
+
+    if (!hasNumeric) {
+        return (
+            <div
+                className="glass-card"
+                style={{
+                    padding: "14px 18px",
+                    marginBottom: 20,
+                    borderLeft: `3px solid ${regimeColor}`,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    opacity: 0.85,
+                }}
+            >
+                <SlidersHorizontal size={18} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                    Bu kayıt için uygulanan eşik ayrıntıları yok (eski tarama). Yeni bir tarama çalıştırın.
+                </p>
+            </div>
+        );
+    }
+
+    const minN = effMin as number;
+    const topN = effTop as number;
+    const tightened = minN > reqMin || topN < reqTop;
+    const mult =
+        typeof regimeMultiplier === "number" && Number.isFinite(regimeMultiplier) && regimeMultiplier < 1
+            ? regimeMultiplier
+            : null;
+
+    const confTr =
+        regimeConfidence === "TENTATIVE"
+            ? "Teyitsiz"
+            : regimeConfidence === "CONFIRMED"
+              ? "Teyitli"
+              : regimeConfidence || "—";
+
+    return (
+        <div
+            className="glass-card"
+            style={{
+                marginBottom: 20,
+                padding: 0,
+                overflow: "hidden",
+                borderLeft: `4px solid ${regimeColor}`,
+                background:
+                    "linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)",
+            }}
+        >
+            <div
+                style={{
+                    padding: "16px 20px",
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "flex-start",
+                    justifyContent: "space-between",
+                    gap: 16,
+                }}
+            >
+                <div style={{ display: "flex", gap: 14, minWidth: 0, flex: "1 1 280px" }}>
+                    <div
+                        style={{
+                            width: 40,
+                            height: 40,
+                            borderRadius: 12,
+                            background: `color-mix(in srgb, ${regimeColor} 18%, transparent)`,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flexShrink: 0,
+                        }}
+                    >
+                        <Sparkles size={20} style={{ color: regimeColor }} />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                        <div
+                            style={{
+                                fontSize: "0.68rem",
+                                fontWeight: 700,
+                                letterSpacing: "0.06em",
+                                color: "var(--text-muted)",
+                                textTransform: "uppercase",
+                                marginBottom: 6,
+                            }}
+                        >
+                            Uygulanan filtre
+                        </div>
+                        <p
+                            style={{
+                                margin: 0,
+                                fontSize: "0.95rem",
+                                fontWeight: 700,
+                                color: "var(--text-primary)",
+                                lineHeight: 1.45,
+                            }}
+                        >
+                            Ham kalite skoru{" "}
+                            <span style={{ color: "var(--accent)", fontVariantNumeric: "tabular-nums" }}>≥ {minN}</span>
+                            {" · "}
+                            En fazla{" "}
+                            <span style={{ color: "var(--accent)", fontVariantNumeric: "tabular-nums" }}>{topN}</span>{" "}
+                            sonuç
+                        </p>
+                        <p style={{ margin: "8px 0 0", fontSize: "0.8rem", color: "var(--text-secondary)" }}>
+                            Rejim:{" "}
+                            <strong style={{ color: regimeColor }}>{regimeLabel}</strong>
+                            {regimeConfidence ? (
+                                <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>
+                                    {" "}
+                                    · {confTr}
+                                </span>
+                            ) : null}
+                            {mult != null ? (
+                                <span style={{ color: "var(--text-muted)" }}>
+                                    {" "}
+                                    · Skor çarpanı <strong style={{ fontVariantNumeric: "tabular-nums" }}>×{mult}</strong>
+                                </span>
+                            ) : null}
+                        </p>
+                        {regimeDetectError ? (
+                            <p
+                                style={{
+                                    margin: "8px 0 0",
+                                    fontSize: "0.72rem",
+                                    color: "var(--text-muted)",
+                                    padding: "8px 12px",
+                                    borderRadius: 8,
+                                    background: "rgba(148,163,184,0.1)",
+                                    border: "1px solid rgba(148,163,184,0.22)",
+                                    wordBreak: "break-word",
+                                }}
+                            >
+                                Rejim okunamadı:{" "}
+                                {regimeDetectError.length > 220 ? `${regimeDetectError.slice(0, 220)}…` : regimeDetectError}
+                            </p>
+                        ) : null}
+                        {tightened ? (
+                            <p
+                                style={{
+                                    margin: "10px 0 0",
+                                    fontSize: "0.75rem",
+                                    color: "var(--text-muted)",
+                                    padding: "8px 12px",
+                                    borderRadius: 8,
+                                    background: "rgba(245,158,11,0.08)",
+                                    border: "1px solid rgba(245,158,11,0.2)",
+                                    maxWidth: "100%",
+                                }}
+                            >
+                                Bu tarama isteğinde min <strong>{reqMin}</strong> / en fazla <strong>{reqTop}</strong>;
+                                rejim ve çarpan sonrası:{" "}
+                                <strong>
+                                    {[
+                                        minN > reqMin && `ham eşik → ${minN}`,
+                                        topN < reqTop && `liste üst sınırı → ${topN}`,
+                                    ]
+                                        .filter(Boolean)
+                                        .join(" · ")}
+                                </strong>
+                                .
+                            </p>
+                        ) : (
+                            <p style={{ margin: "10px 0 0", fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                                Bu tarama isteği (min {reqMin}, top {reqTop}) aynen uygulandı; ek rejim sıkılaştırması yok.
+                            </p>
+                        )}
+                    </div>
+                </div>
+                <div
+                    style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: 8,
+                        alignItems: "center",
+                        justifyContent: "flex-end",
+                    }}
+                >
+                    <span
+                        style={{
+                            fontSize: "0.72rem",
+                            fontWeight: 700,
+                            padding: "6px 12px",
+                            borderRadius: 999,
+                            background: `color-mix(in srgb, ${regimeColor} 12%, transparent)`,
+                            color: regimeColor,
+                            border: `1px solid color-mix(in srgb, ${regimeColor} 35%, transparent)`,
+                            fontVariantNumeric: "tabular-nums",
+                        }}
+                    >
+                        ham ≥ {minN}
+                    </span>
+                    <span
+                        style={{
+                            fontSize: "0.72rem",
+                            fontWeight: 700,
+                            padding: "6px 12px",
+                            borderRadius: 999,
+                            background: "rgba(255,255,255,0.06)",
+                            color: "var(--text-secondary)",
+                            border: "1px solid var(--border)",
+                            fontVariantNumeric: "tabular-nums",
+                        }}
+                    >
+                        top {topN}
+                    </span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function saveScanResults(data: { signals: Signal[]; stats: Record<string, unknown>; market_regime: string }) {
     try {
         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -408,10 +653,21 @@ export default function ScannerPage() {
     };
 
     const regime = result?.market_regime || "";
-    const regimeColor = regime === "BULL" ? "var(--green)" : regime === "BEAR" ? "var(--red)" : "var(--yellow)";
-    const regimeLabel = regime === "BULL" ? "BULL" : regime === "BEAR" ? "BEAR" : regime === "CAUTION" ? "CAUTION" : regime || "—";
+    const regimeColor =
+        regime === "BULL" ? "var(--green)"
+        : regime === "BEAR" ? "var(--red)"
+        : regime === "CAUTION" ? "var(--yellow)"
+        : regime === "UNKNOWN" ? "var(--text-muted)"
+        : "var(--text-muted)";
+    const regimeLabel =
+        regime === "BULL" ? "BULL"
+        : regime === "BEAR" ? "BEAR"
+        : regime === "CAUTION" ? "CAUTION"
+        : regime === "UNKNOWN" ? "BİLİNMİYOR"
+        : regime || "—";
     const regimeMultiplier = (result?.stats as Record<string, number>)?.regime_multiplier;
     const regimeConfidence = (result?.stats as Record<string, string>)?.regime_confidence || "";
+    const regimeDetectError = (result?.stats as Record<string, string>)?.regime_detect_error;
 
     return (
         <div>
@@ -589,12 +845,16 @@ export default function ScannerPage() {
                                 <span style={{ fontSize: "1rem", fontWeight: 800, color: regimeColor }}>
                                     {regimeLabel}
                                 </span>
-                                {regimeConfidence === "TENTATIVE" && (
+                                {regime === "UNKNOWN" ? (
+                                    <span style={{ fontSize: "0.6rem", color: "var(--text-muted)", fontWeight: 500 }}>
+                                        Veri yok · ×1
+                                    </span>
+                                ) : regimeConfidence === "TENTATIVE" ? (
                                     <span style={{ fontSize: "0.6rem", color: "var(--text-muted)", background: "rgba(255,255,255,0.06)", padding: "2px 6px", borderRadius: 4, fontWeight: 500 }}>
                                         Unconfirmed
                                     </span>
-                                )}
-                                {regimeMultiplier != null && regimeMultiplier < 1 && (
+                                ) : null}
+                                {regime !== "UNKNOWN" && regimeMultiplier != null && regimeMultiplier < 1 && (
                                     <span style={{ fontSize: "0.7rem", fontWeight: 500, opacity: 0.7 }}>
                                         x{regimeMultiplier}
                                     </span>
@@ -610,6 +870,17 @@ export default function ScannerPage() {
                             <div style={{ fontSize: "1.4rem", fontWeight: 800 }}>{(result.stats as Record<string, number>).raw_signals || "—"}</div>
                         </div>
                     </div>
+
+                    <AppliedThresholdPanel
+                        stats={result.stats}
+                        regimeLabel={regimeLabel}
+                        regimeColor={regimeColor}
+                        regimeConfidence={regimeConfidence}
+                        regimeMultiplier={regimeMultiplier}
+                        regimeDetectError={regimeDetectError}
+                        requestedMin={minQuality}
+                        requestedTop={topN}
+                    />
 
                     {/* Signal cards */}
                     {result.signals.length === 0 ? (

@@ -78,7 +78,26 @@ export default function PendingPage() {
             )}
 
             {/* Market Regime Context */}
-            {regime && regime.regime !== "BULL" && (
+            {regime && regime.regime === "UNKNOWN" && (
+                <div style={{
+                    background: "rgba(148,163,184,0.08)",
+                    border: "1px solid rgba(148,163,184,0.25)",
+                    borderRadius: 10, padding: "10px 16px", marginBottom: 16,
+                    fontSize: "0.8rem", display: "flex", flexDirection: "column", gap: 6,
+                    color: "var(--text-muted)",
+                }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <span style={{ fontWeight: 700, color: "var(--text-secondary)" }}>BİLİNMİYOR</span>
+                        <span>Rejim verisi alınamadı; çarpan nötr kabul edildi.</span>
+                    </div>
+                    {regime.detect_error ? (
+                        <span style={{ fontSize: "0.72rem", wordBreak: "break-word" }}>
+                            {regime.detect_error.length > 200 ? `${regime.detect_error.slice(0, 200)}…` : regime.detect_error}
+                        </span>
+                    ) : null}
+                </div>
+            )}
+            {regime && regime.regime !== "BULL" && regime.regime !== "UNKNOWN" && (
                 <div style={{
                     background: regime.regime === "BEAR" ? "rgba(239,68,68,0.06)" : "rgba(245,158,11,0.06)",
                     border: `1px solid ${regime.regime === "BEAR" ? "rgba(239,68,68,0.2)" : "rgba(245,158,11,0.2)"}`,

@@ -3266,7 +3266,9 @@ def smallcap_backtest_page(components):
             end_date=end_date.strftime('%Y-%m-%d'),
             initial_capital=initial_capital,
             max_concurrent=max_concurrent,
-            progress_callback=update_progress
+            min_quality=65,
+            top_n=10,
+            progress_callback=update_progress,
         )
         
         progress_bar.progress(100)

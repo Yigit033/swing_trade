@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS regime_history (
     ma200           REAL,
     vix             REAL,
     spy_5d_return   REAL,
+    detect_error    TEXT,
     created_at      TEXT DEFAULT CURRENT_TIMESTAMP
 )
 """
@@ -90,6 +91,7 @@ CREATE TABLE IF NOT EXISTS regime_history (
     ma200           REAL,
     vix             REAL,
     spy_5d_return   REAL,
+    detect_error    TEXT,
     created_at      TEXT DEFAULT CURRENT_TIMESTAMP
 )
 """
@@ -97,6 +99,19 @@ CREATE TABLE IF NOT EXISTS regime_history (
 _CREATE_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_regime_history_date ON regime_history(detected_at)
 """
+
+
+def _migrate_add_detect_error(cursor) -> None:
+    """Add detect_error for existing deployments (SQLite + PostgreSQL)."""
+    if _MODE == "pg":
+        cursor.execute(
+            "ALTER TABLE regime_history ADD COLUMN IF NOT EXISTS detect_error TEXT"
+        )
+        return
+    cursor.execute("PRAGMA table_info(regime_history)")
+    cols = {r[1] for r in cursor.fetchall()}
+    if "detect_error" not in cols:
+        cursor.execute("ALTER TABLE regime_history ADD COLUMN detect_error TEXT")
 
 
 class RegimeHistoryStorage:
@@ -113,6 +128,7 @@ class RegimeHistoryStorage:
             sql = _CREATE_TABLE_PG if _MODE == "pg" else _CREATE_TABLE_SQLITE
             cursor.execute(sql)
             cursor.execute(_CREATE_INDEX)
+            _migrate_add_detect_error(cursor)
             conn.commit()
             conn.close()
         except Exception as e:
@@ -121,7 +137,8 @@ class RegimeHistoryStorage:
     def save_regime(self, regime_data: Dict) -> Optional[int]:
         """
         Save a regime detection result.
-        Skips insert if the latest record has the same regime+confidence (no change).
+        Skips insert if the latest row matches regime, confidence, and detect_error
+        (so UNKNOWN + new error reason still creates a row; identical spam is avoided).
         Returns the row id if inserted, None if skipped.
         """
         regime = regime_data.get('regime', 'UNKNOWN')
@@ -132,32 +149,68 @@ class RegimeHistoryStorage:
         ma200 = regime_data.get('ma200', 0)
         vix = regime_data.get('vix', 0)
         spy_5d_return = regime_data.get('spy_5d_return', 0)
+        raw_err = regime_data.get("detect_error")
+        detect_error: Optional[str]
+        if raw_err is None or (isinstance(raw_err, str) and not raw_err.strip()):
+            detect_error = None
+        else:
+            detect_error = str(raw_err).strip()[:2000]
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        def _norm_err(e: Optional[str]) -> str:
+            return (e or "").strip()
 
         try:
             conn = _connect()
             cursor = conn.cursor()
 
-            # Check if regime changed from last record
-            cursor.execute("SELECT regime, confidence FROM regime_history ORDER BY id DESC LIMIT 1")
+            cursor.execute(
+                "SELECT regime, confidence, detect_error FROM regime_history ORDER BY id DESC LIMIT 1"
+            )
             row = cursor.fetchone()
             if row:
-                last = dict(row) if _MODE == "sqlite" else dict(zip(['regime', 'confidence'], row))
-                if last.get('regime') == regime and last.get('confidence') == confidence:
+                if _MODE == "sqlite":
+                    last = dict(row)
+                else:
+                    last = dict(zip(["regime", "confidence", "detect_error"], row))
+                if (
+                    last.get("regime") == regime
+                    and last.get("confidence") == confidence
+                    and _norm_err(last.get("detect_error")) == _norm_err(detect_error)
+                ):
                     conn.close()
                     return None  # No change, skip
 
             p = _ph()
-            cursor.execute(f"""
+            placeholders = ", ".join([p] * 10)
+            insert_sql = f"""
                 INSERT INTO regime_history
-                (detected_at, regime, confidence, score_multiplier, spy_price, ma50, ma200, vix, spy_5d_return)
-                VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})
-            """, (now, regime, confidence, multiplier, spy_price, ma50, ma200, vix, spy_5d_return))
+                (detected_at, regime, confidence, score_multiplier, spy_price, ma50, ma200, vix, spy_5d_return, detect_error)
+                VALUES ({placeholders})
+            """
+            params = (
+                now,
+                regime,
+                confidence,
+                multiplier,
+                spy_price,
+                ma50,
+                ma200,
+                vix,
+                spy_5d_return,
+                detect_error,
+            )
+            if _MODE == "pg":
+                cursor.execute(insert_sql + " RETURNING id", params)
+                row_id = cursor.fetchone()[0]
+            else:
+                cursor.execute(insert_sql, params)
+                row_id = cursor.lastrowid
 
             conn.commit()
-            row_id = cursor.lastrowid
             conn.close()
-            logger.info(f"Regime saved: {regime} ({confidence}) multiplier={multiplier}")
+            err_note = f" err={detect_error[:80]}…" if detect_error and len(detect_error) > 80 else (f" err={detect_error}" if detect_error else "")
+            logger.info(f"Regime saved: {regime} ({confidence}) multiplier={multiplier}{err_note}")
             return row_id
 
         except Exception as e:
