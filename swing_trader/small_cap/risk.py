@@ -23,28 +23,39 @@ class SmallCapRisk:
     
     # ── CORE CONSTANTS (v3.0) ──
     MAX_RISK_PER_TRADE = 0.015        # 1.5% of portfolio per trade (was 1.0% — too small for small cap)
-    STOP_ATR_MULTIPLIER = 1.5         # 1.5 ATR stop
+    STOP_ATR_MULTIPLIER = 1.5         # 1.5 ATR — room for small-cap volatility
     MAX_HOLDING_DAYS = 14             # 14 days max hold
     
     # ── TYPE-SPECIFIC STOP LOSS CAPS ──
     # v2.3: Replaces flat MAX_STOP_PERCENT = 0.15
     MAX_STOP_BY_TYPE = {
-        'C': 0.08,   # %8  — erken giriş, düşük volatilite beklentisi
-        'A': 0.10,   # %10 — standard continuation
-        'B': 0.10,   # %10 — momentum ama kontrollü
-        'S': 0.12,   # %12 — squeeze'de geniş hareket normal
+        'C': 0.06,   # %6  — early stage
+        'A': 0.08,   # %8  — continuation
+        'B': 0.09,   # %9  — momentum
+        'S': 0.10,   # %10 — squeeze
     }
-    MAX_STOP_PERCENT = 0.10  # Default fallback
+    MAX_STOP_PERCENT = 0.08  # Default fallback
     
-    # ── TYPE-SPECIFIC T1/T2 PROFIT TARGETS (v4.0 — hit-rate optimized) ──
-    # V3 targets were 15-25% T1 / 28-45% T2 — almost never hit in 7-14 day window.
-    # V4: achievable within swing timeframe; still > 1.5R minimum.
-    TYPE_TARGETS = {
-        'S': (0.12, 0.22),   # Squeeze:  T1 +12%, T2 +22%
-        'B': (0.10, 0.18),   # Momentum: T1 +10%, T2 +18%
-        'C': (0.08, 0.15),   # Early:    T1  +8%, T2 +15%
-        'A': (0.10, 0.18),   # Continuation: T1 +10%, T2 +18%
+    # ── ATR-BASED T1/T2 TARGETS (v5.0 — dynamic per-stock volatility) ──
+    # T1 = entry + ATR * multiplier, T2 = entry + ATR * multiplier * T2_RATIO
+    # Old fixed-pct table kept as ceiling to prevent unrealistic targets.
+    TYPE_ATR_MULTIPLIERS = {
+        'S': 2.5,   # Squeeze: aggressive, high vol expected
+        'B': 2.0,   # Momentum: strong move
+        'A': 1.8,   # Continuation: steady trend
+        'C': 1.5,   # Early stage: conservative
     }
+    T2_ATR_RATIO = 2.0  # T2 multiplier = T1 multiplier * this
+
+    TYPE_TARGET_CAPS = {
+        'S': (0.12, 0.22),   # Max T1 +12%, T2 +22%
+        'B': (0.10, 0.18),   # Max T1 +10%, T2 +18%
+        'C': (0.08, 0.15),   # Max T1  +8%, T2 +15%
+        'A': (0.10, 0.18),   # Max T1 +10%, T2 +18%
+    }
+
+    # Legacy alias for any external code that reads TYPE_TARGETS
+    TYPE_TARGETS = TYPE_TARGET_CAPS
     
     # ── TYPE-SPECIFIC POSITION CAPS (max % of portfolio per position) ──
     TYPE_POSITION_CAPS = {
@@ -82,11 +93,13 @@ class SmallCapRisk:
         except Exception:
             return 0.0
     
+    MIN_STOP_PERCENT = 0.03  # 3% min stop — prevents whipsaw on volatile small caps
+
     def calculate_stop_loss(self, df: pd.DataFrame, swing_type: str = 'A') -> Tuple[float, str]:
         """
         Calculate stop loss for small-cap trade.
-        v2.3: Type-specific max stop caps.
-        Uses tighter of: 1.5 ATR or recent swing low, capped per type.
+        v5.1: Uses WIDER of ATR stop vs swing low (not tighter!) to give
+        trades room to breathe. Capped per type, floored at MIN_STOP_PERCENT.
         """
         if df is None or len(df) < 5:
             return 0.0, "Insufficient data"
@@ -98,23 +111,32 @@ class SmallCapRisk:
             
             # Method 1: 1.5 ATR stop
             atr_stop = current_close - (self.STOP_ATR_MULTIPLIER * atr)
-            atr_pct = (current_close - atr_stop) / current_close
+            atr_pct = (current_close - atr_stop) / current_close if current_close > 0 else 0
             
-            # Method 2: Recent swing low (last 5 days)
+            # Method 2: Recent swing low (last 5 days) with buffer
             swing_low = df['Low'].tail(5).min()
-            swing_pct = (current_close - swing_low) / current_close
+            swing_stop = swing_low * 0.995
+            swing_pct = (current_close - swing_stop) / current_close if current_close > 0 else 0
             
-            # Use tighter stop (lower percentage), capped by type-specific max
-            if atr_pct <= swing_pct and atr_pct <= max_stop_pct:
+            # WIDER stop — more room below entry (pick the stop further from current close)
+            if atr_pct >= swing_pct:
                 stop = atr_stop
                 method = f"ATR Stop ({atr_pct*100:.1f}%)"
-            elif swing_pct <= atr_pct and swing_pct <= max_stop_pct:
-                stop = swing_low * 0.995  # Slightly below swing low
-                method = f"Swing Low ({swing_pct*100:.1f}%)"
             else:
-                # Both too wide, use type-specific max
+                stop = swing_stop
+                method = f"Swing Low ({swing_pct*100:.1f}%)"
+            
+            # Apply type-specific maximum cap
+            stop_pct = (current_close - stop) / current_close if current_close > 0 else 0
+            if stop_pct > max_stop_pct:
                 stop = current_close * (1 - max_stop_pct)
                 method = f"Max Stop ({max_stop_pct*100:.0f}%)"
+                stop_pct = (current_close - stop) / current_close if current_close > 0 else 0
+
+            # Apply minimum floor (prevents whipsaw)
+            if stop_pct < self.MIN_STOP_PERCENT:
+                stop = current_close * (1 - self.MIN_STOP_PERCENT)
+                method = f"Min Stop ({self.MIN_STOP_PERCENT*100:.0f}%)"
             
             return max(stop, 0.01), method
             
@@ -122,28 +144,68 @@ class SmallCapRisk:
             logger.error(f"Error calculating stop: {e}")
             return 0.0, str(e)
     
-    def calculate_targets(self, entry_price: float, stop_loss: float, swing_type: str = 'A') -> Tuple[float, float]:
+    def calculate_targets(
+        self,
+        entry_price: float,
+        stop_loss: float,
+        swing_type: str = 'A',
+        atr: float = 0.0,
+        quality_score: int = 0,
+        regime: str = '',
+    ) -> Tuple[float, float]:
         """
-        Calculate T1 and T2 target prices based on swing type.
-        
-        v2.3: Type-specific dual targets instead of flat 3R.
-        
-        Returns:
-            Tuple of (target_1, target_2)
+        Calculate T1 and T2 target prices — ATR-dynamic with quality boost.
+
+        v5.0: Targets scale with the stock's own volatility (ATR) instead of
+        fixed percentages.  Quality score widens targets for strong signals.
+        Regime narrows T2 in cautious / bear markets.
+
+        Falls back to fixed-pct table when ATR is unavailable.
         """
-        t1_pct, t2_pct = self.TYPE_TARGETS.get(swing_type, (0.25, 0.40))
-        
-        target_1 = entry_price * (1 + t1_pct)
-        target_2 = entry_price * (1 + t2_pct)
-        
+        t1_cap_pct, t2_cap_pct = self.TYPE_TARGET_CAPS.get(swing_type, (0.10, 0.18))
+
+        if atr > 0 and entry_price > 0:
+            mult = self.TYPE_ATR_MULTIPLIERS.get(swing_type, 1.8)
+
+            q_boost = 1.0
+            if quality_score >= 85:
+                q_boost = 1.15
+            elif quality_score >= 75:
+                q_boost = 1.08
+
+            t1_raw = entry_price + atr * mult * q_boost
+            t2_mult = self.T2_ATR_RATIO
+            if regime == 'CAUTION':
+                t2_mult = 1.6
+            elif regime == 'BEAR':
+                t2_mult = 1.05
+            t2_raw = entry_price + atr * mult * q_boost * t2_mult
+
+            t1_cap = entry_price * (1 + t1_cap_pct)
+            t2_cap = entry_price * (1 + t2_cap_pct)
+            target_1 = min(t1_raw, t1_cap)
+            target_2 = min(t2_raw, t2_cap)
+        else:
+            target_1 = entry_price * (1 + t1_cap_pct)
+            target_2 = entry_price * (1 + t2_cap_pct)
+
         risk = entry_price - stop_loss
-        min_target = entry_price + (risk * 1.5)  # Minimum 1.5R for T1 (was 2R — pushed targets too high)
-        
+        min_target = entry_price + (risk * 1.5)
         if target_1 < min_target:
             target_1 = min_target
-        if target_2 <= target_1:
-            target_2 = target_1 * 1.15  # T2 at least 15% above T1
-        
+
+        t2_gap = 1.15
+        if regime == 'BEAR':
+            t2_gap = 1.05
+        elif regime == 'CAUTION':
+            t2_gap = 1.10
+        if target_2 < target_1 * 1.005:
+            target_2 = target_1 * t2_gap
+
+        t2_hard_cap = entry_price * (1 + t2_cap_pct)
+        if target_2 > t2_hard_cap:
+            target_2 = max(t2_hard_cap, target_1 * 1.02)
+
         return round(target_1, 2), round(target_2, 2)
     
     def calculate_target(self, entry_price: float, stop_loss: float) -> float:
@@ -226,20 +288,13 @@ class SmallCapRisk:
         self, 
         signal: Dict, 
         df: pd.DataFrame,
-        portfolio_value: float = 10000
+        portfolio_value: float = 10000,
+        regime: str = '',
     ) -> Dict:
         """
         Add risk management parameters to signal.
-        
-        v2.3 Adds:
-        - stop_loss (type-specific cap)
-        - target_1 (T1 — ilk hedef)
-        - target_2 (T2 — ikinci hedef) 
-        - position_size (shares, type-specific cap)
-        - risk_amount
-        - expected_hold (min, max)
-        - max_hold_date
-        - volatility_warning
+
+        v5.0: ATR-dynamic targets, quality boost, regime-aware T2.
         """
         from datetime import datetime, timedelta
         
@@ -247,14 +302,21 @@ class SmallCapRisk:
             entry_price = signal.get('entry_price', df['Close'].iloc[-1])
             atr_percent = signal.get('atr_percent', 0.08)
             swing_type = signal.get('swing_type', 'A')
+            quality_score = int(signal.get('quality_score') or signal.get('original_quality_score') or 0)
             
             # Calculate stop loss (type-specific cap)
             stop_loss, stop_method = self.calculate_stop_loss(df, swing_type)
             signal['stop_loss'] = round(stop_loss, 2)
             signal['stop_method'] = stop_method
             
-            # Calculate T1 and T2 targets (type-specific)
-            target_1, target_2 = self.calculate_targets(entry_price, stop_loss, swing_type)
+            # ATR for dynamic targets
+            atr_val = self.calculate_atr(df)
+
+            # Calculate T1 and T2 targets (ATR-dynamic + quality + regime)
+            target_1, target_2 = self.calculate_targets(
+                entry_price, stop_loss, swing_type,
+                atr=atr_val, quality_score=quality_score, regime=regime,
+            )
             signal['target_1'] = target_1
             signal['target_2'] = target_2
             

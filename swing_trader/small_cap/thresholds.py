@@ -16,19 +16,20 @@ def effective_scan_thresholds(
     rq = request_min_quality
     rt = request_top_n
 
+    # Relaxed vs legacy (deep backtest fix): ~10–15pt lower floors so more trades pass in CAUTION/BEAR scans
     if regime == "BEAR":
         if regime_confidence == "TENTATIVE":
-            eff_min = max(rq, 80)
+            eff_min = max(rq, 70)
             eff_top = min(rt, 4)
         else:
-            eff_min = max(rq, 85)
+            eff_min = max(rq, 72)
             eff_top = min(rt, 3)
     elif regime == "CAUTION":
         if regime_confidence == "CONFIRMED":
-            eff_min = max(rq, 80)
+            eff_min = max(rq, 68)
             eff_top = min(rt, 4)
         else:
-            eff_min = max(rq, 75)
+            eff_min = max(rq, 63)
             eff_top = min(rt, 5)
     else:
         eff_min = rq

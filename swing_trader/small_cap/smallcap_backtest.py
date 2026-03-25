@@ -30,18 +30,26 @@ class SmallCapBacktester:
     Live parity notes (scan_stock backtest_mode=True still differs from full live):
     - Earnings filter is skipped; catalyst / short / insider / news bonuses are zero;
       sector RS uses SPY proxy when benchmark window exists.
-    - Execution: optional slippage + commission below; live API does not model fills.
+    - Execution: optional slippage below; live API does not model fills. No commission model (US zero-commission assumption).
     """
 
     # Backtest parameters (aligned with live SmallCapRisk: 1.5% risk + TYPE_POSITION_CAPS)
-    COOLDOWN_DAYS = 3            # Days to wait after stop-out before re-entering same ticker
-    # Adverse slippage vs mid/OHLC quote: buy worse, sell worse (0 = same as raw bar prices)
+    COOLDOWN_DAYS = 5            # Days after stop-out before re-entering same ticker (was 3 → 5)
+    TICKER_MAX_LOSSES = 2        # Max losses on same ticker in entire backtest; after this → permanent ban
     SLIPPAGE_BPS_PER_SIDE = 5
-    # Per-dollar fee on each leg (entry notional + exit notional); 0 = typical US zero-commission
-    COMMISSION_BPS_PER_SIDE = 0
-    MAX_GAP_UP_PCT = 5.0         # Skip entry if gap-up > 5% (momentum exhausted)
-    MAX_GAP_DOWN_PCT = 3.0       # Skip entry if gap-down > 3% (bad news)
-    MAX_ENTRY_RSI = 70           # Don't enter if RSI > 70 (overbought)
+    MAX_GAP_UP_PCT = 5.0         # Skip entry if gap-up > 5%
+    MAX_GAP_DOWN_PCT = 4.0       # Skip entry if gap-down > 4%
+    MAX_ENTRY_RSI = 70           # Momentum names often sit 60–70 RSI
+    MIN_RR_AT_ENTRY = 1.2        # Minimum R:R at entry (non–Type C)
+    PARTIAL_AT_T1_FRACTION = 0.5
+    MIN_SHARES_FOR_PARTIAL = 2
+    MIN_QUALITY_TYPE_C = 65      # Type C — allow more early-stage setups
+    MIN_QUALITY_TYPE_A = 60      # Type A continuation floor
+    MIN_QUALITY_TYPE_B = 60      # Type B momentum floor
+    MIN_RR_TYPE_C = 1.5          # Type C R:R (was 2.0 — too strict with tight stops)
+    MAX_LOSS_PER_TRADE_PCT = 0.07  # Hard cap: max 7% vs stop (position sizing limits gap damage)
+    MAX_GAP_RISK_PORTFOLIO_PCT = 0.02  # Cap shares so ~2×ATR gap ≤ this % of capital
+    MAX_POSITION_COST_PORTFOLIO_PCT = 0.15  # Max notional per trade vs capital
     
     def __init__(self, config: Dict = None):
         self.engine = SmallCapEngine(config)
@@ -53,12 +61,29 @@ class SmallCapBacktester:
         self.initial_capital = 10000
         self.capital = self.initial_capital
         self.cooldowns = {}  # ticker -> date when cooldown expires
+        self.ticker_losses = {}  # ticker -> count of stop-out losses (for permanent ban)
+        self.banned_tickers = set()  # permanently banned after TICKER_MAX_LOSSES
         self.pending_signals = []  # Signals waiting for next-day entry
+        self._peak_equity = 10000
         self._spy_df: Optional[pd.DataFrame] = None
         self._vix_df: Optional[pd.DataFrame] = None
         self.min_quality = 65
         self.top_n = 10
         self._max_concurrent = 3
+        self._diag: Dict = {}
+
+    def _reset_diagnostics(self) -> None:
+        self._diag = {
+            "signals_passed_rsi": 0,
+            "pending_queued": 0,
+            "entry_skip_gap_up": 0,
+            "entry_skip_gap_down": 0,
+            "entry_skip_tip_c": 0,
+            "entry_skip_risk": 0,
+            "entry_skip_rr": 0,
+            "entry_skip_trend": 0,
+            "entries_opened": 0,
+        }
 
     def run_backtest(
         self,
@@ -87,7 +112,11 @@ class SmallCapBacktester:
         self.open_trades = []
         self.equity_curve = []
         self.cooldowns = {}
+        self.ticker_losses = {}
+        self.banned_tickers = set()
         self.pending_signals = []
+        self._peak_equity = initial_capital
+        self._reset_diagnostics()
         
         start_dt = datetime.strptime(start_date, '%Y-%m-%d')
         end_dt = datetime.strptime(end_date, '%Y-%m-%d')
@@ -134,14 +163,37 @@ class SmallCapBacktester:
             # 2a: Check exits on open trades
             self._check_exits(current_date_dt, data_dict)
             
-            # 2b: Process pending signals from YESTERDAY (next-day-open entry)
-            if self.pending_signals and len(self.open_trades) < max_concurrent:
-                self._process_pending_entries(current_date_dt, data_dict, max_concurrent)
-
+            # Compute regime BEFORE entry decisions
             regime, eff_min, eff_top, spy_rs = self._daily_regime_bundle(current_date_dt)
             
-            # 2c: Record equity (+ daily regime / thresholds for UI)
+            # Regime-aware concurrent limit for entries
+            regime_name = regime.get('regime', 'UNKNOWN')
+            regime_conf = regime.get('confidence', 'TENTATIVE')
+            if regime_name == 'BEAR':
+                entry_max = 0  # No new entries in BEAR
+            elif regime_name == 'CAUTION':
+                entry_max = min(max_concurrent, 1)
+            else:
+                entry_max = max_concurrent
+            
+            # Drawdown circuit breaker: reduce size or pause if losing too much
             portfolio_value = self._calculate_portfolio_value(current_date_dt, data_dict)
+            current_dd = (self._peak_equity - portfolio_value) / self._peak_equity if self._peak_equity > 0 else 0
+            if portfolio_value > self._peak_equity:
+                self._peak_equity = portfolio_value
+            
+            # If drawdown > 25%, pause new entries
+            if current_dd > 0.25:
+                entry_max = 0
+            # If drawdown > 15%, reduce to max 1 position
+            elif current_dd > 0.15:
+                entry_max = min(entry_max, 1)
+            
+            # 2b: Process pending signals from YESTERDAY (next-day-open entry)
+            if self.pending_signals and entry_max > 0 and len(self.open_trades) < entry_max:
+                self._process_pending_entries(current_date_dt, data_dict, entry_max)
+            
+            # 2c: Record equity (+ daily regime / thresholds for UI)
             self.equity_curve.append({
                 'date': current_date_dt.strftime('%Y-%m-%d'),
                 'portfolio_value': round(portfolio_value, 2),
@@ -156,7 +208,7 @@ class SmallCapBacktester:
             })
             
             # 2d: Scan for new signals → queue as PENDING (enter tomorrow)
-            if len(self.open_trades) < max_concurrent:
+            if entry_max > 0 and len(self.open_trades) < max_concurrent:
                 self._scan_for_signals(
                     current_date_dt,
                     data_dict,
@@ -188,12 +240,14 @@ class SmallCapBacktester:
             'metrics': metrics,
             'data_stocks': len(data_dict),
             'period': f"{start_date} to {end_date}",
+            'diagnostics': dict(self._diag),
             'params': {
                 'min_quality': self.min_quality,
                 'top_n': self.top_n,
                 'max_concurrent': self._max_concurrent,
                 'slippage_bps_per_side': self.SLIPPAGE_BPS_PER_SIDE,
-                'commission_bps_per_side': self.COMMISSION_BPS_PER_SIDE,
+                'min_rr_at_entry': self.MIN_RR_AT_ENTRY,
+                'partial_at_t1_fraction': self.PARTIAL_AT_T1_FRACTION,
             },
         }
 
@@ -206,12 +260,6 @@ class SmallCapBacktester:
             return quoted
         b = self.SLIPPAGE_BPS_PER_SIDE / 10000.0
         return round(quoted * (1.0 - b), 2)
-
-    def _commission_dollars(self, entry_px: float, exit_px: float, shares: int) -> float:
-        b = self.COMMISSION_BPS_PER_SIDE / 10000.0
-        if b <= 0 or shares <= 0:
-            return 0.0
-        return entry_px * shares * b + exit_px * shares * b
 
     def _normalize_benchmark_df(self, raw: Optional[pd.DataFrame]) -> pd.DataFrame:
         if raw is None or len(raw) == 0:
@@ -290,9 +338,20 @@ class SmallCapBacktester:
         Full-universe day scan: backtest_mode scan_stock, regime multiplier,
         original_quality_score filter (live parity), sort, top_n, then queue pending.
         """
+        regime_name = regime.get('regime', 'UNKNOWN')
+        regime_conf = regime.get('confidence', 'TENTATIVE')
+        
+        # Regime-aware: BEAR = no new trades, CAUTION = max 1
+        if regime_name == 'BEAR':
+            return  # NO new trades in BEAR market — preserve capital
+        elif regime_name == 'CAUTION':
+            effective_max = min(max_concurrent, 1)  # max 1 position in CAUTION
+        else:
+            effective_max = max_concurrent
+        
         open_tickers = {t["ticker"] for t in self.open_trades}
         pending_tickers = {s["signal"]["ticker"] for s in self.pending_signals}
-        slots = max_concurrent - len(self.open_trades) - len(self.pending_signals)
+        slots = effective_max - len(self.open_trades) - len(self.pending_signals)
         if slots <= 0:
             return
 
@@ -300,6 +359,9 @@ class SmallCapBacktester:
 
         for ticker in sorted(data_dict.keys()):
             if ticker in open_tickers or ticker in pending_tickers:
+                continue
+
+            if ticker in self.banned_tickers:
                 continue
 
             if ticker in self.cooldowns:
@@ -340,15 +402,43 @@ class SmallCapBacktester:
                 candidates.append(
                     {"ticker": ticker, "signal": signal, "df_window": df_window}
                 )
+                self._diag["signals_passed_rsi"] += 1
             except Exception as e:
                 logger.debug(f"Scan error {ticker}: {e}")
 
         candidates.sort(key=lambda x: x["signal"].get("quality_score", 0), reverse=True)
-        filtered = [
-            c
-            for c in candidates
-            if c["signal"].get("original_quality_score", c["signal"]["quality_score"]) >= eff_min
-        ][:eff_top]
+        filtered = []
+        for c in candidates:
+            oqs = c["signal"].get("original_quality_score", c["signal"]["quality_score"])
+            if oqs < eff_min:
+                continue
+            stype = c["signal"].get("swing_type")
+            if stype == "C":
+                c_min = self.MIN_QUALITY_TYPE_C
+                if regime_name == 'BEAR':
+                    c_min = 82
+                elif regime_name == 'CAUTION':
+                    c_min = 75
+                if oqs < c_min:
+                    continue
+            elif stype == "A":
+                a_min = self.MIN_QUALITY_TYPE_A
+                if regime_name == 'BEAR':
+                    a_min = 72
+                elif regime_name == 'CAUTION':
+                    a_min = 66
+                if oqs < a_min:
+                    continue
+            elif stype == "B":
+                b_min = self.MIN_QUALITY_TYPE_B
+                if regime_name == 'BEAR':
+                    b_min = 67
+                elif regime_name == 'CAUTION':
+                    b_min = 60
+                if oqs < b_min:
+                    continue
+            filtered.append(c)
+        filtered = filtered[:eff_top]
 
         for item in filtered:
             if len(self.open_trades) + len(self.pending_signals) >= max_concurrent:
@@ -364,6 +454,7 @@ class SmallCapBacktester:
                     "df_window": df_window,
                 }
             )
+            self._diag["pending_queued"] += 1
     
     def _process_pending_entries(self, current_date: datetime, data_dict: Dict, max_concurrent: int):
         """Process pending signals: enter at today's Open with gap/confirmation filters."""
@@ -399,38 +490,129 @@ class SmallCapBacktester:
             gap_pct = ((today_open - signal_close) / signal_close) * 100
             
             if gap_pct > self.MAX_GAP_UP_PCT:
+                self._diag["entry_skip_gap_up"] += 1
                 logger.debug(f"{ticker}: Gap UP {gap_pct:+.1f}% > {self.MAX_GAP_UP_PCT}% — skipped")
                 continue
             
             if gap_pct < -self.MAX_GAP_DOWN_PCT:
+                self._diag["entry_skip_gap_down"] += 1
                 logger.debug(f"{ticker}: Gap DOWN {gap_pct:+.1f}% < -{self.MAX_GAP_DOWN_PCT}% — skipped")
                 continue
             
-            # ── ADIM 4: Tip C next-day confirmation ──
-            # Tip C requires Open > Yesterday Close (buyers still in control)
+            # ── Type C: open-only confirmation (no same-day close — not knowable at open)
             if signal.get('swing_type') == 'C':
-                if today_open <= signal_close:
-                    logger.debug(f"{ticker}: TipC confirmation FAILED (Open ${today_open:.2f} <= Close ${signal_close:.2f})")
+                if today_open < signal_close * 0.98:
+                    self._diag["entry_skip_tip_c"] += 1
                     continue
             
             # ── All filters passed: Enter at today's Open (+ adverse slippage) ──
-            # Live parity: stop/target/sizing from SmallCapRisk.add_risk_management using
-            # signal-day df (same as scan_stock), entry_price = fill at open.
             entry_price = self._entry_fill_price(today_open)
-            df_window = pending['df_window']
+            
+            # Use entry-day data (not signal-day) for accurate stop/target
+            full_df = data_dict.get(ticker)
+            df_entry = full_df[full_df['Date'] <= current_date].copy() if full_df is not None else pending['df_window']
+            
+            # EMA trend: completed bars only (no same-day close lookahead)
+            df_prior = df_entry.iloc[:-1] if len(df_entry) > 21 else df_entry
+            if len(df_prior) >= 21:
+                ema10 = float(df_prior['Close'].ewm(span=10, adjust=False).mean().iloc[-1])
+                ema20 = float(df_prior['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
+                if entry_price < ema10 and entry_price < ema20:
+                    self._diag["entry_skip_trend"] += 1
+                    continue
+            
             sig = signal.copy()
             sig['entry_price'] = entry_price
+            regime_str = sig.get('market_regime', '')
+            
             try:
-                self.risk.add_risk_management(sig, df_window, portfolio_value=self.capital)
+                self.risk.add_risk_management(
+                    sig, df_entry,
+                    portfolio_value=self.capital,
+                    regime=regime_str,
+                )
             except Exception as e:
+                self._diag["entry_skip_risk"] += 1
                 logger.debug(f"{ticker}: add_risk_management failed on entry: {e}")
                 continue
-            if int(sig.get('position_size') or 0) < 1:
-                continue
+            
+            # Recalculate stop relative to actual entry_price (not signal-day close)
             sl = float(sig.get('stop_loss') or 0)
+            atr_val = self.risk.calculate_atr(df_entry)
+            swing_type = sig.get('swing_type', 'A')
+            max_stop_pct = self.risk.MAX_STOP_BY_TYPE.get(swing_type, self.risk.MAX_STOP_PERCENT)
+            
+            if atr_val > 0:
+                atr_stop = entry_price - (self.risk.STOP_ATR_MULTIPLIER * atr_val)
+                swing_low = float(df_entry['Low'].tail(5).min()) * 0.995
+                entry_max_stop = entry_price * (1 - max_stop_pct)
+                # WIDER stop: further from entry = larger % risk from ATR vs swing
+                atr_dist = (entry_price - atr_stop) / entry_price if entry_price > 0 else 0.0
+                swing_dist = (entry_price - swing_low) / entry_price if entry_price > 0 else 0.0
+                if atr_dist >= swing_dist:
+                    sl = atr_stop
+                else:
+                    sl = swing_low
+                sl = max(sl, entry_max_stop)
+                sl = min(sl, entry_price * 0.995)  # must be below entry
+                hard_floor = entry_price * (1 - self.MAX_LOSS_PER_TRADE_PCT)
+                sl = max(sl, hard_floor)
+                sig['stop_loss'] = round(sl, 2)
+            
+            if int(sig.get('position_size') or 0) < 1:
+                self._diag["entry_skip_risk"] += 1
+                continue
             if sl <= 0 or sl >= entry_price:
+                self._diag["entry_skip_risk"] += 1
+                continue
+            
+            # Recalculate targets based on actual entry_price and new stop
+            quality_score = int(sig.get('original_quality_score') or sig.get('quality_score') or 0)
+            t1, t2 = self.risk.calculate_targets(
+                entry_price, sl, swing_type,
+                atr=atr_val, quality_score=quality_score, regime=regime_str,
+            )
+            sig['target_1'] = t1
+            sig['target_2'] = t2
+            
+            # Recalculate position size with new stop
+            shares, _ = self.risk.calculate_position_size(
+                self.capital, entry_price, sl, swing_type
+            )
+            # Gap-aware cap: plan 2×ATR; also vs full stop distance (gap-through-stop can exceed 2×ATR)
+            if atr_val > 0 and entry_price > 0:
+                atr_pct_at_entry = atr_val / entry_price
+                two_atr = entry_price * atr_pct_at_entry * 2.0
+                stop_width = max(entry_price - sl, 1e-9)
+                max_gap_loss_per_share = max(two_atr, stop_width)
+                if max_gap_loss_per_share > 1e-9:
+                    gap_cap = int(
+                        (self.capital * self.MAX_GAP_RISK_PORTFOLIO_PCT)
+                        / max_gap_loss_per_share
+                    )
+                    shares = min(shares, max(0, gap_cap))
+            # Hard notional cap (survive total loss / large gap)
+            max_sh_cost = int(
+                (self.capital * self.MAX_POSITION_COST_PORTFOLIO_PCT) / entry_price
+            ) if entry_price > 0 else 0
+            shares = min(shares, max(0, max_sh_cost))
+            sig['position_size'] = shares
+            if shares < 1:
+                self._diag["entry_skip_risk"] += 1
+                continue
+            
+            # R:R check with actual entry-based values
+            risk_px = entry_price - sl
+            reward_px = t1 - entry_price
+            min_rr = self.MIN_RR_TYPE_C if swing_type == 'C' else self.MIN_RR_AT_ENTRY
+            if risk_px <= 0 or reward_px / risk_px < min_rr:
+                self._diag["entry_skip_rr"] += 1
+                logger.debug(
+                    f"{ticker}: Entry R:R {reward_px/risk_px:.2f} < min {min_rr} — skipped"
+                )
                 continue
             self._open_trade(sig, current_date, df_today)
+            self._diag["entries_opened"] += 1
         
         # Expire all pending signals (1-day validity)
         self.pending_signals = []
@@ -448,9 +630,12 @@ class SmallCapBacktester:
         
         # ATR-based target from risk module (3R minimum)
         target = signal.get('target_1', 0)
+        target_2 = float(signal.get("target_2") or 0)
         if target <= entry_price:
             risk_amount = entry_price - stop_loss
             target = entry_price + (risk_amount * 2.0)  # fallback min ~2R if target_1 missing
+        if target_2 <= target:
+            target_2 = target * 1.15
         
         # Validate
         if entry_price <= 0 or stop_loss <= 0 or stop_loss >= entry_price:
@@ -487,9 +672,15 @@ class SmallCapBacktester:
             'initial_stop': round(stop_loss, 2),
             'trailing_stop': round(stop_loss, 2),
             'target': round(target, 2),
+            'target_2': round(target_2, 2),
             'stop_pct': round(stop_pct, 1),
             'target_pct': round(target_pct, 1),
             'shares': shares,
+            'initial_shares': shares,
+            'partial_done': False,
+            'partial_pnl_dollar': 0.0,
+            'partial_shares': 0,
+            'partial_exit_price': 0.0,
             'atr': round(atr, 4),
             'swing_type': swing_type,
             'quality_score': signal.get('quality_score', 0),
@@ -506,7 +697,7 @@ class SmallCapBacktester:
         self.open_trades.append(trade)
     
     def _check_exits(self, current_date: datetime, data_dict: Dict):
-        """Check exit conditions for all open trades with trailing stop."""
+        """Check exits: trailing stop, optional partial at T1 + BE, T2, timeout."""
         still_open = []
         
         for trade in self.open_trades:
@@ -517,7 +708,6 @@ class SmallCapBacktester:
                 still_open.append(trade)
                 continue
             
-            # Get today's bar
             mask = df['Date'].dt.date == current_date.date() if hasattr(df['Date'].iloc[0], 'date') else df['Date'] == current_date
             today_bars = df[mask]
             
@@ -532,64 +722,134 @@ class SmallCapBacktester:
             current_high = float(bar['High'])
             current_low = float(bar['Low'])
             atr = trade.get('atr', 0)
+            entry_price = trade['entry_price']
+            shares = trade['shares']
             
-            # ── TRAILING STOP UPDATE ──
-            # Only activate after 50% of max hold time AND 2+ ATR gain
-            half_hold = trade['max_hold_days'] * 0.5
-            if atr > 0 and current_close > trade['entry_price'] and days_held >= half_hold:
-                unrealized_gain = current_close - trade['entry_price']
-                atr_gain = unrealized_gain / atr
+            # Time-based exit: stale losers only after more room (5d / 5%)
+            if days_held >= 5 and current_close < entry_price and not trade.get('partial_done'):
+                loss_pct = (entry_price - current_close) / entry_price
+                if loss_pct > 0.05:
+                    trade['exit_price'] = self._exit_fill_price(current_close)
+                    trade['exit_date'] = current_date.strftime('%Y-%m-%d')
+                    trade['exit_reason'] = f'Time Stop ({days_held}d, {loss_pct*100:.1f}% loss)'
+                    trade['status'] = 'STOPPED'
+                    trade['days_held'] = days_held
+                    self._close_trade(trade)
+                    self.cooldowns[ticker] = current_date + timedelta(days=self.COOLDOWN_DAYS)
+                    self.ticker_losses[ticker] = self.ticker_losses.get(ticker, 0) + 1
+                    if self.ticker_losses[ticker] >= self.TICKER_MAX_LOSSES:
+                        self.banned_tickers.add(ticker)
+                    continue
+            
+            # Aggressive trailing stop: protect gains quickly
+            if atr > 0 and current_high > entry_price:
+                peak_gain = current_high - entry_price
+                atr_gain_peak = peak_gain / atr
+                close_gain = max(current_close - entry_price, 0)
+                atr_gain_close = close_gain / atr if current_close > entry_price else 0
+                new_trail = trade['trailing_stop']
+
+                # Step trail: lock in gains aggressively
+                if atr_gain_peak >= 2.5:
+                    new_trail = max(new_trail, current_high - 0.8 * atr)
+                elif atr_gain_peak >= 2.0:
+                    new_trail = max(new_trail, entry_price + (peak_gain * 0.5))
+                elif atr_gain_peak >= 1.5:
+                    new_trail = max(new_trail, entry_price + (peak_gain * 0.3))
                 
-                if atr_gain >= 2.0:
-                    atr_steps = int(atr_gain) - 1
-                    new_trail = trade['initial_stop'] + (atr_steps * atr)
-                    # Only move stop UP, never down
-                    if new_trail > trade['trailing_stop']:
-                        trade['trailing_stop'] = round(new_trail, 2)
+                # Breakeven at 1.5 ATR peak gain (room for volatility)
+                if atr_gain_peak >= 1.5:
+                    new_trail = max(new_trail, entry_price)
+                # Light protection after 1.0 ATR peak
+                elif atr_gain_peak >= 1.0:
+                    new_trail = max(new_trail, entry_price - 0.2 * atr)
+                
+                # Close-based tightening for strong closes
+                if atr_gain_close >= 2.0:
+                    new_trail = max(new_trail, current_close - 1.0 * atr)
+                elif atr_gain_close >= 1.5:
+                    new_trail = max(new_trail, current_close - 1.2 * atr)
+
+                if new_trail > trade['trailing_stop']:
+                    trade['trailing_stop'] = round(new_trail, 2)
             
-            # Use trailing stop as active stop
             active_stop = trade['trailing_stop']
             
-            # Check stop loss (trailing stop)
-            # CRITICAL: If today's LOW gaps through our stop, we can't exit at
-            # the stop price — we exit at the Open (realistic slippage)
             if current_low <= active_stop:
                 today_open = float(bar['Open'])
                 if today_open <= active_stop:
-                    # Gap-down through stop — exit at Open (slippage)
-                    exit_price = today_open
+                    raw_exit = today_open
                 else:
-                    # Intraday dip to stop — exit at stop price
-                    exit_price = active_stop
+                    raw_exit = active_stop
                 is_trail = active_stop > trade['initial_stop']
-                trade['exit_price'] = self._exit_fill_price(exit_price)
+                trade['exit_price'] = self._exit_fill_price(raw_exit)
                 trade['exit_date'] = current_date.strftime('%Y-%m-%d')
-                trade['exit_reason'] = 'Trailing Stop' if is_trail else 'Stop Loss'
+                if trade.get('partial_done'):
+                    trade['exit_reason'] = 'Trailing Stop (kalan)' if is_trail else 'Stop Loss (kalan)'
+                else:
+                    trade['exit_reason'] = 'Trailing Stop' if is_trail else 'Stop Loss'
                 trade['status'] = 'TRAILED' if is_trail else 'STOPPED'
                 trade['days_held'] = days_held
                 self._close_trade(trade)
-                # Set cooldown for this ticker
                 self.cooldowns[ticker] = current_date + timedelta(days=self.COOLDOWN_DAYS)
+                # Track losses per ticker — ban after too many
+                if not is_trail:
+                    self.ticker_losses[ticker] = self.ticker_losses.get(ticker, 0) + 1
+                    if self.ticker_losses[ticker] >= self.TICKER_MAX_LOSSES:
+                        self.banned_tickers.add(ticker)
                 continue
             
-            # Check target (high touches target)
-            if current_high >= trade['target']:
+            if not trade.get('partial_done') and current_high >= trade['target']:
+                if shares < self.MIN_SHARES_FOR_PARTIAL:
+                    trade['exit_price'] = self._exit_fill_price(float(trade['target']))
+                    trade['exit_date'] = current_date.strftime('%Y-%m-%d')
+                    trade['exit_reason'] = 'Hedef T1 (tam)'
+                    trade['status'] = 'TARGET'
+                    trade['days_held'] = days_held
+                    self._close_trade(trade)
+                    continue
+                
+                ps = max(1, int(shares * self.PARTIAL_AT_T1_FRACTION))
+                if ps >= shares:
+                    ps = max(1, shares - 1)
+                px = self._exit_fill_price(float(trade['target']))
+                leg_pnl = (px - entry_price) * ps
+                self.capital += leg_pnl
+                trade['partial_pnl_dollar'] = round(leg_pnl, 2)
+                trade['partial_shares'] = ps
+                trade['partial_exit_price'] = px
+                trade['shares'] = shares - ps
+                trade['partial_done'] = True
+                trade['trailing_stop'] = max(trade['trailing_stop'], entry_price)
+                trade['initial_stop'] = max(trade['initial_stop'], entry_price)
+                trade['target'] = round(float(trade.get('target_2') or trade['target'] * 1.15), 2)
+                still_open.append(trade)
+                continue
+            
+            if trade.get('partial_done') and current_high >= trade['target']:
                 trade['exit_price'] = self._exit_fill_price(float(trade['target']))
                 trade['exit_date'] = current_date.strftime('%Y-%m-%d')
-                trade['exit_reason'] = 'Target Hit'
-                trade['status'] = 'TARGET'
+                trade['exit_reason'] = 'Hedef T2 (kısmi sonrası)'
+                trade['status'] = 'TARGET_T2'
                 trade['days_held'] = days_held
                 self._close_trade(trade)
                 continue
             
-            # Check timeout
             if days_held >= trade['max_hold_days']:
-                trade['exit_price'] = self._exit_fill_price(current_close)
+                exit_px = current_close
+                if not trade.get('partial_done') and current_high >= trade['target']:
+                    exit_px = float(trade['target'])
+                trade['exit_price'] = self._exit_fill_price(exit_px)
                 trade['exit_date'] = current_date.strftime('%Y-%m-%d')
                 trade['exit_reason'] = f'Timeout ({days_held}d)'
                 trade['status'] = 'TIMEOUT'
                 trade['days_held'] = days_held
                 self._close_trade(trade)
+                # Timeout on a losing trade = count as a loss for that ticker
+                if exit_px < entry_price:
+                    self.ticker_losses[ticker] = self.ticker_losses.get(ticker, 0) + 1
+                    if self.ticker_losses[ticker] >= self.TICKER_MAX_LOSSES:
+                        self.banned_tickers.add(ticker)
                 continue
             
             still_open.append(trade)
@@ -597,20 +857,28 @@ class SmallCapBacktester:
         self.open_trades = still_open
     
     def _close_trade(self, trade: Dict):
-        """Calculate P/L using actual position size and move to closed trades."""
+        """Close remaining shares; sum partial leg if any. Updates capital for remainder only."""
         entry = trade['entry_price']
-        exit_p = trade['exit_price']
+        last_exit = float(trade['exit_price'])
         shares = trade.get('shares', 100)
-        fee = self._commission_dollars(entry, exit_p, shares)
-        trade['commission_dollar'] = round(fee, 2)
+        init_sh = int(trade.get('initial_shares') or shares)
+        partial_pnl = float(trade.get('partial_pnl_dollar') or 0)
+        ps = int(trade.get('partial_shares') or 0)
+        ppx = float(trade.get('partial_exit_price') or 0)
         
-        pnl_pct = ((exit_p / entry) - 1) * 100
-        pnl_dollar = (exit_p - entry) * shares - fee
+        rem_leg = (last_exit - entry) * shares
+        if ps > 0:
+            self.capital += rem_leg
+            total = partial_pnl + rem_leg
+            trade['pnl_dollar'] = round(total, 2)
+            trade['exit_price'] = round((ppx * ps + last_exit * shares) / init_sh, 2)
+            trade['pnl_pct'] = round((total / (entry * init_sh)) * 100, 2) if entry * init_sh > 0 else 0
+        else:
+            self.capital += rem_leg
+            trade['pnl_dollar'] = round(rem_leg, 2)
+            trade['pnl_pct'] = round(((last_exit / entry) - 1) * 100, 2) if entry > 0 else 0
         
-        trade['pnl_pct'] = round(pnl_pct, 2)
-        trade['pnl_dollar'] = round(pnl_dollar, 2)
-        
-        self.capital += pnl_dollar
+        trade['shares'] = init_sh
         self.trades.append(trade)
     
     def _force_close_all(self, end_date: datetime, data_dict: Dict):
@@ -760,12 +1028,14 @@ class SmallCapBacktester:
             'metrics': self._empty_metrics(),
             'data_stocks': 0,
             'period': '',
+            'diagnostics': dict(getattr(self, '_diag', {}) or {}),
             'params': {
                 'min_quality': getattr(self, 'min_quality', 65),
                 'top_n': getattr(self, 'top_n', 10),
                 'max_concurrent': getattr(self, '_max_concurrent', 3),
                 'slippage_bps_per_side': self.SLIPPAGE_BPS_PER_SIDE,
-                'commission_bps_per_side': self.COMMISSION_BPS_PER_SIDE,
+                'min_rr_at_entry': self.MIN_RR_AT_ENTRY,
+                'partial_at_t1_fraction': self.PARTIAL_AT_T1_FRACTION,
             },
         }
     

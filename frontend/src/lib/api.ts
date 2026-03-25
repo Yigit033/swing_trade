@@ -349,7 +349,9 @@ export interface BacktestTrade {
     shares?: number;
     max_hold_days?: number;
     quality_score?: number;
-    commission_dollar?: number;
+    /** Lot at open (same as shares on closed trades) */
+    initial_shares?: number;
+    partial_shares?: number;
 }
 
 export interface BacktestEquityPoint {
@@ -380,8 +382,11 @@ export interface BacktestResult {
         top_n: number;
         max_concurrent: number;
         slippage_bps_per_side?: number;
-        commission_bps_per_side?: number;
+        min_rr_at_entry?: number;
+        partial_at_t1_fraction?: number;
     };
+    /** Walk-forward funnel: signals, pending, entry skips */
+    diagnostics?: Record<string, number>;
     metrics: BacktestMetrics;
     equity_curve: BacktestEquityPoint[];
     trades: BacktestTrade[];

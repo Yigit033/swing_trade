@@ -177,8 +177,8 @@ class SmallCapEngine:
         if higher_lows:
             type_c_score += 1
         
-        # Type C threshold: 8+ points
-        if type_c_score >= 8:
+        # Type C threshold: 10+ points (raised from 8 — higher conviction required)
+        if type_c_score >= 10:
             if rsi_divergence:
                 emoji = "🌟"
                 reason = f"RSI Divergence + Early: 5d={five_day_return:+.0f}%, RSI={rsi:.0f}"

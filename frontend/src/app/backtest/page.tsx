@@ -13,13 +13,16 @@ const PERIOD_OPTIONS = [
     { label: "2 Ay", days: 60 },
     { label: "3 Ay", days: 90 },
     { label: "6 Ay", days: 180 },
+    { label: "12 Ay", days: 365 },
+    { label: "18 Ay", days: 548 },
 ];
 
 /** Trade.status from walk-forward engine (preferred for display) */
 const STATUS_LABELS: Record<string, string> = {
     STOPPED: "🛑 Stop",
     TRAILED: "📍 Trailing stop",
-    TARGET: "🎯 Hedef",
+    TARGET: "🎯 Hedef T1",
+    TARGET_T2: "🎯 Hedef T2",
     TIMEOUT: "⏰ Süre doldu",
     FORCED: "🔚 Backtest sonu",
 };
@@ -81,7 +84,7 @@ export default function BacktestPage() {
     const [periodDays, setPeriodDays] = useState(90);
     const [capital, setCapital] = useState(10000);
     const [maxConcurrent, setMaxConcurrent] = useState(3);
-    const [minQuality, setMinQuality] = useState(65);
+    const [minQuality, setMinQuality] = useState(60);
     const [topN, setTopN] = useState(10);
     const [tickerInput, setTickerInput] = useState("AEHR,AXTI,VELO,FSLY,NMRA,NVCR,SGRY,MLTX,FJET,WIN");
     const [useFinviz, setUseFinviz] = useState(false);
@@ -221,7 +224,7 @@ export default function BacktestPage() {
                     {/* Max concurrent */}
                     <div style={{ minWidth: 120 }}>
                         <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 6 }}>MAKS EŞ ZAMANLI</label>
-                        <input className="input" type="number" min={1} max={10} value={maxConcurrent}
+                        <input className="input" type="number" min={1} max={8} value={maxConcurrent}
                             onChange={e => setMaxConcurrent(Number(e.target.value))} />
                     </div>
 
@@ -295,10 +298,23 @@ export default function BacktestPage() {
                                 İstek: ham skor ≥ {result.min_quality ?? "—"}, en fazla {result.top_n ?? "—"} aday/gün; rejim günlük sıkılaştırması equity grafiği ipucunda.
                             </span>
                         )}
-                        {(result.params?.slippage_bps_per_side != null || result.params?.commission_bps_per_side != null) && (
+                        {result.params?.slippage_bps_per_side != null && (
                             <span style={{ display: "block", marginTop: 6 }}>
-                                Simülasyon sürtünme: slip {result.params?.slippage_bps_per_side ?? "—"} bps/kenar, komisyon {result.params?.commission_bps_per_side ?? "—"} bps/kenar (nominal üzerinden). Canlı API fiyatları slip içermez; backtest_mode taramada kazanç/earnings yok.
+                                Simülasyon slip: {result.params.slippage_bps_per_side} bps/kenar. Giriş min R:R: {result.params.min_rr_at_entry ?? "—"}. T1 kısmi çıkış: %{Math.round((result.params.partial_at_t1_fraction ?? 0.5) * 100)} (kalan T2 / BE). Komisyon yok. Parite: repo içi docs/BACKTEST_LIVE_PARITY.md
                             </span>
+                        )}
+                        {result.diagnostics && Object.keys(result.diagnostics).length > 0 && (
+                            <div style={{ display: "block", marginTop: 10, padding: "10px 12px", background: "rgba(255,255,255,0.03)", borderRadius: 8, fontSize: "0.75rem", lineHeight: 1.55 }}>
+                                <strong style={{ color: "var(--text-secondary)" }}>Teşhis (tüm dönem)</strong>
+                                <div style={{ color: "var(--text-muted)", marginTop: 4 }}>
+                                    RSI sonrası aday: {result.diagnostics.signals_passed_rsi ?? 0} · Kuyruğa alınan: {result.diagnostics.pending_queued ?? 0} ·
+                                    Açılan pozisyon: {result.diagnostics.entries_opened ?? 0}
+                                </div>
+                                <div style={{ color: "var(--text-muted)", marginTop: 2 }}>
+                                    Elenen giriş: gap↑ {result.diagnostics.entry_skip_gap_up ?? 0} · gap↓ {result.diagnostics.entry_skip_gap_down ?? 0} ·
+                                    Tip C {result.diagnostics.entry_skip_tip_c ?? 0} · risk {result.diagnostics.entry_skip_risk ?? 0} · R:R {result.diagnostics.entry_skip_rr ?? 0}
+                                </div>
+                            </div>
                         )}
                     </div>
 
@@ -500,7 +516,7 @@ export default function BacktestPage() {
                                                         <td>
                                                             <span
                                                                 className={`badge ${
-                                                                    t.status === "TARGET"
+                                                                    t.status === "TARGET" || t.status === "TARGET_T2"
                                                                         ? "badge-green"
                                                                         : t.status === "STOPPED" || t.status === "TRAILED"
                                                                           ? "badge-red"

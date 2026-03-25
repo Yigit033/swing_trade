@@ -17,10 +17,10 @@ logger = logging.getLogger(__name__)
 
 
 class BacktestRequest(BaseModel):
-    period_days: int = Field(default=90, ge=7, le=730)
+    period_days: int = Field(default=90, ge=7, le=730)  # max ~2 years
     initial_capital: float = Field(default=10000, ge=100)
-    max_concurrent: int = Field(default=3, ge=1, le=20)
-    min_quality: int = Field(default=65, ge=30, le=100)
+    max_concurrent: int = Field(default=3, ge=1, le=8)
+    min_quality: int = Field(default=60, ge=30, le=100)
     top_n: int = Field(default=10, ge=1, le=50)
     tickers: Optional[List[str]] = None   # None = auto Finviz; [] invalid — rejected below
 
@@ -49,9 +49,9 @@ def run_smallcap_backtest(body: BacktestRequest):
             if not tickers:
                 return {"error": "Ticker list is empty — add symbols or choose Finviz universe", "results": None}
         else:
-            # Finviz universe (can be slow ~30-60 s)
+            # Finviz universe — same cap as live scanner (api/routers/scanner.py)
             engine = SmallCapEngine(config=None)
-            tickers = engine.get_small_cap_universe(use_finviz=True, max_tickers=50)
+            tickers = engine.get_small_cap_universe(use_finviz=True, max_tickers=200)
             if not tickers:
                 return {"error": "No tickers found from Finviz universe", "results": None}
 
@@ -83,6 +83,7 @@ def run_smallcap_backtest(body: BacktestRequest):
             "top_n":          body.top_n,
             "data_stocks":    results.get("data_stocks", 0),
             "params":         results.get("params", {}),
+            "diagnostics":    results.get("diagnostics", {}),
             "metrics":        results.get("metrics", {}),
             "equity_curve":   results.get("equity_curve", []),
             "trades":         results.get("trades", []),
