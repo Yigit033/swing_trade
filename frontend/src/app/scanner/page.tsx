@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { trackSignal, addTrade } from "@/lib/api";
 import { useScannerJob, SCAN_COMPLETE_EVENT } from "@/providers/ScannerJobProvider";
 import type { Signal } from "@/lib/api";
@@ -672,7 +673,12 @@ export default function ScannerPage() {
     return (
         <div>
             <h1 className="page-title gradient-text">SmallCap Scanner</h1>
-            <p className="page-subtitle">AI-powered momentum signals · SmallCap universe</p>
+            <p className="page-subtitle">
+                AI-powered momentum signals · SmallCap universe ·{" "}
+                <Link href="/how-it-works" style={{ color: "var(--accent)", fontWeight: 600 }}>
+                    Akış ve ayar rehberi
+                </Link>
+            </p>
 
             {/* Controls */}
             <div className="glass-card" style={{ padding: 20, marginBottom: 16, display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-end" }}>

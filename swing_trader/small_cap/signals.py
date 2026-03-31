@@ -6,9 +6,12 @@ SENIOR TRADER OPTIMIZED v2.0
 """
 
 import logging
-from typing import Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Optional, Tuple
 import pandas as pd
 import numpy as np
+
+if TYPE_CHECKING:
+    from .settings_config import SmallCapSettings
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +39,23 @@ class SmallCapSignals:
     """
     
     # SENIOR TRADER SIGNAL CONSTANTS
-    MIN_VOLUME_SURGE = 1.2            # 1.2x (was 1.8x — audit showed most stocks rejected at 1.3-1.5x)
-    MIN_ATR_PERCENT_TRIGGER = 0.03    # 3.0% (aligned with SmallCapFilters)
+    MIN_VOLUME_SURGE = 1.2            # Default soft check; live from settings.min_volume_surge_soft
+    MIN_ATR_PERCENT_TRIGGER = 0.03    # Default; live from settings.min_atr_percent
     ATR_PERIOD = 10                   # 10-period ATR (faster)
     GAP_THRESHOLD = 0.03              # 3% gap for catalyst boost
     
-    def __init__(self, config: Dict = None):
+    def __init__(self, config: Dict = None, settings: Optional["SmallCapSettings"] = None):
         """Initialize SmallCapSignals."""
+        from .settings_config import load_settings
+
         self.config = config or {}
+        self._settings = settings if settings is not None else load_settings()
+        scfg = self._settings.signal_confirmation
+        self._overext_today_max = scfg.overext_today_change_max
+        self._overext_single_day_max = scfg.overext_single_day_max
+        self._overext_five_day_total_max = scfg.overext_five_day_total_max
+        self._ma20_max_below_pct = scfg.ma20_max_distance_below_pct
+        self.ATR_PERIOD = self._settings.universe_filters.atr_period
         logger.info("SmallCapSignals initialized (Senior Trader v2.0)")
     
     def calculate_volume_surge(self, df: pd.DataFrame, period: int = 20) -> float:
@@ -413,14 +425,16 @@ class SmallCapSignals:
     
     def check_volume_surge(self, volume_surge: float) -> Tuple[bool, str]:
         """Check if volume surge meets threshold."""
-        if volume_surge >= self.MIN_VOLUME_SURGE:
-            return True, f"Volume surge {volume_surge:.1f}x >= 1.2x"
-        return False, f"Volume surge {volume_surge:.1f}x < 1.2x"
+        soft = self._settings.min_volume_surge_soft
+        if volume_surge >= soft:
+            return True, f"Volume surge {volume_surge:.1f}x >= {soft}x"
+        return False, f"Volume surge {volume_surge:.1f}x < {soft}x"
     
     def check_atr_percent(self, atr_pct: float) -> Tuple[bool, str]:
         """Check if ATR% meets signal trigger threshold."""
-        threshold_pct = self.MIN_ATR_PERCENT_TRIGGER * 100
-        if atr_pct >= self.MIN_ATR_PERCENT_TRIGGER:
+        thr = self._settings.min_atr_percent
+        threshold_pct = thr * 100
+        if atr_pct >= thr:
             return True, f"ATR% {atr_pct*100:.1f}% >= {threshold_pct:.1f}%"
         return False, f"ATR% {atr_pct*100:.1f}% < {threshold_pct:.1f}%"
     
@@ -444,16 +458,18 @@ class SmallCapSignals:
         atr_pct = self.calculate_atr_percent(df)
         breakout_passed, breakout_reason = self.check_breakout(df)
         
+        vol_need = self._settings.volume_surge_trigger
+        atr_need = self._settings.min_atr_percent
         # Store all metrics
         details['triggers']['volume_surge'] = {
-            'passed': volume_surge >= 1.5,
-            'reason': f"Volume surge {volume_surge:.1f}x (need 1.5x)",
+            'passed': volume_surge >= vol_need,
+            'reason': f"Volume surge {volume_surge:.1f}x (need {vol_need}x)",
             'value': volume_surge
         }
         
         details['triggers']['atr_percent'] = {
-            'passed': atr_pct >= 0.03,
-            'reason': f"ATR% {atr_pct*100:.1f}% (need 3.0%)",
+            'passed': atr_pct >= atr_need,
+            'reason': f"ATR% {atr_pct*100:.1f}% (need {atr_need*100:.1f}%)",
             'value': atr_pct
         }
         
@@ -463,8 +479,8 @@ class SmallCapSignals:
             'optional': True
         }
         
-        min_vol_ok = volume_surge >= 1.5    # V4.1: 50% above average (1.8x killed all signals; 1.3x was too loose)
-        min_atr_ok = atr_pct >= 0.03        # V4.1: 3% (3.5% matched filter but double-filtered; 2% was too loose)
+        min_vol_ok = volume_surge >= vol_need
+        min_atr_ok = atr_pct >= atr_need
         
         # ALWAYS store values for display (even if not triggered)
         details['volume_surge'] = volume_surge
@@ -598,14 +614,10 @@ class SmallCapSignals:
             five_day_total = (df['Close'].iloc[-1] / df['Close'].iloc[-6] - 1) * 100
             result['five_day_total'] = five_day_total
             
-            # SAFE if:
-            # - Today < +15%
-            # - No single day > +25%
-            # - 5-day total <= +40% (v3.0: removed lower bound — don't penalize early entries)
             is_safe = (
-                today_change <= 15 and
-                max_single_day <= 25 and
-                five_day_total <= 40
+                today_change <= self._overext_today_max
+                and max_single_day <= self._overext_single_day_max
+                and five_day_total <= self._overext_five_day_total_max
             )
             
             return is_safe, result
@@ -678,9 +690,9 @@ class SmallCapSignals:
         rsi = self.calculate_rsi(df)
         details['rsi'] = rsi
         
-        # SWING READY: 5d momentum required; MA20 proximity accepted (within 3% below)
-        ma20_distance = details['above_ma20'].get('distance', 0)
-        ma20_ok = passed_ma or ma20_distance >= -3.0
+        # SWING READY: 5d momentum required; MA20 proximity accepted (within N% below)
+        ma20_distance = details["above_ma20"].get("distance", 0)
+        ma20_ok = passed_ma or ma20_distance >= -self._ma20_max_below_pct
         details['swing_ready'] = passed_5d and ma20_ok
         
         return details['swing_ready'], details

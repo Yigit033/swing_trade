@@ -55,7 +55,7 @@ Login sonrası `router.push("/")` yerine `window.location.href = "/"` kullanıl�
 
 ## 1. CORS_ORIGINS (En Sık Sebep)
 
-**Sorun:** Backend varsayılan olarak sadece `localhost:3000` kabul eder. Production domain'i (`swingtrade.vercel.app`) izin listesinde değilse API istekleri CORS tarafından engellenir veya 401 döner.
+**Sorun:** Backend varsayılan olarak sadece `localhost:5000` kabul eder. Production domain'i (`swingtrade.vercel.app`) izin listesinde değilse API istekleri CORS tarafından engellenir veya 401 döner.
 
 **Çözüm:**
 ```powershell

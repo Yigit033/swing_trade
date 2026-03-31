@@ -23,7 +23,7 @@ REM --- Start Next.js frontend in this window ---
 cd /d "C:\swing_trade\frontend"
 
 echo.
-echo Launching Next.js dev server on http://localhost:3000 ...
+echo Launching Next.js dev server on http://localhost:5000 ...
 echo (Press CTRL+C in this window to stop the frontend.)
 echo.
 

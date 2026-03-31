@@ -51,7 +51,7 @@ def run_smallcap_backtest(body: BacktestRequest):
         else:
             # Finviz universe — same cap as live scanner (api/routers/scanner.py)
             engine = SmallCapEngine(config=None)
-            tickers = engine.get_small_cap_universe(use_finviz=True, max_tickers=200)
+            tickers = engine.get_small_cap_universe()
             if not tickers:
                 return {"error": "No tickers found from Finviz universe", "results": None}
 

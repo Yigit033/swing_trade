@@ -22,7 +22,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.routers import trades, pending, performance, lookup, scanner, genai, backtest, regime
+from api.routers import trades, pending, performance, lookup, scanner, genai, backtest, regime, settings as settings_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # CORS — credentials=true için "*" kullanılamaz, localhost açıkça eklenmeli
 _cors_origins = _os.environ.get("CORS_ORIGINS", "*")
 if _cors_origins == "*":
-    _origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    _origins = ["http://localhost:5000", "http://127.0.0.1:5000"]
 else:
     _origins = [o.strip() for o in _cors_origins.split(",") if o.strip()]
 app.add_middleware(
@@ -71,6 +71,7 @@ app.include_router(lookup.router,      prefix="/api/lookup",      tags=["lookup"
 app.include_router(scanner.router,     prefix="/api/scanner",     tags=["scanner"])
 app.include_router(genai.router,       prefix="/api/genai",       tags=["genai"])
 app.include_router(backtest.router,    prefix="/api/backtest",    tags=["backtest"])
+app.include_router(settings_router.router)
 app.include_router(regime.router)
 
 

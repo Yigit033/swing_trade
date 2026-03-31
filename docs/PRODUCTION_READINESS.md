@@ -45,7 +45,7 @@ Bu dokümanda sistemin production hazırlığı ve local/deployment farkları **
 | Değişken | Local | Production |
 |----------|-------|------------|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | `https://swing-trade.fly.dev` |
-| `CORS_ORIGINS` | `*` → localhost:3000 | `https://xxx.vercel.app` |
+| `CORS_ORIGINS` | `*` → localhost:5000 | `https://xxx.vercel.app` |
 | `.env` kaynağı | `.env` dosyası | `fly secrets` / Vercel env |
 
 **Sonuç:** Kod ve iş mantığı birebir aynı. Sadece URL'ler ve secret'lar ortama göre değişir.

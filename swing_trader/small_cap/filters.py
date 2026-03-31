@@ -6,9 +6,12 @@ SENIOR TRADER OPTIMIZED v2.0
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 import pandas as pd
 import numpy as np
+
+if TYPE_CHECKING:
+    from .settings_config import SmallCapSettings
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +40,7 @@ class SmallCapFilters:
     MIN_MARKET_CAP = 250_000_000      # $250M (was $300M)
     MAX_MARKET_CAP = 2_500_000_000    # $2.5B (was $3B)
     MIN_AVG_VOLUME = 750_000          # 750K shares (was 1M)
-    MIN_ATR_PERCENT = 0.03            # 3.0% minimum (was 3.5% — too restrictive in low-vol regimes)
+    MIN_ATR_PERCENT = 0.03            # Default; live value from SmallCapSettings.min_atr_percent
     MAX_FLOAT = 150_000_000            # 150M shares (was 80M - raised based on data analysis)
     IDEAL_FLOAT = 60_000_000          # 60M - main filter for explosion potential
     MIN_PRICE = 3.00                  # $3 (avoid penny stocks)
@@ -51,9 +54,21 @@ class SmallCapFilters:
     FLOAT_TIER_SMALL = 45_000_000     # 30-45M: +10 pts
     FLOAT_TIER_TIGHT = 60_000_000     # 45-60M: +5 pts
     
-    def __init__(self, config: Dict = None):
+    def __init__(self, config: Dict = None, settings: Optional["SmallCapSettings"] = None):
         """Initialize SmallCapFilters."""
+        from .settings_config import load_settings
+
         self.config = config or {}
+        self._settings = settings if settings is not None else load_settings()
+        uf = self._settings.universe_filters
+        self.MIN_MARKET_CAP = uf.min_market_cap
+        self.MAX_MARKET_CAP = uf.max_market_cap
+        self.MIN_AVG_VOLUME = uf.min_avg_volume
+        self.MAX_FLOAT = uf.max_float_shares
+        self.MIN_PRICE = uf.min_price
+        self.MAX_PRICE = uf.max_price
+        self.EARNINGS_EXCLUSION_DAYS = uf.earnings_exclusion_days
+        self.ATR_PERIOD = uf.atr_period
         logger.info("SmallCapFilters initialized (Senior Trader v2.0)")
     
     def calculate_atr_percent(self, df: pd.DataFrame, period: int = None) -> float:
@@ -117,8 +132,9 @@ class SmallCapFilters:
     
     def check_atr_percent(self, atr_pct: float) -> Tuple[bool, str]:
         """Check if ATR% meets volatility threshold."""
-        if atr_pct < self.MIN_ATR_PERCENT:
-            return False, f"ATR% too low ({atr_pct*100:.1f}% < {self.MIN_ATR_PERCENT*100:.1f}%)"
+        min_atr = self._settings.min_atr_percent
+        if atr_pct < min_atr:
+            return False, f"ATR% too low ({atr_pct*100:.1f}% < {min_atr*100:.1f}%)"
         return True, f"ATR% OK ({atr_pct*100:.1f}%)"
     
     def check_float(self, float_shares: float) -> Tuple[bool, str]:

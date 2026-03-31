@@ -405,3 +405,21 @@ export const runBacktest = (params: {
     api.post<BacktestResult>("/api/backtest/smallcap", params, { timeout: 300000 })
         .then((r) => r.data);
 
+/** Small-cap JSON from GET /api/settings (matches backend SmallCapSettings). */
+export type SmallCapSettingsJSON = Record<string, unknown>;
+
+export type SmallCapSettingsPutResponse = {
+    ok: boolean;
+    settings: SmallCapSettingsJSON;
+};
+
+/** Backend hem `/api/settings` hem `/api/settings/` kabul eder (307 yok). */
+export const fetchSmallCapSettings = () =>
+    api.get<SmallCapSettingsJSON>("/api/settings").then((r) => r.data);
+
+export const updateSmallCapSettings = (body: SmallCapSettingsJSON) =>
+    api.put<SmallCapSettingsPutResponse>("/api/settings", body).then((r) => r.data);
+
+export const resetSmallCapSettings = () =>
+    api.post<SmallCapSettingsPutResponse>("/api/settings/reset").then((r) => r.data);
+

@@ -73,10 +73,14 @@ fly deploy
 **Vercel (frontend):**
 Add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_API_URL` in project settings.
 
+## Local dev URL (Supabase)
+
+If you use login locally, add **`http://localhost:5000`** (and `http://127.0.0.1:5000` if needed) under **Authentication → URL Configuration** → Redirect URLs / Site URL in the Supabase dashboard. The Next.js dev server runs on port **5000** by default in this repo.
+
 ## Test
 
 1. `npm run dev` (frontend)
-2. Visit http://localhost:3000 → redirects to /login
+2. Visit http://localhost:5000 → redirects to /login
 3. Sign in with the user you created
 4. Dashboard loads with your trades
 

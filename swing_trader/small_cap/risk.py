@@ -4,9 +4,12 @@ Completely independent from LargeCap risk management.
 """
 
 import logging
-from typing import Dict, Tuple
+from typing import TYPE_CHECKING, Dict, Optional, Tuple
 import pandas as pd
 import numpy as np
+
+if TYPE_CHECKING:
+    from .settings_config import SmallCapSettings
 
 logger = logging.getLogger(__name__)
 
@@ -21,53 +24,28 @@ class SmallCapRisk:
     - Clean position sizing: 1.5% risk, no artificial factor, only type cap
     """
     
-    # ── CORE CONSTANTS (v3.0) ──
-    MAX_RISK_PER_TRADE = 0.015        # 1.5% of portfolio per trade (was 1.0% — too small for small cap)
-    STOP_ATR_MULTIPLIER = 1.5         # 1.5 ATR — room for small-cap volatility
-    MAX_HOLDING_DAYS = 14             # 14 days max hold
-    
-    # ── TYPE-SPECIFIC STOP LOSS CAPS ──
-    # v2.3: Replaces flat MAX_STOP_PERCENT = 0.15
-    MAX_STOP_BY_TYPE = {
-        'C': 0.06,   # %6  — early stage
-        'A': 0.08,   # %8  — continuation
-        'B': 0.09,   # %9  — momentum
-        'S': 0.10,   # %10 — squeeze
-    }
-    MAX_STOP_PERCENT = 0.08  # Default fallback
-    
-    # ── ATR-BASED T1/T2 TARGETS (v5.0 — dynamic per-stock volatility) ──
-    # T1 = entry + ATR * multiplier, T2 = entry + ATR * multiplier * T2_RATIO
-    # Old fixed-pct table kept as ceiling to prevent unrealistic targets.
-    TYPE_ATR_MULTIPLIERS = {
-        'S': 2.5,   # Squeeze: aggressive, high vol expected
-        'B': 2.0,   # Momentum: strong move
-        'A': 1.8,   # Continuation: steady trend
-        'C': 1.5,   # Early stage: conservative
-    }
-    T2_ATR_RATIO = 2.0  # T2 multiplier = T1 multiplier * this
+    # Defaults documented in settings_config.SmallCapSettings; instance values set in __init__.
 
-    TYPE_TARGET_CAPS = {
-        'S': (0.12, 0.22),   # Max T1 +12%, T2 +22%
-        'B': (0.10, 0.18),   # Max T1 +10%, T2 +18%
-        'C': (0.08, 0.15),   # Max T1  +8%, T2 +15%
-        'A': (0.10, 0.18),   # Max T1 +10%, T2 +18%
-    }
+    def __init__(self, config: Dict = None, settings: Optional["SmallCapSettings"] = None):
+        """Initialize SmallCapRisk from SmallCapSettings (file-backed)."""
+        from .settings_config import load_settings
 
-    # Legacy alias for any external code that reads TYPE_TARGETS
-    TYPE_TARGETS = TYPE_TARGET_CAPS
-    
-    # ── TYPE-SPECIFIC POSITION CAPS (max % of portfolio per position) ──
-    TYPE_POSITION_CAPS = {
-        'C': 0.25,   # %25 max portföy
-        'A': 0.25,   # %25 max portföy
-        'B': 0.20,   # %20 max portföy
-        'S': 0.15,   # %15 max portföy (en riskli)
-    }
-    
-    def __init__(self, config: Dict = None):
-        """Initialize SmallCapRisk."""
         self.config = config or {}
+        s = settings if settings is not None else load_settings()
+        self.MAX_RISK_PER_TRADE = s.max_risk_per_trade
+        self.STOP_ATR_MULTIPLIER = s.stop_atr_multiplier
+        self.MIN_STOP_PERCENT = s.min_stop_percent
+        self.MAX_STOP_PERCENT = s.max_stop_percent_fallback
+        self.MAX_HOLDING_DAYS = s.max_holding_days
+        self.MAX_STOP_BY_TYPE = dict(s.max_stop_by_type)
+        self.TYPE_ATR_MULTIPLIERS = dict(s.type_atr_multipliers)
+        self.T2_ATR_RATIO = s.t2_atr_ratio
+        self.TYPE_TARGET_CAPS = {
+            k: (v.t1_max_pct, v.t2_max_pct) for k, v in s.type_target_caps.items()
+        }
+        self.TYPE_TARGETS = self.TYPE_TARGET_CAPS
+        self.TYPE_POSITION_CAPS = dict(s.type_position_caps)
+        self._risk_targets = s.risk_targets
         logger.info("SmallCapRisk initialized (v3.0 — realistic targets, clean sizing)")
     
     def calculate_atr(self, df: pd.DataFrame, period: int = 14) -> float:
@@ -92,8 +70,6 @@ class SmallCapRisk:
             
         except Exception:
             return 0.0
-    
-    MIN_STOP_PERCENT = 0.03  # 3% min stop — prevents whipsaw on volatile small caps
 
     def calculate_stop_loss(self, df: pd.DataFrame, swing_type: str = 'A') -> Tuple[float, str]:
         """
@@ -164,21 +140,22 @@ class SmallCapRisk:
         """
         t1_cap_pct, t2_cap_pct = self.TYPE_TARGET_CAPS.get(swing_type, (0.10, 0.18))
 
+        rt = self._risk_targets
         if atr > 0 and entry_price > 0:
             mult = self.TYPE_ATR_MULTIPLIERS.get(swing_type, 1.8)
 
             q_boost = 1.0
-            if quality_score >= 85:
-                q_boost = 1.15
-            elif quality_score >= 75:
-                q_boost = 1.08
+            if quality_score >= rt.quality_tier_high:
+                q_boost = rt.quality_boost_high
+            elif quality_score >= rt.quality_tier_mid:
+                q_boost = rt.quality_boost_mid
 
             t1_raw = entry_price + atr * mult * q_boost
             t2_mult = self.T2_ATR_RATIO
-            if regime == 'CAUTION':
-                t2_mult = 1.6
-            elif regime == 'BEAR':
-                t2_mult = 1.05
+            if regime == "CAUTION":
+                t2_mult = rt.t2_atr_mult_caution
+            elif regime == "BEAR":
+                t2_mult = rt.t2_atr_mult_bear
             t2_raw = entry_price + atr * mult * q_boost * t2_mult
 
             t1_cap = entry_price * (1 + t1_cap_pct)
@@ -190,16 +167,16 @@ class SmallCapRisk:
             target_2 = entry_price * (1 + t2_cap_pct)
 
         risk = entry_price - stop_loss
-        min_target = entry_price + (risk * 1.5)
+        min_target = entry_price + (risk * rt.min_reward_risk_multiple_t1)
         if target_1 < min_target:
             target_1 = min_target
 
-        t2_gap = 1.15
-        if regime == 'BEAR':
-            t2_gap = 1.05
-        elif regime == 'CAUTION':
-            t2_gap = 1.10
-        if target_2 < target_1 * 1.005:
+        t2_gap = rt.t2_min_gap_vs_t1_bull
+        if regime == "BEAR":
+            t2_gap = rt.t2_min_gap_vs_t1_bear
+        elif regime == "CAUTION":
+            t2_gap = rt.t2_min_gap_vs_t1_caution
+        if target_2 < target_1 * rt.t2_vs_t1_near_cap_floor:
             target_2 = target_1 * t2_gap
 
         t2_hard_cap = entry_price * (1 + t2_cap_pct)

@@ -176,6 +176,7 @@ def _scan_regime_and_thresholds(
         regime_multiplier,
         body.min_quality,
         body.top_n,
+        regime_caps=engine.settings.regime_thresholds,
     )
     logger.info(
         "Effective thresholds: regime=%s conf=%s mult=%s → min_quality=%s top_n=%s (request %s/%s)",
@@ -204,7 +205,7 @@ def _execute_smallcap_scan(
     fetcher = get_fetcher()
 
     prog(2, "universe", "Fetching small-cap universe…")
-    tickers = engine.get_small_cap_universe(use_finviz=True, max_tickers=200)
+    tickers = engine.get_small_cap_universe()
     logger.info(f"SmallCap universe: {len(tickers)} tickers")
     prog(6, "universe", f"Universe: {len(tickers)} tickers")
 

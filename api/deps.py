@@ -45,6 +45,11 @@ def get_smallcap_engine():
     return SmallCapEngine(get_config())
 
 
+def invalidate_smallcap_engine_cache() -> None:
+    """Call after small-cap JSON settings change so the next scan uses fresh parameters."""
+    get_smallcap_engine.cache_clear()
+
+
 @lru_cache(maxsize=1)
 def get_fetcher():
     from swing_trader.data.fetcher import DataFetcher

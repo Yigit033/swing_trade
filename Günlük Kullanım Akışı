@@ -15,7 +15,7 @@ uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 # 2) Frontend (ayrı terminal)
 cd frontend
 npm install   # ilk sefer
-npm run dev   # http://localhost:3000
+npm run dev   # http://localhost:5000
 ```
 
 `.env` / `frontend/.env.local` içinde **`NEXT_PUBLIC_API_URL`** (örn. `http://localhost:8000`) tanımlı olmalı. Üretimde Vercel + Fly benzeri URL’ler kullanılır.

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
     LayoutDashboard, Search, TrendingUp, Clock, BarChart3,
-    LineChart, MessageSquare, Zap, FlaskConical, X, LogOut,
+    LineChart, MessageSquare, Zap, FlaskConical, X, LogOut, Settings, BookOpen,
 } from "lucide-react";
 import { createSupabaseClient } from "@/lib/supabase/client";
 
@@ -15,6 +15,7 @@ interface SidebarProps {
 
 const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/how-it-works", label: "Nasıl çalışır?", icon: BookOpen },
     { href: "/scanner", label: "Scanner", icon: Search },
     { href: "/lookup", label: "Manual Lookup", icon: Zap },
     { href: "/trades", label: "Paper Trades", icon: TrendingUp },
@@ -22,6 +23,7 @@ const navItems = [
     { href: "/performance", label: "Performance", icon: BarChart3 },
     { href: "/charts", label: "Charts", icon: LineChart },
     { href: "/backtest", label: "Backtest", icon: FlaskConical },
+    { href: "/settings", label: "Ayarlar", icon: Settings },
     { href: "/chat", label: "AI Chat", icon: MessageSquare },
 ];
 

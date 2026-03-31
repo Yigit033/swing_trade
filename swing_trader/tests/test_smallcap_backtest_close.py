@@ -48,6 +48,6 @@ def test_close_trade_after_partial(bt):
 
 def test_fill_prices_slip_zero():
     b = SmallCapBacktester(config=None)
-    b.SLIPPAGE_BPS_PER_SIDE = 0
+    b.settings = b.settings.model_copy(update={"slippage_bps_per_side": 0})
     assert b._entry_fill_price(100.0) == 100.0
     assert b._exit_fill_price(100.0) == 100.0

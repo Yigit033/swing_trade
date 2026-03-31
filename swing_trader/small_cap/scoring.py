@@ -6,9 +6,13 @@ SENIOR TRADER OPTIMIZED v2.0
 """
 
 import logging
-from typing import Dict
-import pandas as pd
+from typing import TYPE_CHECKING, Dict, Optional
+
 import numpy as np
+import pandas as pd
+
+if TYPE_CHECKING:
+    from .settings_config import SmallCapSettings
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +52,28 @@ class SmallCapScoring:
     MAX_MOMENTUM_SCORE = 15
     MAX_RISK_SCORE = 15
     
-    def __init__(self, config: Dict = None):
-        """Initialize SmallCapScoring."""
+    def __init__(self, config: Dict = None, settings: Optional["SmallCapSettings"] = None):
+        """Initialize SmallCapScoring from SmallCapSettings.scoring_tuning."""
+        from .settings_config import load_settings
+
         self.config = config or {}
+        s = settings if settings is not None else load_settings()
+        self._st = s.scoring_tuning
+        # Mirror tuning onto class-style names used below
+        st = self._st
+        self.WEIGHT_VOLUME = st.weight_volume
+        self.WEIGHT_VOLATILITY = st.weight_volatility
+        self.WEIGHT_FLOAT = st.weight_float
+        self.WEIGHT_MOMENTUM = st.weight_momentum
+        self.WEIGHT_RISK = st.weight_risk
+        self.MAX_VOLUME_SCORE = st.max_volume_score
+        self.MAX_VOLATILITY_SCORE = st.max_volatility_score
+        self.MAX_FLOAT_SCORE = st.max_float_score
+        self.MAX_MOMENTUM_SCORE = st.max_momentum_score
+        self.MAX_RISK_SCORE = st.max_risk_score
+        self.BONUS_CAP = st.bonus_cap
+        self.FINAL_SCORE_MAX = st.final_score_max
+        self.RISK_SCORE_ATR_MULT = st.risk_score_atr_mult
         logger.info("SmallCapScoring initialized (Senior Trader v2.0)")
     
     def score_volume_explosion(self, volume_surge: float, rvol: float = None) -> float:
@@ -61,49 +84,22 @@ class SmallCapScoring:
         Previous bug: RVOL = volume_surge (same function), causing double-count.
         Now uses unified tiered scoring based on volume_surge alone.
         """
-        # Unified volume scoring — NO double-count
-        # Uses volume_surge as the single metric (0-30 range)
-        if volume_surge >= 6.0:
-            return 30  # Extreme institutional / parabolic
-        elif volume_surge >= 5.0:
-            return 26  # Parabolic
-        elif volume_surge >= 4.0:
-            return 22  # Very strong, viral interest
-        elif volume_surge >= 3.0:
-            return 18  # Strong, significant
-        elif volume_surge >= 2.5:
-            return 14  # Moderate, building
-        elif volume_surge >= 2.0:
-            return 10  # Early surge, watchlist worthy
-        elif volume_surge >= 1.5:
-            return 6   # Minimum qualification
-        elif volume_surge >= 1.3:
-            return 3   # Slight above average
-        else:
-            return 0   # Below threshold
+        st = self._st
+        for t in sorted(st.volume_surge_tiers, key=lambda x: -x.min_surge):
+            if volume_surge >= t.min_surge:
+                return t.score
+        return 0
     
     def score_volatility_expansion(self, atr_percent: float) -> float:
         """
         Score volatility expansion (0-25 points).
         Higher ATR% = higher score for momentum plays.
         """
-        # ATR% scoring - OPTIMIZED thresholds
-        if atr_percent >= 0.15:    # 15%+ - extreme volatility
-            return 25
-        elif atr_percent >= 0.12:  # 12-15% - very high
-            return 22
-        elif atr_percent >= 0.10:  # 10-12% - high
-            return 18
-        elif atr_percent >= 0.08:  # 8-10% - above average
-            return 14
-        elif atr_percent >= 0.06:  # 6-8% - moderate
-            return 10
-        elif atr_percent >= 0.04:  # 4-6% - minimum for Type B
-            return 7
-        elif atr_percent >= 0.035: # 3.5-4% - minimum for Type A/C
-            return 5
-        else:                       # Below threshold
-            return 0
+        st = self._st
+        for t in sorted(st.atr_percent_tiers, key=lambda x: -x.min_atr_frac):
+            if atr_percent >= t.min_atr_frac:
+                return t.score
+        return 0
     
     def score_float_tightness(self, float_shares: float) -> float:
         """
@@ -117,107 +113,94 @@ class SmallCapScoring:
         - 60-80M: Accept (+0 pts) - No bonus
         - >80M:  REJECT (filtered out)
         """
+        st = self._st
         if float_shares is None or float_shares <= 0:
-            return 5  # Unknown - reduced score
-        
+            return st.float_score_unknown
+
         float_millions = float_shares / 1_000_000
-        
-        # SENIOR TRADER TIERING
-        if float_millions <= 15:
-            return 20  # ATOMIC - parabolic potential
-        elif float_millions <= 30:
-            return 15  # MICRO - explosive potential
-        elif float_millions <= 45:
-            return 10  # SMALL - strong potential
-        elif float_millions <= 60:
-            return 5   # TIGHT - good potential
-        elif float_millions <= 80:
-            return 0   # Accept but no bonus
-        else:
-            return -8  # Too large — hard to move, poor R/R for small-cap play
+        for b in sorted(st.float_millions_bands, key=lambda x: x.max_millions_le):
+            if float_millions <= b.max_millions_le:
+                return b.score
+        return st.float_score_above_max_band
     
     def score_momentum_continuity(self, df: pd.DataFrame) -> float:
         """
         Score momentum continuity (0-15 points).
         Higher highs / higher closes = momentum persisting.
         """
+        mp = self._st.momentum_points
         if df is None or len(df) < 3:
-            return 5
-        
+            return float(mp.insufficient_bars_score)
+
         score = 0
-        
+
         try:
-            # Check last 3 days for higher highs
-            highs = df['High'].tail(3).values
+            highs = df["High"].tail(3).values
             if highs[2] > highs[1] > highs[0]:
-                score += 6
+                score += mp.higher_highs_full
             elif highs[2] > highs[1]:
-                score += 3
-            
-            # Check last 3 days for higher closes
-            closes = df['Close'].tail(3).values
+                score += mp.higher_highs_partial
+
+            closes = df["Close"].tail(3).values
             if closes[2] > closes[1] > closes[0]:
-                score += 6
+                score += mp.higher_closes_full
             elif closes[2] > closes[1]:
-                score += 3
-            
-            # Check if close near high of day (bullish)
-            today_close = df['Close'].iloc[-1]
-            today_high = df['High'].iloc[-1]
-            today_low = df['Low'].iloc[-1]
-            
+                score += mp.higher_closes_partial
+
+            today_close = df["Close"].iloc[-1]
+            today_high = df["High"].iloc[-1]
+            today_low = df["Low"].iloc[-1]
+
             day_range = today_high - today_low
             if day_range > 0:
                 close_position = (today_close - today_low) / day_range
-                if close_position >= 0.8:  # Close in top 20% of range
-                    score += 3
-            
-            return min(score, 15)
-            
+                if close_position >= mp.close_in_top_of_range_min:
+                    score += mp.close_near_high_pts
+
+            return min(score, mp.raw_cap)
+
         except Exception as e:
             logger.error(f"Error scoring momentum: {e}")
-            return 5
+            return float(mp.insufficient_bars_score)
     
     def score_risk_control(self, df: pd.DataFrame, atr_percent: float) -> float:
         """
         Score risk control efficiency (0-15 points).
         Better stop placement = higher score.
         """
+        rb = self._st.risk_bands
         if df is None or len(df) < 1:
-            return 5
-        
+            return float(rb.insufficient_bars_score)
+
         score = 0
-        
+
         try:
-            current_close = df['Close'].iloc[-1]
-            
-            # ATR-based stop distance
+            current_close = df["Close"].iloc[-1]
+
             atr_value = atr_percent * current_close
-            stop_distance = 1.5 * atr_value  # 1.5 ATR stop
+            stop_distance = self.RISK_SCORE_ATR_MULT * atr_value
             stop_pct = stop_distance / current_close
-            
-            # Tighter stop = better R:R potential
-            if stop_pct <= 0.05:  # <= 5% stop
-                score += 10
-            elif stop_pct <= 0.08:  # 5-8% stop
-                score += 7
-            elif stop_pct <= 0.10:  # 8-10% stop
-                score += 5
+
+            if stop_pct <= 0.05:
+                score += rb.stop_le_05_pts
+            elif stop_pct <= 0.08:
+                score += rb.stop_le_08_pts
+            elif stop_pct <= 0.10:
+                score += rb.stop_le_10_pts
             else:
-                score += 3
-            
-            # Reward tight intraday range (easier to define stop)
-            today_range = (df['High'].iloc[-1] - df['Low'].iloc[-1]) / current_close
+                score += rb.stop_else_pts
+
+            today_range = (df["High"].iloc[-1] - df["Low"].iloc[-1]) / current_close
             if today_range <= 0.05:
-                score += 5
+                score += rb.range_le_05_pts
             elif today_range <= 0.08:
-                score += 3
-            
-            return min(score, 15)
-            
+                score += rb.range_le_08_pts
+
+            return min(score, rb.raw_cap)
+
         except Exception as e:
             logger.error(f"Error scoring risk: {e}")
-            return 5
+            return float(rb.insufficient_bars_score)
     
     def calculate_quality_score(
         self, 
@@ -261,43 +244,42 @@ class SmallCapScoring:
         # Weighted total (0-100 range)
         total = volume_score + volatility_score + float_score + momentum_score + risk_score
         
+        st = self._st
         # ============================================================
         # BOOSTER BONUSES (max +35, expanded from +25)
         # ============================================================
         bonus = 0
         if boosters:
             if boosters.get('high_rvol'):
-                bonus += 3
+                bonus += st.bonus_high_rvol
             if boosters.get('gap_continuation'):
-                bonus += 4
+                bonus += st.bonus_gap_continuation
             if boosters.get('higher_highs'):
-                bonus += 3
+                bonus += st.bonus_higher_highs
             
             # SWING TRADE BONUSES
             if boosters.get('swing_ready'):
-                bonus += 10  # Major bonus for swing-ready stocks
+                bonus += st.bonus_swing_ready
             if boosters.get('higher_lows'):
-                bonus += 5   # Accumulation pattern
+                bonus += st.bonus_higher_lows
             if boosters.get('multi_day_volume'):
-                bonus += 3   # Multi-day interest
+                bonus += st.bonus_multi_day_volume
             
             # SUSTAINED VOLUME PATTERN
-            # Count days with 1.5x+ volume in last 5 days
             swing_details = boosters.get('swing_details', {})
             multi_day_vol = swing_details.get('multi_day_volume', {})
             surge_days = multi_day_vol.get('surge_days', 0)
             if surge_days >= 3:
-                bonus += 5   # Sustained campaign (3+ days)
+                bonus += st.bonus_surge_days_3
             elif surge_days >= 2:
-                bonus += 3   # Building interest (2 days)
+                bonus += st.bonus_surge_days_2
             
-            # EARLY ENTRY BONUS (NEW) - Reward catching moves early!
             five_day_mom = swing_details.get('five_day_momentum', {})
             five_day_return = five_day_mom.get('return', 0)
-            if 5 <= five_day_return <= 15:
-                bonus += 8   # PERFECT early entry zone!
-            elif 0 < five_day_return < 5:
-                bonus += 5   # Very early (building phase)
+            if st.bonus_early_entry_lo <= five_day_return <= st.bonus_early_entry_hi:
+                bonus += st.bonus_early_entry_pts
+            elif 0 < five_day_return < st.bonus_very_early_hi:
+                bonus += st.bonus_very_early_pts
             
             # ============================================================
             # SECTOR RS BONUS (NEW - Senior Trader v2.1)
@@ -320,9 +302,8 @@ class SmallCapScoring:
             news_bonus = boosters.get('news_bonus', 0)
             bonus += news_bonus  # Max +5 for high news activity
             
-            # RSI Divergence (already exists but emphasize)
             if boosters.get('rsi_divergence'):
-                bonus += 8  # Game changer for early reversal
+                bonus += st.bonus_rsi_divergence
 
             # OBV Trend (v3.0 — Smart Money detection)
             obv_bonus = boosters.get('obv_bonus', 0)
@@ -335,85 +316,69 @@ class SmallCapScoring:
         if boosters:
             swing_details = boosters.get('swing_details', {})
             
-            # RSI Penalties (Type-aware)
             rsi = boosters.get('rsi', 50)
             swing_type = boosters.get('swing_type', 'A')
             
-            if swing_type == 'A':  # Continuation - stricter RSI
+            if swing_type == 'A':
                 if rsi > 70:
-                    penalty += 10
+                    penalty += st.pen_a_rsi_gt_70
                 elif rsi > 65:
-                    penalty += 5
-            elif swing_type == 'B':  # Momentum - allows higher RSI
+                    penalty += st.pen_a_rsi_gt_65
+            elif swing_type == 'B':
                 if rsi > 85:
-                    penalty += 15
+                    penalty += st.pen_b_rsi_gt_85
                 elif rsi > 80:
-                    penalty += 10
+                    penalty += st.pen_b_rsi_gt_80
                 elif rsi > 75:
-                    penalty += 5
-            else:  # Type C - Early stage
+                    penalty += st.pen_b_rsi_gt_75
+            else:
                 if rsi > 65:
-                    penalty += 10
+                    penalty += st.pen_c_rsi_gt_65
                 elif rsi > 60:
-                    penalty += 5
+                    penalty += st.pen_c_rsi_gt_60
             
-            # Overextension Penalties
             ext_info = swing_details.get('overextension', {})
             ext_details = ext_info.get('details', {})
             
-            # Single day spike penalty (gap risk)
             max_single_day = ext_details.get('max_single_day', 0)
             if max_single_day > 25:
-                penalty += 15  # Major gap risk
+                penalty += st.pen_ext_day_gt_25
             elif max_single_day > 20:
-                penalty += 8
+                penalty += st.pen_ext_day_gt_20
             
-            # Today chasing penalty
             today_change = ext_details.get('today_change', 0)
             if today_change > 15:
-                penalty += 10  # Chasing a spike
+                penalty += st.pen_today_gt_15
             elif today_change > 10:
-                penalty += 5
+                penalty += st.pen_today_gt_10
             
-            # 5-day total overextension - TIGHTENED FOR EARLY ENTRY FOCUS
             five_day_total = ext_details.get('five_day_total', 0)
             if five_day_total > 40:
-                penalty += 15  # Way too extended - likely chasing
+                penalty += st.pen_5d_gt_40
             elif five_day_total > 30:
-                penalty += 10  # Extended - late entry (TIGHTENED)
+                penalty += st.pen_5d_gt_30
             elif five_day_total > 25:
-                penalty += 5   # Getting extended (NEW)
+                penalty += st.pen_5d_gt_25
             
-            # PARABOLIC MOVE DETECTION (NEW)
-            # Check if last 3 days show accelerating gains
             if df is not None and len(df) >= 4:
                 try:
                     day1_ret = (df['Close'].iloc[-3] / df['Close'].iloc[-4] - 1) * 100
                     day2_ret = (df['Close'].iloc[-2] / df['Close'].iloc[-3] - 1) * 100
                     day3_ret = (df['Close'].iloc[-1] / df['Close'].iloc[-2] - 1) * 100
                     
-                    # Parabolic = each day bigger than previous AND day3 >= 10%
-                    if day1_ret < day2_ret < day3_ret and day3_ret >= 10:
-                        penalty += 15  # Parabolic - reversal imminent
-                except:
+                    if day1_ret < day2_ret < day3_ret and day3_ret >= st.parabolic_day3_min_pct:
+                        penalty += st.pen_parabolic
+                except Exception:
                     pass
             
-            # NOT swing ready penalty
             if not boosters.get('swing_ready'):
-                penalty += 5  # Missing key swing criteria
+                penalty += st.pen_not_swing_ready
         
-        # ============================================================
-        # BONUS CAP (v3.0 — prevent score inflation)
-        # ============================================================
-        bonus = min(bonus, 40)
+        bonus = min(bonus, st.bonus_cap)
 
-        # ============================================================
-        # FINAL SCORE (Range: 0 to 140)
-        # ============================================================
         final_score = total + bonus - penalty
 
-        # Clamp between 0 and 140
-        final_score = max(0, min(final_score, 140))
+        final_score = max(0, min(final_score, st.final_score_max))
         
         logger.debug(
             f"SmallCap Score: Vol={volume_score:.1f}(raw {volume_score_raw}), "

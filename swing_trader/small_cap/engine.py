@@ -21,6 +21,7 @@ from .catalysts import CatalystDetector
 from .narrative import generate_signal_narrative
 from .technical_levels import calculate_technical_levels
 from .regime_logic import rs_bonus_vs_spy
+from .settings_config import load_settings
 
 logger = logging.getLogger(__name__)
 
@@ -53,14 +54,15 @@ class SmallCapEngine:
     def __init__(self, config: Dict = None):
         """Initialize SmallCapEngine with all sub-components."""
         self.config = config or {}
-        
-        # Initialize independent components
-        self.filters = SmallCapFilters(config)
-        self.signals = SmallCapSignals(config)
-        self.scoring = SmallCapScoring(config)
-        self.risk = SmallCapRisk(config)
-        self.universe_provider = SmallCapUniverse(config)
-        
+        self.settings = load_settings()
+
+        # Initialize independent components (risk/filters/signals read self.settings)
+        self.filters = SmallCapFilters(config, self.settings)
+        self.signals = SmallCapSignals(config, self.settings)
+        self.scoring = SmallCapScoring(config, self.settings)
+        self.risk = SmallCapRisk(config, self.settings)
+        self.universe_provider = SmallCapUniverse(config, self.settings)
+
         logger.info("SmallCapEngine initialized (momentum breakout engine)")
     
     def _classify_swing_type(
@@ -111,74 +113,100 @@ class SmallCapEngine:
             (swing_type, (min_days, max_days), reason)
         """
         
+        sp = self.settings.swing.parabolic
+        ts = self.settings.swing.type_s
+        tc = self.settings.swing.type_c
+        tb = self.settings.swing.type_b
+        ta = self.settings.swing.type_a
+
         # ============================================================
         # EXTREME CHASING PROTECTION
         # ============================================================
-        if five_day_return > 70:
-            return ('B', (1, 2), f"⚠️ PARABOLIC: 5d={five_day_return:+.0f}% - EXIT FAST!")
-        
-        if five_day_return > 60 and rsi > 85:
-            return ('B', (1, 2), f"⚠️ EXTREME: 5d={five_day_return:+.0f}%, RSI={rsi:.0f} - VERY SHORT!")
-        
+        if five_day_return > sp.five_day_gt:
+            return (
+                "B",
+                sp.hold_short,
+                f"⚠️ PARABOLIC: 5d={five_day_return:+.0f}% - EXIT FAST!",
+            )
+
+        if five_day_return > sp.five_day_extreme_gt and rsi > sp.rsi_extreme_gt:
+            return (
+                "B",
+                sp.hold_short,
+                f"⚠️ EXTREME: 5d={five_day_return:+.0f}%, RSI={rsi:.0f} - VERY SHORT!",
+            )
+
         # ============================================================
         # TYPE S CHECK - Short Squeeze (PRIORITY 1)
         # ============================================================
-        if short_interest >= 20 and days_to_cover >= 5 and volume_surge >= 4.0:
-            if 15 <= five_day_return <= 60 and 60 <= rsi <= 80:
-                return ('S', (1, 4), f"🔥 SQUEEZE: SI={short_interest:.0f}%, DTC={days_to_cover:.0f}, Vol={volume_surge:.1f}x")
-        
-        # Also check for potential squeeze setup
-        if short_interest >= 15 and days_to_cover >= 3 and volume_surge >= 3.0:
-            if 10 <= five_day_return <= 40 and 55 <= rsi <= 75:
-                return ('S', (2, 4), f"💥 Squeeze Setup: SI={short_interest:.0f}%, 5d={five_day_return:+.0f}%")
-        
+        if (
+            short_interest >= ts.primary_si_min
+            and days_to_cover >= ts.primary_dtc_min
+            and volume_surge >= ts.primary_vol_min
+        ):
+            if (
+                ts.primary_5d_min <= five_day_return <= ts.primary_5d_max
+                and ts.primary_rsi_min <= rsi <= ts.primary_rsi_max
+            ):
+                return (
+                    "S",
+                    (ts.primary_hold_min, ts.primary_hold_max),
+                    f"🔥 SQUEEZE: SI={short_interest:.0f}%, DTC={days_to_cover:.0f}, Vol={volume_surge:.1f}x",
+                )
+
+        if (
+            short_interest >= ts.secondary_si_min
+            and days_to_cover >= ts.secondary_dtc_min
+            and volume_surge >= ts.secondary_vol_min
+        ):
+            if (
+                ts.secondary_5d_min <= five_day_return <= ts.secondary_5d_max
+                and ts.secondary_rsi_min <= rsi <= ts.secondary_rsi_max
+            ):
+                return (
+                    "S",
+                    (ts.secondary_hold_min, ts.secondary_hold_max),
+                    f"💥 Squeeze Setup: SI={short_interest:.0f}%, 5d={five_day_return:+.0f}%",
+                )
+
         # ============================================================
         # TYPE C CHECK - Early Stage Breakout (PRIORITY 2 - Best R/R)
         # ============================================================
         type_c_score = 0
-        
-        # 5-day return: -5% to +15% (pullback entry allowed!)
-        if -5 <= five_day_return <= 15:
-            type_c_score += 4
-            if 0 <= five_day_return <= 10:
-                type_c_score += 1  # Sweet spot bonus
-        
-        # RSI: 40-60 (room to run)
-        if 40 <= rsi <= 60:
-            type_c_score += 4
-            if rsi <= 50:
-                type_c_score += 1  # Low RSI bonus
-        elif 60 < rsi <= 65:
-            type_c_score += 2  # Still acceptable
-        
-        # Volume: 1.8x to 4.0x
-        if 1.8 <= volume_surge <= 4.0:
-            type_c_score += 2
-            if volume_surge >= 2.5:
-                type_c_score += 1
-        
-        # MA20 distance: -3% to +8% (pullback or just above)
-        if -3 <= ma20_distance <= 8:
-            type_c_score += 2
-        
-        # Close position: ≥ 0.55 upper half
-        if close_position >= 0.55:
-            type_c_score += 1
-        
-        # RSI Divergence: GAME CHANGER (+3)
+
+        if tc.return_min <= five_day_return <= tc.return_max:
+            type_c_score += tc.return_band_pts
+            if tc.sweet_return_min <= five_day_return <= tc.sweet_return_max:
+                type_c_score += tc.sweet_bonus_pts
+
+        if tc.rsi_min <= rsi <= tc.rsi_max:
+            type_c_score += tc.rsi_band_pts
+            if rsi <= tc.rsi_low_max:
+                type_c_score += tc.rsi_low_bonus_pts
+        elif tc.rsi_max < rsi <= tc.rsi_mid_max:
+            type_c_score += tc.rsi_mid_pts
+
+        if tc.vol_min <= volume_surge <= tc.vol_max:
+            type_c_score += tc.vol_band_pts
+            if volume_surge >= tc.vol_high_min:
+                type_c_score += tc.vol_high_bonus_pts
+
+        if tc.ma_dist_min <= ma20_distance <= tc.ma_dist_max:
+            type_c_score += tc.ma_band_pts
+
+        if close_position >= tc.close_position_min:
+            type_c_score += tc.close_position_pts
+
         if rsi_divergence:
-            type_c_score += 3
-        
-        # MACD Bullish: Bonus
+            type_c_score += tc.rsi_div_pts
+
         if macd_bullish:
-            type_c_score += 1
-        
-        # Higher lows
+            type_c_score += tc.macd_pts
+
         if higher_lows:
-            type_c_score += 1
-        
-        # Type C threshold: 10+ points (raised from 8 — higher conviction required)
-        if type_c_score >= 10:
+            type_c_score += tc.higher_lows_pts
+
+        if type_c_score >= tc.min_score:
             if rsi_divergence:
                 emoji = "🌟"
                 reason = f"RSI Divergence + Early: 5d={five_day_return:+.0f}%, RSI={rsi:.0f}"
@@ -188,100 +216,88 @@ class SmallCapEngine:
             else:
                 emoji = "⭐"
                 reason = f"Early Stage: 5d={five_day_return:+.0f}%, RSI={rsi:.0f}"
-            return ('C', (3, 8), f"{emoji} {reason}")
-        
+            return ("C", (tc.hold_min, tc.hold_max), f"{emoji} {reason}")
+
         # ============================================================
         # TYPE B CHECK - Momentum Swing (PRIORITY 3)
         # ============================================================
         type_b_score = 0
-        
-        # 5-day return: +30% to +70% (Senior Trader specs)
+
         if 30 <= five_day_return <= 70:
-            type_b_score += 3
+            type_b_score += tb.r_30_70_pts
         elif 20 <= five_day_return < 30:
-            type_b_score += 2
+            type_b_score += tb.r_20_30_pts
         elif five_day_return > 70:
-            type_b_score += 1  # Extended but still momentum
-        
-        # RSI: 68-85 (elevated)
+            type_b_score += tb.r_gt_70_pts
+
         if 68 <= rsi <= 85:
-            type_b_score += 3
+            type_b_score += tb.rsi_68_85_pts
         elif 60 <= rsi < 68:
-            type_b_score += 2
+            type_b_score += tb.rsi_60_68_pts
         elif rsi > 85:
-            type_b_score += 1  # Extreme
-        
-        # Volume: ≥ 3.5x
-        if volume_surge >= 3.5:
-            type_b_score += 3
-        elif volume_surge >= 2.5:
-            type_b_score += 2
-        
-        # Close position: ≥ 0.75
-        if close_position >= 0.75:
-            type_b_score += 2
-        
-        # Catalyst bonus
+            type_b_score += tb.rsi_gt_85_pts
+
+        if volume_surge >= tb.gate_vol_min:
+            type_b_score += tb.vol_35_pts
+        elif volume_surge >= tb.vol_surge_secondary_min:
+            type_b_score += tb.vol_25_pts
+
+        if close_position >= tb.close_pos_min:
+            type_b_score += tb.close_pos_pts
+
         if has_catalyst:
-            type_b_score += 1
-        
-        # Type B threshold: 6+ points
-        if type_b_score >= 6:
-            # ── BALANCED FILTER GATE (v3.0) ──
-            # Type B is HIGH RISK — require strong volume + at least one safety:
-            #   1. Volume >= 3.5x (strong conviction)
-            #   2. At least ONE of: has_catalyst OR RSI <= 72
-            # If filter fails → downgrade to Type A
-            has_safety = has_catalyst or rsi <= 72
-            if volume_surge < 3.5 or not has_safety:
-                pass  # Fall through to Type A
+            type_b_score += tb.catalyst_pts
+
+        if type_b_score >= tb.min_score:
+            has_safety = has_catalyst or rsi <= tb.gate_rsi_safe_max
+            if volume_surge < tb.gate_vol_min or not has_safety:
+                pass
             else:
-                if rsi > 73:
-                    hold_days = (2, 4)  # Overbought — short hold
-                elif rsi > 68:
-                    hold_days = (3, 5)  # Elevated
+                if rsi > tb.rsi_overbought_hold_gt:
+                    hold_days = tb.hold_overbought
+                elif rsi > tb.rsi_elevated_gt:
+                    hold_days = tb.hold_elevated
                 else:
-                    hold_days = (4, 6)  # Room to run
+                    hold_days = tb.hold_default
 
                 cat_str = "Cat:✓" if has_catalyst else "Vol-driven"
-                return ('B', hold_days, f"🚀 Momentum: 5d={five_day_return:+.0f}%, RSI={rsi:.0f}, {cat_str}")
-        
+                return (
+                    "B",
+                    hold_days,
+                    f"🚀 Momentum: 5d={five_day_return:+.0f}%, RSI={rsi:.0f}, {cat_str}",
+                )
+
         # ============================================================
         # TYPE A - Continuation Swing (FALLBACK)
         # ============================================================
         type_a_reasons = []
-        
-        # 5-day return: +10% to +35%
+
         if 10 <= five_day_return <= 35:
             type_a_reasons.append(f"5d={five_day_return:+.0f}%")
         elif five_day_return < 10:
             type_a_reasons.append(f"5d={five_day_return:+.0f}% (building)")
         else:
             type_a_reasons.append(f"5d={five_day_return:+.0f}%")
-        
-        # RSI: 50-68
+
         if 50 <= rsi <= 68:
             type_a_reasons.append(f"RSI={rsi:.0f} (healthy)")
         else:
             type_a_reasons.append(f"RSI={rsi:.0f}")
-        
-        # Higher lows
+
         if higher_lows:
             type_a_reasons.append("HL ✓")
-        
-        # MACD
+
         if macd_bullish:
             type_a_reasons.append("MACD ✓")
-        
-        # Sub-classification for Type A (5-14 days, extended for proper swing)
-        if five_day_return <= 15 and rsi <= 55:
-            hold_days = (5, 10)  # Early continuation
-        elif five_day_return <= 25 and rsi <= 62:
-            hold_days = (7, 12)  # Standard
+
+        if five_day_return <= ta.five_d_max_early and rsi <= ta.rsi_max_early:
+            hold_days = ta.hold_early
+        elif five_day_return <= ta.five_d_max_std and rsi <= ta.rsi_max_std:
+            hold_days = ta.hold_std
         else:
-            hold_days = (8, 14)  # Extended trend
-        
-        return ('A', hold_days, "🐢 Continuation: " + ", ".join(type_a_reasons[:2]))
+            hold_days = ta.hold_extended
+
+        return ("A", hold_days, "🐢 Continuation: " + ", ".join(type_a_reasons[:2]))
     
     def get_stock_info(self, ticker: str) -> Dict:
         """Get stock info from yfinance."""
@@ -489,14 +505,20 @@ class SmallCapEngine:
             )
             
             # V4 hard RSI gate: reject overbought signals before they become trades
-            if rsi > 70 and swing_type != 'S':
-                logger.debug(f"{ticker}: RSI {rsi:.0f} > 70 — rejected (overbought, not squeeze)")
+            max_rsi = self.settings.max_entry_rsi
+            if rsi > max_rsi and swing_type != 'S':
+                logger.debug(f"{ticker}: RSI {rsi:.0f} > {max_rsi} — rejected (overbought, not squeeze)")
                 return None
 
             # V4: Hard overextension gate — reject late entries (except squeeze candidates)
-            overext_details = overext.get('details', {})
-            five_day_total = overext_details.get('five_day_total', five_day_return)
-            if five_day_total > 30 and rsi > 65 and swing_type != 'S':
+            overext_details = overext.get("details", {})
+            five_day_total = overext_details.get("five_day_total", five_day_return)
+            sg = self.settings.scan_gates
+            if (
+                five_day_total > sg.late_entry_five_day_total_gt
+                and rsi > sg.late_entry_rsi_gt
+                and swing_type != "S"
+            ):
                 logger.debug(
                     f"{ticker}: Late entry rejected — 5d={five_day_total:+.0f}%, RSI={rsi:.0f}"
                 )
@@ -735,20 +757,26 @@ class SmallCapEngine:
 
         return signals
     
-    def get_small_cap_universe(self, use_finviz: bool = True, max_tickers: int = 200) -> List[str]:
+    def get_small_cap_universe(
+        self,
+        use_finviz: Optional[bool] = None,
+        max_tickers: Optional[int] = None,
+    ) -> List[str]:
         """
         Get list of potential small-cap stocks to scan.
-        
-        Uses SmallCapUniverse to get dynamic ticker list from:
-        1. Finviz screener via finvizfinance (primary)
-        2. Curated static list (fallback)
-        
-        Args:
-            use_finviz: If True, try Finviz first
-            max_tickers: Maximum number of tickers to return
-        
+
+        Defaults (``use_finviz``, ``max_tickers``) come from ``settings.universe_scan``.
+        Pass explicit values to override (e.g. dashboard preview with a smaller cap).
+
         Returns:
             List of ticker symbols
         """
-        return self.universe_provider.get_universe(use_finviz=use_finviz, max_tickers=max_tickers)
+        us = self.settings.universe_scan
+        # cache_duration_minutes == 0 → always refetch; >0 → reuse in-memory Finviz list until TTL.
+        force_refresh = us.cache_duration_minutes <= 0
+        return self.universe_provider.get_universe(
+            use_finviz=use_finviz,
+            max_tickers=max_tickers,
+            force_refresh=force_refresh,
+        )
 
