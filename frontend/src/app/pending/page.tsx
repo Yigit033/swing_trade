@@ -112,7 +112,6 @@ export default function PendingPage() {
                         <span style={{ fontSize: "0.68rem", opacity: 0.7 }}>(Unconfirmed)</span>
                     )}
                     <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                        x{regime.score_multiplier} multiplier
                         {regime.vix != null && regime.vix > 0 && ` · VIX ${regime.vix.toFixed(1)}`}
                     </span>
                     <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginLeft: "auto" }}>

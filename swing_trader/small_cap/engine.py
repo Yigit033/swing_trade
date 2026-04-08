@@ -524,6 +524,35 @@ class SmallCapEngine:
                 )
                 return None
 
+            # ================================================================
+            # V5.0: OBV DISTRIBUTION HARD GATE — Smart Money Filter
+            # If OBV shows distribution (smart money selling), reject signal.
+            # Exception: Type S (short squeeze) — distribution is expected
+            # before a squeeze.
+            # ================================================================
+            if boosters.get('obv_distribution', False) and swing_type != 'S':
+                logger.debug(
+                    f"{ticker}: OBV Distribution — hard reject "
+                    f"(smart money exiting, type={swing_type})"
+                )
+                return None
+
+            # ================================================================
+            # V5.0: TREND QUALITY GATE — Reject weak trend phases
+            # If trend phase is "distribution" or "markdown", reject
+            # unless it's a squeeze candidate.
+            # ================================================================
+            trend_data = swing_details.get("trend_quality", {})
+            trend_phase = trend_data.get("trend_phase", "unknown")
+            if trend_phase in ("distribution", "markdown") and swing_type != 'S':
+                trend_strength = trend_data.get("trend_strength", 50)
+                if trend_strength < 30:
+                    logger.debug(
+                        f"{ticker}: Weak trend phase '{trend_phase}' "
+                        f"(strength={trend_strength}) — rejected"
+                    )
+                    return None
+
             # Inject swing_type into boosters so scoring uses correct RSI penalty bands
             boosters['swing_type'] = swing_type
 
@@ -717,7 +746,6 @@ class SmallCapEngine:
         # v4.0: Detect market regime ONCE for all stocks
         market_regime = self.signals.detect_market_regime()
         self._last_regime = market_regime  # expose for callers (e.g. scanner API)
-        regime_multiplier = market_regime.get('score_multiplier', 1.0)
 
         for ticker in tickers:
             if ticker not in data_dict:
@@ -729,14 +757,9 @@ class SmallCapEngine:
             signal = self.scan_stock(ticker, df)
 
             if signal:
-                # v3.0: Apply market regime multiplier to quality score
-                # Store original score for user-facing min_quality filter
-                signal['original_quality_score'] = signal['quality_score']
+                # Keep regime info for UI, but do not modify score (regime effect removed).
                 signal['market_regime'] = market_regime['regime']
-                signal['regime_multiplier'] = regime_multiplier
                 signal['regime_confidence'] = market_regime.get('confidence', 'CONFIRMED')
-                if regime_multiplier < 1.0:
-                    signal['quality_score'] = round(signal['quality_score'] * regime_multiplier, 1)
 
                 # Re-apply risk with real portfolio value if different from default
                 if portfolio_value != 10000:

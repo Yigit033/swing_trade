@@ -138,11 +138,7 @@ export default function DashboardPage() {
                   Unconfirmed
                 </span>
               ) : null}
-              {!isUnknown && regime.score_multiplier < 1 && (
-                <span style={{ fontSize: "0.72rem", color: "var(--text-secondary)" }}>
-                  x{regime.score_multiplier}
-                </span>
-              )}
+              {/* score_multiplier removed */}
             </div>
             {isUnknown && regime.detect_error ? (
               <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", wordBreak: "break-word" }}>

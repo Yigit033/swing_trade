@@ -21,29 +21,34 @@ class SmallCapScoring:
     """
     Quality scoring for Small Cap Momentum Engine.
 
-    SENIOR TRADER SCORING SYSTEM v3.0 (Weighted):
+    SENIOR TRADER SCORING SYSTEM v5.0 (Directional Rebalance):
 
     BASE SCORE (max 100 — weighted):
-    - Volume Explosion:    30% weight (raw 0-30, normalized)
-    - Volatility (ATR%):   20% weight (raw 0-25, normalized)
-    - Float Tightness:     20% weight (raw 0-20, normalized)
-    - Momentum Continuity: 15% weight (raw 0-15, normalized)
-    - Risk Control:        15% weight (raw 0-15, normalized)
+    - Volume Explosion:    20% weight (raw 0-30, normalized) [was 30%]
+    - Volatility (ATR%):   15% weight (raw 0-25, normalized) [was 20%]
+    - Float Tightness:     15% weight (raw 0-20, normalized) [was 20%]
+    - Momentum Continuity: 20% weight (raw 0-15, normalized) [was 15%]
+    - Risk Control:        10% weight (raw 0-15, normalized) [was 15%]
+    - Trend Quality:       20% weight (raw 0-25, normalized) [NEW]
+
+    KEY CHANGE: Directional information now = 40% (Momentum + Trend)
+    vs old 15%. Non-directional (Volume + ATR + Float) = 50% → 50%.
 
     CATALYST BONUS (max +40 pts, capped):
-    PENALTY SYSTEM (max -40 pts)
+    PENALTY SYSTEM (max -60 pts, expanded)
 
     FINAL RANGE: 0 to 140
     """
     
-    # SENIOR TRADER SCORING WEIGHTS (v3.0 — actually applied!)
-    # Each component is normalized to 0-100, then multiplied by weight.
-    # Weighted total = 0-100 base score.
-    WEIGHT_VOLUME = 0.30          # 30% importance
-    WEIGHT_VOLATILITY = 0.20      # 20% importance
-    WEIGHT_FLOAT = 0.20           # 20% importance
-    WEIGHT_MOMENTUM = 0.15        # 15% importance
-    WEIGHT_RISK = 0.15            # 15% importance
+    # SCORING WEIGHTS v5.0 — Directional Rebalance
+    # Directional info (Momentum + Trend) = 40% of base score.
+    # This ensures "which direction" matters more than "how much it moved."
+    WEIGHT_VOLUME = 0.20          # 20% importance [was 30%]
+    WEIGHT_VOLATILITY = 0.15      # 15% importance [was 20%]
+    WEIGHT_FLOAT = 0.15           # 15% importance [was 20%]
+    WEIGHT_MOMENTUM = 0.20        # 20% importance [was 15%]
+    WEIGHT_RISK = 0.10            # 10% importance [was 15%]
+    WEIGHT_TREND = 0.20           # 20% importance [NEW]
 
     # Raw score maximums (for normalization to 0-100)
     MAX_VOLUME_SCORE = 30
@@ -51,6 +56,7 @@ class SmallCapScoring:
     MAX_FLOAT_SCORE = 20
     MAX_MOMENTUM_SCORE = 15
     MAX_RISK_SCORE = 15
+    MAX_TREND_SCORE = 25          # NEW
     
     def __init__(self, config: Dict = None, settings: Optional["SmallCapSettings"] = None):
         """Initialize SmallCapScoring from SmallCapSettings.scoring_tuning."""
@@ -66,15 +72,17 @@ class SmallCapScoring:
         self.WEIGHT_FLOAT = st.weight_float
         self.WEIGHT_MOMENTUM = st.weight_momentum
         self.WEIGHT_RISK = st.weight_risk
+        self.WEIGHT_TREND = st.weight_trend
         self.MAX_VOLUME_SCORE = st.max_volume_score
         self.MAX_VOLATILITY_SCORE = st.max_volatility_score
         self.MAX_FLOAT_SCORE = st.max_float_score
         self.MAX_MOMENTUM_SCORE = st.max_momentum_score
         self.MAX_RISK_SCORE = st.max_risk_score
+        self.MAX_TREND_SCORE = st.max_trend_score
         self.BONUS_CAP = st.bonus_cap
         self.FINAL_SCORE_MAX = st.final_score_max
         self.RISK_SCORE_ATR_MULT = st.risk_score_atr_mult
-        logger.info("SmallCapScoring initialized (Senior Trader v2.0)")
+        logger.info("SmallCapScoring initialized (v5.0 — Directional Rebalance)")
     
     def score_volume_explosion(self, volume_surge: float, rvol: float = None) -> float:
         """
@@ -202,6 +210,84 @@ class SmallCapScoring:
             logger.error(f"Error scoring risk: {e}")
             return float(rb.insufficient_bars_score)
     
+    def score_trend_quality(self, df: pd.DataFrame, boosters: Dict = None) -> float:
+        """
+        Score trend quality — directional health (0-25 points). NEW in v5.0.
+
+        This is the most important new component: it measures whether the
+        stock is in a healthy, constructive uptrend vs a distribution or
+        markdown phase.
+
+        Scoring:
+        - MA20 rising slope: +6
+        - Close above MA50: +5
+        - Golden cross (MA20 > MA50): +4
+        - Trend phase = markup: +5
+        - Higher lows pattern (>60% of lookback): +3
+        - No rejection candle: +2
+        """
+        score = 0
+        trend_data = {}
+
+        if boosters:
+            swing_details = boosters.get('swing_details', {})
+            trend_data = swing_details.get('trend_quality', {})
+
+        if not trend_data:
+            # Fallback: calculate inline if not available from boosters
+            from .trend_quality import calculate_trend_quality
+            if df is not None and len(df) >= 21:
+                trend_data = calculate_trend_quality(df)
+
+        if not trend_data:
+            return 5  # Neutral fallback
+
+        # MA20 slope rising
+        if trend_data.get('ma20_slope_ok', False):
+            slope_val = abs(trend_data.get('ma20_slope_value', 0))
+            if slope_val > 1.0:
+                score += 6  # Strong upslope
+            elif slope_val > 0.3:
+                score += 4  # Moderate upslope
+            else:
+                score += 2  # Weak but positive
+
+        # Close above MA50
+        ma50_dist = trend_data.get('ma50_distance_pct', 0)
+        if ma50_dist > 5:
+            score += 5  # Comfortably above
+        elif ma50_dist > 0:
+            score += 3  # Just above
+        elif ma50_dist > -5:
+            score += 1  # Slightly below but within range
+
+        # Golden cross
+        if trend_data.get('golden_cross', False):
+            score += 4
+
+        # Trend phase
+        phase = trend_data.get('trend_phase', 'unknown')
+        if phase == 'markup':
+            score += 5
+        elif phase == 'late_markup':
+            score += 2
+        # distribution/markdown get 0
+
+        # Higher lows pattern
+        hl_count = trend_data.get('higher_lows_count', 0)
+        if hl_count >= 6:
+            score += 3
+        elif hl_count >= 4:
+            score += 2
+        elif hl_count >= 2:
+            score += 1
+
+        # No rejection candle
+        if not trend_data.get('rejection_candle', False):
+            score += 2
+
+        return min(score, 25)
+
     def calculate_quality_score(
         self, 
         df: pd.DataFrame,
@@ -211,17 +297,18 @@ class SmallCapScoring:
         boosters: Dict = None
     ) -> float:
         """
-        Calculate composite quality score (0-100).
+        Calculate composite quality score (0-140).
         
-        Components:
-        - Volume Explosion: 30%
-        - Volatility Expansion: 25%
-        - Float Tightness: 15%
-        - Momentum Continuity: 15%
-        - Risk Control: 15%
+        v5.0 Components (Directional Rebalance):
+        - Volume Explosion:    20% [was 30%]
+        - Volatility (ATR%):   15% [was 20%]
+        - Float Tightness:     15% [was 20%]
+        - Momentum Continuity: 20% [was 15%]
+        - Risk Control:        10% [was 15%]
+        - Trend Quality:       20% [NEW — directional health]
         
-        + Swing Bonuses (NEW)
-        - Penalties for overextension (NEW)
+        + Bonuses (catalyst, sector RS, OBV, etc.)
+        - Penalties (RSI overbought, overextension, trend weakness)
         """
         # Calculate raw component scores
         volume_score_raw = self.score_volume_explosion(
@@ -232,17 +319,18 @@ class SmallCapScoring:
         float_score_raw = self.score_float_tightness(float_shares)
         momentum_score_raw = self.score_momentum_continuity(df)
         risk_score_raw = self.score_risk_control(df, atr_percent)
+        trend_score_raw = self.score_trend_quality(df, boosters)
 
-        # Normalize each to 0-100, then apply weights (v3.0)
-        # V4: float_score allows negative values so large-float penalty actually bites
+        # Normalize each to 0-100, then apply weights (v5.0)
         volume_score = (max(volume_score_raw, 0) / self.MAX_VOLUME_SCORE) * 100 * self.WEIGHT_VOLUME
         volatility_score = (max(volatility_score_raw, 0) / self.MAX_VOLATILITY_SCORE) * 100 * self.WEIGHT_VOLATILITY
         float_score = (float_score_raw / self.MAX_FLOAT_SCORE) * 100 * self.WEIGHT_FLOAT
         momentum_score = (max(momentum_score_raw, 0) / self.MAX_MOMENTUM_SCORE) * 100 * self.WEIGHT_MOMENTUM
         risk_score = (max(risk_score_raw, 0) / self.MAX_RISK_SCORE) * 100 * self.WEIGHT_RISK
+        trend_score = (max(trend_score_raw, 0) / self.MAX_TREND_SCORE) * 100 * self.WEIGHT_TREND
 
         # Weighted total (0-100 range)
-        total = volume_score + volatility_score + float_score + momentum_score + risk_score
+        total = volume_score + volatility_score + float_score + momentum_score + risk_score + trend_score
         
         st = self._st
         # ============================================================
@@ -308,9 +396,19 @@ class SmallCapScoring:
             # OBV Trend (v3.0 — Smart Money detection)
             obv_bonus = boosters.get('obv_bonus', 0)
             bonus += obv_bonus  # +8 accumulation, +4 confirm, -5 distribution
+
+            # v5.0: Golden Cross bonus
+            trend_data = boosters.get('swing_details', {}).get('trend_quality', {})
+            if trend_data.get('golden_cross', False):
+                bonus += st.bonus_golden_cross
+
+            # v5.0: Confirmed breakout gets stronger bonus
+            trigger_details = boosters.get('trigger_details', {})
+            if trigger_details and trigger_details.get('has_breakout', False):
+                bonus += st.bonus_confirmed_breakout
         
         # ============================================================
-        # PENALTY SYSTEM (max -40, expanded from -35)
+        # PENALTY SYSTEM (max -60, expanded in v5.0)
         # ============================================================
         penalty = 0
         if boosters:
@@ -373,6 +471,35 @@ class SmallCapScoring:
             
             if not boosters.get('swing_ready'):
                 penalty += st.pen_not_swing_ready
+
+            # ================================================================
+            # v5.0: DIRECTIONAL PENALTIES (NEW — these are critical)
+            # ================================================================
+            trend_data = swing_details.get('trend_quality', {})
+
+            # OBV Distribution: -15 (was -5 via obv_bonus)
+            # This stacks with the hard gate — if somehow it passes the gate,
+            # the score still gets hammered.
+            if boosters.get('obv_distribution', False):
+                penalty += st.pen_obv_distribution
+
+            # Close below MA50: -10 (long-term downtrend)
+            ma50_dist = trend_data.get('ma50_distance_pct', 0)
+            if ma50_dist < -3:
+                penalty += st.pen_below_ma50
+
+            # MA20 falling slope: -8 (short-term trend fading)
+            if not trend_data.get('ma20_slope_ok', True):
+                penalty += st.pen_ma20_falling
+
+            # Rejection candle (bull trap): -12
+            if trend_data.get('rejection_candle', False):
+                penalty += st.pen_rejection_candle
+
+            # Distribution/Markdown trend phase: -8
+            phase = trend_data.get('trend_phase', 'unknown')
+            if phase in ('distribution', 'markdown'):
+                penalty += st.pen_weak_trend_phase
         
         bonus = min(bonus, st.bonus_cap)
 
@@ -381,11 +508,12 @@ class SmallCapScoring:
         final_score = max(0, min(final_score, st.final_score_max))
         
         logger.debug(
-            f"SmallCap Score: Vol={volume_score:.1f}(raw {volume_score_raw}), "
-            f"Volatility={volatility_score:.1f}(raw {volatility_score_raw}), "
+            f"SmallCap Score v5.0: Vol={volume_score:.1f}(raw {volume_score_raw}), "
+            f"ATR={volatility_score:.1f}(raw {volatility_score_raw}), "
             f"Float={float_score:.1f}(raw {float_score_raw}), "
-            f"Momentum={momentum_score:.1f}(raw {momentum_score_raw}), "
+            f"Mom={momentum_score:.1f}(raw {momentum_score_raw}), "
             f"Risk={risk_score:.1f}(raw {risk_score_raw}), "
+            f"Trend={trend_score:.1f}(raw {trend_score_raw}), "
             f"Bonus={bonus}, Penalty={penalty} -> Total={final_score}"
         )
         

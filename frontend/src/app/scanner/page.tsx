@@ -336,11 +336,6 @@ function AppliedThresholdPanel({
 
     const minN = effMin as number;
     const topN = effTop as number;
-    const tightened = minN > reqMin || topN < reqTop;
-    const mult =
-        typeof regimeMultiplier === "number" && Number.isFinite(regimeMultiplier) && regimeMultiplier < 1
-            ? regimeMultiplier
-            : null;
 
     const confTr =
         regimeConfidence === "TENTATIVE"
@@ -409,11 +404,11 @@ function AppliedThresholdPanel({
                             }}
                         >
                             Ham kalite skoru{" "}
-                            <span style={{ color: "var(--accent)", fontVariantNumeric: "tabular-nums" }}>≥ {minN}</span>
+                            <span style={{ color: "var(--accent)", fontVariantNumeric: "tabular-nums" }}>≥ {reqMin}</span>
                             {" · "}
                             En fazla{" "}
                             <span style={{ color: "var(--accent)", fontVariantNumeric: "tabular-nums" }}>{topN}</span>{" "}
-                            sonuç
+                            sonuç gösteriliyor
                         </p>
                         <p style={{ margin: "8px 0 0", fontSize: "0.8rem", color: "var(--text-secondary)" }}>
                             Rejim:{" "}
@@ -422,12 +417,6 @@ function AppliedThresholdPanel({
                                 <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>
                                     {" "}
                                     · {confTr}
-                                </span>
-                            ) : null}
-                            {mult != null ? (
-                                <span style={{ color: "var(--text-muted)" }}>
-                                    {" "}
-                                    · Skor çarpanı <strong style={{ fontVariantNumeric: "tabular-nums" }}>×{mult}</strong>
                                 </span>
                             ) : null}
                         </p>
@@ -448,34 +437,13 @@ function AppliedThresholdPanel({
                                 {regimeDetectError.length > 220 ? `${regimeDetectError.slice(0, 220)}…` : regimeDetectError}
                             </p>
                         ) : null}
-                        {tightened ? (
-                            <p
-                                style={{
-                                    margin: "10px 0 0",
-                                    fontSize: "0.75rem",
-                                    color: "var(--text-muted)",
-                                    padding: "8px 12px",
-                                    borderRadius: 8,
-                                    background: "rgba(245,158,11,0.08)",
-                                    border: "1px solid rgba(245,158,11,0.2)",
-                                    maxWidth: "100%",
-                                }}
-                            >
-                                Bu tarama isteğinde min <strong>{reqMin}</strong> / en fazla <strong>{reqTop}</strong>;
-                                rejim ve çarpan sonrası:{" "}
-                                <strong>
-                                    {[
-                                        minN > reqMin && `ham eşik → ${minN}`,
-                                        topN < reqTop && `liste üst sınırı → ${topN}`,
-                                    ]
-                                        .filter(Boolean)
-                                        .join(" · ")}
-                                </strong>
-                                .
+                        {topN < reqTop ? (
+                            <p style={{ margin: "10px 0 0", fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                                Rejim: <strong style={{ color: regimeColor }}>{regimeLabel}</strong> · En fazla <strong>{topN}</strong> sonuç gösteriliyor.
                             </p>
                         ) : (
                             <p style={{ margin: "10px 0 0", fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                                Bu tarama isteği (min {reqMin}, top {reqTop}) aynen uygulandı; ek rejim sıkılaştırması yok.
+                                Rejim: <strong style={{ color: regimeColor }}>{regimeLabel}</strong>.
                             </p>
                         )}
                     </div>
@@ -501,7 +469,7 @@ function AppliedThresholdPanel({
                             fontVariantNumeric: "tabular-nums",
                         }}
                     >
-                        ham ≥ {minN}
+                        min ≥ {reqMin}
                     </span>
                     <span
                         style={{
@@ -666,6 +634,7 @@ export default function ScannerPage() {
         : regime === "CAUTION" ? "CAUTION"
         : regime === "UNKNOWN" ? "BİLİNMİYOR"
         : regime || "—";
+    // Rejim çarpanı artık skora uygulanmıyor; UI’da kullanılmıyor.
     const regimeMultiplier = (result?.stats as Record<string, number>)?.regime_multiplier;
     const regimeConfidence = (result?.stats as Record<string, string>)?.regime_confidence || "";
     const regimeDetectError = (result?.stats as Record<string, string>)?.regime_detect_error;
@@ -860,11 +829,7 @@ export default function ScannerPage() {
                                         Unconfirmed
                                     </span>
                                 ) : null}
-                                {regime !== "UNKNOWN" && regimeMultiplier != null && regimeMultiplier < 1 && (
-                                    <span style={{ fontSize: "0.7rem", fontWeight: 500, opacity: 0.7 }}>
-                                        x{regimeMultiplier}
-                                    </span>
-                                )}
+                                {/* Rejim çarpanı artık skora uygulanmıyor; sadece bilgi gösteriyoruz. */}
                             </div>
                         </div>
                         <div className="metric-card" style={{ padding: "14px 20px", flex: 1, minWidth: 120 }}>

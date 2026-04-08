@@ -19,7 +19,6 @@ def regime_unknown(reason: str) -> Dict:
         "spy_above_ma50": False,
         "spy_above_ma200": False,
         "spy_5d_return": 0.0,
-        "score_multiplier": 1.0,
         "spy_price": 0.0,
         "ma50": 0.0,
         "ma200": 0.0,
@@ -62,7 +61,6 @@ def regime_from_spy_close(close: pd.Series, vix_last: Optional[float] = None) ->
         if vix_val > 30:
             result["regime"] = "BEAR"
             result["confidence"] = "CONFIRMED"
-            result["score_multiplier"] = 0.70
             return result
 
         ma50_series = close.rolling(50).mean()
@@ -78,31 +76,22 @@ def regime_from_spy_close(close: pd.Series, vix_last: Optional[float] = None) ->
         if bull_days >= 4:
             result["regime"] = "BULL"
             result["confidence"] = "CONFIRMED"
-            result["score_multiplier"] = 1.0
         elif bear_days >= 4:
             result["regime"] = "BEAR"
             result["confidence"] = "CONFIRMED"
-            result["score_multiplier"] = 0.75
         elif bear_days == 3:
             result["regime"] = "BEAR"
             result["confidence"] = "TENTATIVE"
-            result["score_multiplier"] = 0.72
         elif current > ma200_val:
             if bear_days >= 2:
                 result["regime"] = "CAUTION"
                 result["confidence"] = "CONFIRMED"
-                result["score_multiplier"] = 0.80
             else:
                 result["regime"] = "CAUTION"
                 result["confidence"] = "TENTATIVE"
-                result["score_multiplier"] = 0.85
         else:
             result["regime"] = "CAUTION"
             result["confidence"] = "TENTATIVE"
-            result["score_multiplier"] = 0.80
-
-        if vix_val > 25 and result["regime"] != "BEAR":
-            result["score_multiplier"] = round(result["score_multiplier"] - 0.05, 2)
 
         return result
 

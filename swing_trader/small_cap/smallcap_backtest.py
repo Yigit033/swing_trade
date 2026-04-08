@@ -184,7 +184,6 @@ class SmallCapBacktester:
                 'open_trades': len(self.open_trades),
                 'market_regime': regime.get('regime', 'UNKNOWN'),
                 'regime_confidence': regime.get('confidence', ''),
-                'regime_multiplier': regime.get('score_multiplier', 1.0),
                 'effective_min_quality': eff_min,
                 'effective_top_n': eff_top,
                 'request_min_quality': self.min_quality,
@@ -280,7 +279,6 @@ class SmallCapBacktester:
             eff_min, eff_top = effective_scan_thresholds(
                 r["regime"],
                 r["confidence"],
-                float(r["score_multiplier"]),
                 self.min_quality,
                 self.top_n,
                 regime_caps=self.settings.regime_thresholds,
@@ -293,7 +291,6 @@ class SmallCapBacktester:
             eff_min, eff_top = effective_scan_thresholds(
                 r["regime"],
                 r["confidence"],
-                float(r["score_multiplier"]),
                 self.min_quality,
                 self.top_n,
                 regime_caps=self.settings.regime_thresholds,
@@ -311,7 +308,6 @@ class SmallCapBacktester:
         eff_min, eff_top = effective_scan_thresholds(
             r.get("regime", "UNKNOWN"),
             r.get("confidence", "TENTATIVE"),
-            float(r.get("score_multiplier", 1.0)),
             self.min_quality,
             self.top_n,
             regime_caps=self.settings.regime_thresholds,
@@ -330,8 +326,7 @@ class SmallCapBacktester:
         spy_rs: pd.DataFrame,
     ):
         """
-        Full-universe day scan: backtest_mode scan_stock, regime multiplier,
-        original_quality_score filter (live parity), sort, top_n, then queue pending.
+        Full-universe day scan: backtest_mode scan_stock, quality filter, sort, top_n, then queue pending.
         """
         regime_name = regime.get('regime', 'UNKNOWN')
         regime_conf = regime.get('confidence', 'TENTATIVE')
@@ -381,14 +376,9 @@ class SmallCapBacktester:
                 if not signal:
                     continue
 
-                orig = float(signal["quality_score"])
-                signal["original_quality_score"] = orig
-                mult = float(regime.get("score_multiplier", 1.0))
                 signal["market_regime"] = regime.get("regime", "UNKNOWN")
-                signal["regime_multiplier"] = mult
                 signal["regime_confidence"] = regime.get("confidence", "CONFIRMED")
-                if mult < 1.0:
-                    signal["quality_score"] = round(orig * mult, 1)
+                # Regime multiplier no longer affects score (kept only as info).
 
                 signal_rsi = signal.get("rsi", 50)
                 if signal_rsi > self.settings.max_entry_rsi:
@@ -404,8 +394,8 @@ class SmallCapBacktester:
         candidates.sort(key=lambda x: x["signal"].get("quality_score", 0), reverse=True)
         filtered = []
         for c in candidates:
-            oqs = c["signal"].get("original_quality_score", c["signal"]["quality_score"])
-            if oqs < eff_min:
+            qs = c["signal"].get("quality_score", 0)
+            if qs < eff_min:
                 continue
             stype = c["signal"].get("swing_type")
             tq = self.settings.backtest_type_quality
@@ -415,7 +405,7 @@ class SmallCapBacktester:
                     c_min = tq.type_c_bear
                 elif regime_name == "CAUTION":
                     c_min = tq.type_c_caution
-                if oqs < c_min:
+                if qs < c_min:
                     continue
             elif stype == "A":
                 a_min = self.settings.min_quality_type_a
@@ -423,7 +413,7 @@ class SmallCapBacktester:
                     a_min = tq.type_a_bear
                 elif regime_name == "CAUTION":
                     a_min = tq.type_a_caution
-                if oqs < a_min:
+                if qs < a_min:
                     continue
             elif stype == "B":
                 b_min = self.settings.min_quality_type_b
@@ -431,7 +421,7 @@ class SmallCapBacktester:
                     b_min = tq.type_b_bear
                 elif regime_name == "CAUTION":
                     b_min = tq.type_b_caution
-                if oqs < b_min:
+                if qs < b_min:
                     continue
             filtered.append(c)
         filtered = filtered[:eff_top]

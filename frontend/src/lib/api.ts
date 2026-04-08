@@ -261,7 +261,6 @@ export const trackSignal = (signal: Signal & { hold_days_max?: number }) =>
 export interface RegimeData {
     regime: string;
     confidence: string;
-    score_multiplier: number;
     spy_price?: number;
     ma50?: number;
     ma200?: number;

@@ -650,18 +650,24 @@ class SmallCapSignals:
         Master swing confirmation check.
         Combines all swing-specific criteria.
         
-        Required for swing trade:
+        Required for swing trade (v5.0 — Trend Quality Enhanced):
         - 5-day momentum > 0
-        - Close > 20-day MA
+        - Close > 20-day MA (or within tolerance)
+        - MA20 slope must be rising (NEW — prevents entering fading trends)
+        - Close must not be too far below MA50 (NEW — long-term downtrend rejection)
+        - No rejection candle / bull trap (NEW — distribution candle detection)
         
         Returns (passed, details)
         """
+        from .trend_quality import calculate_trend_quality
+
         details = {
             'five_day_momentum': {},
             'above_ma20': {},
             'higher_lows': {},
             'multi_day_volume': {},
             'overextension': {},
+            'trend_quality': {},
             'rsi': 0,
             'swing_ready': False
         }
@@ -689,11 +695,57 @@ class SmallCapSignals:
         # 6. RSI (for penalty scoring)
         rsi = self.calculate_rsi(df)
         details['rsi'] = rsi
+
+        # ================================================================
+        # 7. TREND QUALITY ANALYSIS (v5.0 — Directional Gates)
+        # ================================================================
+        trend = calculate_trend_quality(
+            df,
+            ma20_slope_lookback=5,
+            ma50_max_below_pct=self._settings.signal_confirmation.ma50_max_below_pct,
+        )
+        details['trend_quality'] = trend
         
-        # SWING READY: 5d momentum required; MA20 proximity accepted (within N% below)
+        # SWING READY: composite check
         ma20_distance = details["above_ma20"].get("distance", 0)
         ma20_ok = passed_ma or ma20_distance >= -self._ma20_max_below_pct
-        details['swing_ready'] = passed_5d and ma20_ok
+
+        # NEW GATES:
+        # Gate A: MA20 slope must be rising (prevents entering fading trends)
+        ma20_slope_ok = trend.get("ma20_slope_ok", True)
+
+        # Gate B: Must not be too far below MA50 (rejects long-term downtrend bounce)
+        ma50_ok = trend.get("ma50_ok", True)
+
+        # Gate C: No rejection candle (bull trap / distribution candle)
+        no_rejection = not trend.get("rejection_candle", False)
+
+        details['swing_ready'] = (
+            passed_5d
+            and ma20_ok
+            and ma20_slope_ok
+            and ma50_ok
+            and no_rejection
+        )
+
+        # Log rejection reasons for debugging
+        if not details['swing_ready']:
+            fail_reasons = []
+            if not passed_5d:
+                fail_reasons.append(f"5d_mom={return_5d:+.1f}%")
+            if not ma20_ok:
+                fail_reasons.append(f"MA20_dist={ma20_distance:+.1f}%")
+            if not ma20_slope_ok:
+                fail_reasons.append(f"MA20_slope={trend.get('ma20_slope_value', 0):+.3f}%")
+            if not ma50_ok:
+                fail_reasons.append(f"MA50_dist={trend.get('ma50_distance_pct', 0):+.1f}%")
+            if not no_rejection:
+                rej = trend.get("rejection_details", {})
+                fail_reasons.append(
+                    f"rejection(gap={rej.get('gap_pct', 0):+.1f}%,"
+                    f"close_pos={rej.get('close_position', 0):.2f})"
+                )
+            logger.debug("Swing confirmation failed: %s", " | ".join(fail_reasons))
         
         return details['swing_ready'], details
     
@@ -787,10 +839,10 @@ class SmallCapSignals:
         - 5-day confirmation window prevents whipsaw around MA lines
         - 1y data for real MA200 calculation (was 6mo → MA200 was fake)
         - VIX-based fear adjustment (>30 = forced BEAR)
-        - Confidence level (CONFIRMED vs TENTATIVE) — drives API min_quality/top_n
+        - Confidence level (CONFIRMED vs TENTATIVE) — drives API top_n caps
         - BEAR TENTATIVE: 3/5 days below MA200 (between CAUTION and BEAR)
         - CAUTION CONFIRMED: above MA200 but 2+ of last 5 below MA200
-        - BEAR multiplier 0.65 → 0.75 (less aggressive)
+        - No score multiplier: regime is informational; top_n caps are applied elsewhere
 
         Returns:
             {
@@ -799,7 +851,6 @@ class SmallCapSignals:
                 'spy_above_ma50': bool,
                 'spy_above_ma200': bool,
                 'spy_5d_return': float,
-                'score_multiplier': float,
                 'spy_price': float,
                 'ma50': float,
                 'ma200': float,
@@ -836,7 +887,7 @@ class SmallCapSignals:
                 logger.info(
                     f"Market Regime: {result['regime']} ({result['confidence']}) | "
                     f"SPY ${result['spy_price']:.2f} vs MA50 ${result['ma50']:.2f} / MA200 ${result['ma200']:.2f} | "
-                    f"VIX: {result['vix']:.1f} | Multiplier: {result['score_multiplier']}"
+                    f"VIX: {result['vix']:.1f}"
                 )
             return result
 

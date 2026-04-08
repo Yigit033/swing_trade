@@ -326,6 +326,12 @@ class SignalsConfirmationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     ma20_max_distance_below_pct: float = 3.0
+    ma50_max_below_pct: float = Field(
+        default=8.0,
+        ge=1.0,
+        le=25.0,
+        description="Max %% below MA50 before rejecting swing confirmation.",
+    )
     overext_today_change_max: float = 15.0
     overext_single_day_max: float = 25.0
     overext_five_day_total_max: float = 40.0
@@ -397,6 +403,17 @@ class ScoringTuningSettings(BaseModel):
     pen_parabolic: int = 15
     parabolic_day3_min_pct: float = 10.0
     pen_not_swing_ready: int = 5
+    # v5.0: Directional scoring fields
+    weight_trend: float = Field(default=0.20, ge=0.0, le=1.0)
+    max_trend_score: float = Field(default=25.0, ge=1.0, le=100.0)
+    bonus_golden_cross: int = Field(default=5, ge=0, le=20)
+    bonus_confirmed_breakout: int = Field(default=8, ge=0, le=20)
+    # v5.0: Directional penalties
+    pen_obv_distribution: int = Field(default=15, ge=0, le=30)
+    pen_below_ma50: int = Field(default=10, ge=0, le=25)
+    pen_ma20_falling: int = Field(default=8, ge=0, le=20)
+    pen_rejection_candle: int = Field(default=12, ge=0, le=25)
+    pen_weak_trend_phase: int = Field(default=8, ge=0, le=20)
 
 
 class BacktestLoopSettings(BaseModel):

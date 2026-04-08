@@ -20,7 +20,6 @@ def get_current_regime():
         out = {
             "regime": latest["regime"],
             "confidence": latest["confidence"],
-            "score_multiplier": latest["score_multiplier"],
             "spy_price": latest.get("spy_price"),
             "ma50": latest.get("ma50"),
             "ma200": latest.get("ma200"),
@@ -42,7 +41,6 @@ def get_current_regime():
         out = {
             "regime": result["regime"],
             "confidence": result["confidence"],
-            "score_multiplier": result["score_multiplier"],
             "spy_price": result.get("spy_price"),
             "ma50": result.get("ma50"),
             "ma200": result.get("ma200"),
@@ -58,7 +56,6 @@ def get_current_regime():
         return {
             "regime": "UNKNOWN",
             "confidence": "TENTATIVE",
-            "score_multiplier": 1.0,
             "detected_at": None,
             "detect_error": str(e)[:500],
         }

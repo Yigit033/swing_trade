@@ -155,17 +155,15 @@ def _scan_regime_and_thresholds(
 ) -> tuple[str, float, str, int, int]:
     """
     Resolve regime for API response (including 0-signal scans via _last_regime)
-    and compute effective_min_quality / effective_top_n from regime+confidence,
-    then lift min_quality by regime_multiplier so filters are not blind to the penalty.
+    Resolve regime for API response (including 0-signal scans via _last_regime)
+    and compute effective_min_quality / effective_top_n from regime+confidence.
     """
     last = getattr(engine, "_last_regime", None) or {}
     if signals:
         actual_regime = signals[0].get("market_regime", "UNKNOWN")
-        regime_multiplier = float(signals[0].get("regime_multiplier", 1.0))
         regime_confidence = signals[0].get("regime_confidence", "CONFIRMED")
     else:
         actual_regime = last.get("regime", "UNKNOWN")
-        regime_multiplier = float(last.get("score_multiplier", 1.0))
         regime_confidence = last.get("confidence", "CONFIRMED")
 
     from swing_trader.small_cap.thresholds import effective_scan_thresholds
@@ -173,7 +171,6 @@ def _scan_regime_and_thresholds(
     eff_min, eff_top = effective_scan_thresholds(
         actual_regime,
         regime_confidence,
-        regime_multiplier,
         body.min_quality,
         body.top_n,
         regime_caps=engine.settings.regime_thresholds,
@@ -182,14 +179,14 @@ def _scan_regime_and_thresholds(
         "Effective thresholds: regime=%s conf=%s mult=%s → min_quality=%s top_n=%s (request %s/%s)",
         actual_regime,
         regime_confidence,
-        regime_multiplier,
+        "n/a",
         eff_min,
         eff_top,
         body.min_quality,
         body.top_n,
     )
 
-    return actual_regime, regime_multiplier, regime_confidence, eff_min, eff_top
+    return actual_regime, 1.0, regime_confidence, eff_min, eff_top
 
 
 def _execute_smallcap_scan(
@@ -238,10 +235,7 @@ def _execute_smallcap_scan(
         _scan_regime_and_thresholds(engine, body, signals)
     )
 
-    filtered = [
-        s for s in signals
-        if s.get("original_quality_score", s.get("quality_score", 0)) >= effective_min_quality
-    ]
+    filtered = [s for s in signals if s.get("quality_score", 0) >= effective_min_quality]
     filtered = filtered[: effective_top_n]
 
     try:

@@ -68,7 +68,6 @@ CREATE TABLE IF NOT EXISTS regime_history (
     detected_at     TEXT NOT NULL,
     regime          TEXT NOT NULL,
     confidence      TEXT NOT NULL,
-    score_multiplier REAL NOT NULL,
     spy_price       REAL,
     ma50            REAL,
     ma200           REAL,
@@ -85,7 +84,6 @@ CREATE TABLE IF NOT EXISTS regime_history (
     detected_at     TEXT NOT NULL,
     regime          TEXT NOT NULL,
     confidence      TEXT NOT NULL,
-    score_multiplier REAL NOT NULL,
     spy_price       REAL,
     ma50            REAL,
     ma200           REAL,
@@ -143,7 +141,6 @@ class RegimeHistoryStorage:
         """
         regime = regime_data.get('regime', 'UNKNOWN')
         confidence = regime_data.get('confidence', 'TENTATIVE')
-        multiplier = regime_data.get('score_multiplier', 1.0)
         spy_price = regime_data.get('spy_price', 0)
         ma50 = regime_data.get('ma50', 0)
         ma200 = regime_data.get('ma200', 0)
@@ -182,17 +179,16 @@ class RegimeHistoryStorage:
                     return None  # No change, skip
 
             p = _ph()
-            placeholders = ", ".join([p] * 10)
+            placeholders = ", ".join([p] * 9)
             insert_sql = f"""
                 INSERT INTO regime_history
-                (detected_at, regime, confidence, score_multiplier, spy_price, ma50, ma200, vix, spy_5d_return, detect_error)
+                (detected_at, regime, confidence, spy_price, ma50, ma200, vix, spy_5d_return, detect_error)
                 VALUES ({placeholders})
             """
             params = (
                 now,
                 regime,
                 confidence,
-                multiplier,
                 spy_price,
                 ma50,
                 ma200,
@@ -210,7 +206,7 @@ class RegimeHistoryStorage:
             conn.commit()
             conn.close()
             err_note = f" err={detect_error[:80]}…" if detect_error and len(detect_error) > 80 else (f" err={detect_error}" if detect_error else "")
-            logger.info(f"Regime saved: {regime} ({confidence}) multiplier={multiplier}{err_note}")
+            logger.info(f"Regime saved: {regime} ({confidence}){err_note}")
             return row_id
 
         except Exception as e:
