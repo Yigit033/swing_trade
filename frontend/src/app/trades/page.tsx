@@ -231,8 +231,11 @@ export default function TradesPage() {
                 t.current_price == null || t.current_price === 0 || t.current_price === t.entry_price
             )
         );
+        const hasPending = trades.some(t => t.status === "PENDING");
         const shouldAutoUpdate = () => {
             if (hasMissingPrices) return true;
+            // Backend resolves PENDING inside POST /api/trades/update-prices (not only on Pending page)
+            if (hasPending) return true;
             if (!lastUpdate) return true;
             const dt = new Date(lastUpdate);
             if (isNaN(dt.getTime())) return false;

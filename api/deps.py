@@ -60,3 +60,9 @@ def get_fetcher():
 def get_regime_storage():
     from swing_trader.data.regime_storage import RegimeHistoryStorage
     return RegimeHistoryStorage()
+
+
+@lru_cache(maxsize=1)
+def get_signal_history_storage():
+    from swing_trader.data.signal_history_storage import SmallCapSignalHistoryStorage
+    return SmallCapSignalHistoryStorage()

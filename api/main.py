@@ -4,7 +4,9 @@ Serves as the API layer between Next.js frontend and Python trading engine.
 """
 
 import sys
+import asyncio
 import logging
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 # Add project root to path so swing_trader package is importable
@@ -27,10 +29,52 @@ from api.routers import trades, pending, performance, lookup, scanner, genai, ba
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+_PENDING_SCHEDULER_ENABLED = _os.environ.get("ENABLE_PENDING_SCHEDULER", "1").strip().lower() not in (
+    "0", "false", "no",
+)
+_PENDING_INTERVAL_SEC = int(_os.environ.get("PENDING_CONFIRM_INTERVAL_SEC", "3600"))
+
+
+async def _scheduled_pending_confirm_loop() -> None:
+    """Periodically run pending confirmation for all users (no UI required)."""
+    await asyncio.sleep(15)
+    while True:
+        try:
+            from api.deps import get_paper_tracker
+
+            tracker = get_paper_tracker()
+            processed = tracker.confirm_pending_trades(None)
+            n = len(processed or [])
+            if n:
+                logger.info("Scheduled pending confirm: processed %d trade(s)", n)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Scheduled pending confirm failed")
+        await asyncio.sleep(max(60, _PENDING_INTERVAL_SEC))
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = None
+    if _PENDING_SCHEDULER_ENABLED:
+        task = asyncio.create_task(_scheduled_pending_confirm_loop())
+        logger.info(
+            "Pending scheduler enabled (interval=%ss, disable with ENABLE_PENDING_SCHEDULER=0)",
+            _PENDING_INTERVAL_SEC,
+        )
+    yield
+    if task:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
 app = FastAPI(
     title="Swing Trade AI API",
     description="AI-powered swing trading dashboard backend",
     version="2.1.0",
+    lifespan=lifespan,
 )
 
 

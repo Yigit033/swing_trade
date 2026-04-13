@@ -54,7 +54,7 @@ export function useRegime() {
     return useQuery({
         queryKey: queryKeys.regime,
         queryFn: () => getCurrentRegime(),
-        staleTime: 90 * 1000,   // regime changes slowly
+        staleTime: 45 * 1000, // API now live-samples; refresh a bit more often
         gcTime: 5 * 60 * 1000,
     });
 }

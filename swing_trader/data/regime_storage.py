@@ -13,6 +13,21 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Yeni satır eklemeden önce aynı rejimde en az bu kadar saniye geçmeli (SPY/VIX güncel kalsın)
+REGIME_SNAPSHOT_INTERVAL_SEC = int(os.environ.get("REGIME_SNAPSHOT_INTERVAL_SEC", "300"))
+
+
+def _snapshot_age_seconds(detected_at: Optional[str]) -> float:
+    if not detected_at or not str(detected_at).strip():
+        return float("inf")
+    try:
+        s = str(detected_at).strip()[:19]
+        dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+        return (datetime.now() - dt).total_seconds()
+    except ValueError:
+        return float("inf")
+
+
 # ── Connection mode ──────────────────────────────────────────────────────────
 try:
     from dotenv import load_dotenv as _load_dotenv
@@ -162,21 +177,25 @@ class RegimeHistoryStorage:
             cursor = conn.cursor()
 
             cursor.execute(
-                "SELECT regime, confidence, detect_error FROM regime_history ORDER BY id DESC LIMIT 1"
+                "SELECT regime, confidence, detect_error, detected_at FROM regime_history ORDER BY id DESC LIMIT 1"
             )
             row = cursor.fetchone()
             if row:
                 if _MODE == "sqlite":
                     last = dict(row)
                 else:
-                    last = dict(zip(["regime", "confidence", "detect_error"], row))
-                if (
+                    last = dict(
+                        zip(["regime", "confidence", "detect_error", "detected_at"], row)
+                    )
+                same_state = (
                     last.get("regime") == regime
                     and last.get("confidence") == confidence
                     and _norm_err(last.get("detect_error")) == _norm_err(detect_error)
-                ):
+                )
+                # Önceden: aynı rejimde hiç insert yoktu → dashboard SPY/VIX haftalarca eski kalıyordu.
+                if same_state and _snapshot_age_seconds(last.get("detected_at")) < REGIME_SNAPSHOT_INTERVAL_SEC:
                     conn.close()
-                    return None  # No change, skip
+                    return None
 
             p = _ph()
             placeholders = ", ".join([p] * 9)

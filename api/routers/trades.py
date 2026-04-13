@@ -129,6 +129,9 @@ def update_prices(user_id: Optional[str] = Depends(get_current_user_id)):
     """Fetch latest prices and update all open/pending trades."""
     tracker = get_paper_tracker()
     storage = get_paper_storage()
+    # Resolve PENDING → OPEN/REJECTED first (same rules as /api/pending/check).
+    # Without this, pending only advances when the Pending page is opened.
+    tracker.confirm_pending_trades(user_id)
     updated = tracker.update_all_open_trades(user_id)
     # Record that a price refresh was triggered (even if there were no open trades)
     storage.touch_last_price_update()

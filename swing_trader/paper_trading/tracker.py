@@ -14,7 +14,7 @@ V4 Improvements (over V3):
 
 import logging
 from typing import Dict, List, Tuple, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import yfinance as yf
 import pandas as pd
 
@@ -45,6 +45,9 @@ MAX_STOP_BY_TYPE = {
     'S': 0.12,   # Squeeze — wider swings normal
 }
 MAX_STOP_DEFAULT = 0.10
+
+# PENDING: if still unresolved after this many calendar days, auto-REJECT (data gaps / user never opened UI)
+MAX_STALE_PENDING_CALENDAR_DAYS = 14
 
 
 class PaperTradeTracker:
@@ -459,39 +462,71 @@ class PaperTradeTracker:
         pending = [t for t in open_trades if t.get('status') == 'PENDING']
         
         today_str = datetime.now().strftime('%Y-%m-%d')
+        today_d = date.today()
         for trade in pending:
             ticker = trade['ticker']
             signal_price = trade.get('signal_price') or trade['entry_price']
             signal_date = trade['entry_date'][:10]  # sadece YYYY-MM-DD kısmı
             trade_id = trade['id']
             
-            # Fetch price data: wider range to handle weekends, holidays, and signal_date = today
+            # Fetch price data: extend end through "today" so long-idle pending rows still resolve
             try:
                 start_dt = datetime.strptime(signal_date, '%Y-%m-%d')
-                fetch_start = (start_dt - timedelta(days=10)).strftime('%Y-%m-%d')
-                fetch_end = (start_dt + timedelta(days=15)).strftime('%Y-%m-%d')
+                signal_dt = start_dt.date()
+                pending_age_days = (today_d - signal_dt).days
+                stale = pending_age_days > MAX_STALE_PENDING_CALENDAR_DAYS
+
+                fetch_start = (signal_dt - timedelta(days=10)).strftime('%Y-%m-%d')
+                end_cap = max(signal_dt + timedelta(days=15), today_d)
+                fetch_end = end_cap.strftime('%Y-%m-%d')
                 price_data = self.fetch_price_history(ticker, fetch_start, fetch_end)
                 
                 if price_data is None or len(price_data) == 0:
-                    logger.warning(
-                        f"[{ticker}] PENDING kalıyor: yfinance veri döndürmedi "
-                        f"(signal_date={signal_date})"
-                    )
-                    trade['confirm_status'] = 'waiting'
-                    results.append(trade)
+                    if stale:
+                        exit_d = today_str
+                        self.storage.close_trade(
+                            trade_id, signal_price, exit_d, 'REJECTED',
+                            "REJECTED: Pending expired — no market data after extended wait",
+                            user_id,
+                        )
+                        trade['confirm_status'] = 'expired'
+                        trade['reject_reason'] = "No market data (stale pending)"
+                        results.append(trade)
+                        logger.warning(
+                            f"[{ticker}] PENDING → REJECTED (stale, no yfinance data) signal_date={signal_date}"
+                        )
+                    else:
+                        logger.warning(
+                            f"[{ticker}] PENDING kalıyor: yfinance veri döndürmedi "
+                            f"(signal_date={signal_date})"
+                        )
+                        trade['confirm_status'] = 'waiting'
+                        results.append(trade)
                     continue
                 
                 # Find first trading day AFTER signal_date (next-day Open)
-                signal_dt = start_dt.date() if hasattr(start_dt, 'date') else start_dt
                 next_days = price_data[price_data['Date'] > signal_dt]
                 
                 if len(next_days) == 0:
-                    logger.info(
-                        f"[{ticker}] PENDING kalıyor: signal_date={signal_date} sonrası henüz işlem günü yok "
-                        f"(bugün son veri: {today_str})"
-                    )
-                    trade['confirm_status'] = 'waiting'
-                    results.append(trade)
+                    if stale:
+                        self.storage.close_trade(
+                            trade_id, signal_price, today_str, 'REJECTED',
+                            "REJECTED: Pending expired — no session after signal date",
+                            user_id,
+                        )
+                        trade['confirm_status'] = 'expired'
+                        trade['reject_reason'] = "No trading day after signal (stale)"
+                        results.append(trade)
+                        logger.warning(
+                            f"[{ticker}] PENDING → REJECTED (stale, no next session) signal_date={signal_date}"
+                        )
+                    else:
+                        logger.info(
+                            f"[{ticker}] PENDING kalıyor: signal_date={signal_date} sonrası henüz işlem günü yok "
+                            f"(bugün son veri: {today_str})"
+                        )
+                        trade['confirm_status'] = 'waiting'
+                        results.append(trade)
                     continue
                 
                 next_day = next_days.iloc[0]

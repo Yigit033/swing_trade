@@ -10,7 +10,9 @@ import {
     useState,
     type ReactNode,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { startSmallcapScanJob, getSmallcapScanJob } from "@/lib/api";
+import { queryKeys } from "@/hooks/useApi";
 
 /** Job id — localStorage: yeni sekme / aynı origin’de polling devam eder */
 const STORAGE_JOB_KEY = "scanner_active_job_id";
@@ -92,6 +94,7 @@ function persistScanResultToSession(payload: {
 }
 
 export function ScannerJobProvider({ children }: { children: ReactNode }) {
+    const queryClient = useQueryClient();
     const [jobId, setJobId] = useState<string | null>(null);
     const [poll, setPoll] = useState<ScanJobPollState | null>(null);
     const [scanError, setScanError] = useState<string | null>(null);
@@ -130,6 +133,7 @@ export function ScannerJobProvider({ children }: { children: ReactNode }) {
                     setJobId(null);
                     setScanError(null);
                     persistScanResultToSession(d.result);
+                    void queryClient.invalidateQueries({ queryKey: queryKeys.regime });
                     if (typeof window !== "undefined") {
                         window.dispatchEvent(
                             new CustomEvent(EVENT_COMPLETE, { detail: d.result })
@@ -172,7 +176,7 @@ export function ScannerJobProvider({ children }: { children: ReactNode }) {
             cancelled = true;
             clearInterval(interval);
         };
-    }, [jobId]);
+    }, [jobId, queryClient]);
 
     const startBackgroundScan = useCallback(
         async (params: { min_quality: number; top_n: number; portfolio_value: number }) => {

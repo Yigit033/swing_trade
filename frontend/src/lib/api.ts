@@ -159,7 +159,7 @@ export interface Signal {
     expiration_date?: string;
     volatility_warning?: boolean;
     // Narrative
-    narrative?: { full_text?: string; headline?: string;[key: string]: any };
+    narrative?: { full_text?: string; headline?: string; [key: string]: unknown };
     narrative_text?: string;
     narrative_headline?: string;
     // Info
@@ -236,6 +236,33 @@ export const startSmallcapScanJob = (params: {
 export const getSmallcapScanJob = (jobId: string) =>
     api.get(`/api/scanner/smallcap/job/${encodeURIComponent(jobId)}`, { timeout: 20000 }).then((r) => r.data);
 
+// Scanner — saved history (server-side)
+export type SmallcapScanRunMeta = {
+    id: number;
+    created_at: string;
+    job_id?: string | null;
+    user_id?: string | null;
+    portfolio_value?: number | null;
+    request_min_quality?: number | null;
+    request_top_n?: number | null;
+    effective_min_quality?: number | null;
+    effective_top_n?: number | null;
+    market_regime?: string | null;
+    regime_confidence?: string | null;
+};
+
+export type SmallcapScanRunDetail = SmallcapScanRunMeta & {
+    stats?: Record<string, unknown>;
+    signals?: Signal[];
+    stale_fallback?: boolean;
+};
+
+export const getSmallcapScanHistory = (limit = 20) =>
+    api.get("/api/scanner/smallcap/history", { params: { limit }, timeout: 20000 }).then((r) => r.data as { runs: SmallcapScanRunMeta[]; count: number });
+
+export const getSmallcapScanHistoryRun = (runId: number) =>
+    api.get(`/api/scanner/smallcap/history/${runId}`, { timeout: 30000 }).then((r) => r.data as SmallcapScanRunDetail);
+
 /** Senkron scan (script / legacy); UI için startSmallcapScanJob kullan */
 export const runSmallcapScan = (params: {
     min_quality?: number;
@@ -269,6 +296,11 @@ export interface RegimeData {
     detected_at?: string;
     /** Present when regime is UNKNOWN (e.g. rate limit, insufficient data). */
     detect_error?: string;
+    /** True when live yfinance failed and values come from last DB row. */
+    stale_fallback?: boolean;
+    fallback_reason?: string;
+    /** True when sampled fresh from SPY/^VIX (same path as scanner). */
+    live?: boolean;
 }
 
 export const getCurrentRegime = (): Promise<RegimeData> =>

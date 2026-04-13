@@ -18,7 +18,13 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Callable, Optional
 
-from api.deps import get_smallcap_engine, get_paper_tracker, get_fetcher, get_regime_storage
+from api.deps import (
+    get_smallcap_engine,
+    get_paper_tracker,
+    get_fetcher,
+    get_regime_storage,
+    get_signal_history_storage,
+)
 from api.auth import get_current_user_id
 from api.utils import flatten_yf_df, sanitize_for_json, fetch_ticker_history
 from api.scanner_jobs import (
@@ -192,6 +198,9 @@ def _scan_regime_and_thresholds(
 def _execute_smallcap_scan(
     body: ScanRequest,
     on_progress: Optional[Callable[[int, str, str], None]] = None,
+    *,
+    job_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> dict:
     """Core scan logic; optional on_progress(percent, phase, message)."""
     def prog(pct: int, phase: str, message: str) -> None:
@@ -262,12 +271,33 @@ def _execute_smallcap_scan(
     err = rd.get("detect_error")
     if err:
         stats["regime_detect_error"] = err
+
+    # Persist scan result for future analysis (non-critical).
+    try:
+        get_signal_history_storage().save_run(
+            job_id=job_id,
+            user_id=user_id,
+            portfolio_value=body.portfolio_value,
+            request_min_quality=body.min_quality,
+            request_top_n=body.top_n,
+            effective_min_quality=effective_min_quality,
+            effective_top_n=effective_top_n,
+            market_regime=actual_regime,
+            regime_confidence=regime_confidence,
+            stats=stats,
+            signals=filtered,
+        )
+    except Exception:
+        logger.debug("Signal history save skipped (non-critical)")
     prog(97, "finalize", "Done")
     return sanitize_for_json({"signals": filtered, "stats": stats, "market_regime": actual_regime})
 
 
 @router.post("/smallcap/start")
-def start_smallcap_scan(body: ScanRequest):
+def start_smallcap_scan(
+    body: ScanRequest,
+    user_id: Optional[str] = Depends(get_current_user_id),
+):
     """
     Start scan in a background thread. Returns immediately with job_id.
     Poll GET /api/scanner/smallcap/job/{job_id} until status is completed|failed.
@@ -284,7 +314,7 @@ def start_smallcap_scan(body: ScanRequest):
         )
 
     def _run(body_inner: ScanRequest, progress_cb: Callable[[int, str, str], None]) -> dict:
-        return _execute_smallcap_scan(body_inner, progress_cb)
+        return _execute_smallcap_scan(body_inner, progress_cb, job_id=job_id, user_id=user_id)
 
     thread = threading.Thread(
         target=run_scan_worker,
@@ -306,10 +336,13 @@ def get_smallcap_scan_job(job_id: str):
 
 
 @router.post("/smallcap")
-def run_smallcap_scan(body: ScanRequest):
+def run_smallcap_scan(
+    body: ScanRequest,
+    user_id: Optional[str] = Depends(get_current_user_id),
+):
     """Synchronous scan (legacy / scripts). Prefer POST /smallcap/start for UI."""
     try:
-        return _execute_smallcap_scan(body, on_progress=None)
+        return _execute_smallcap_scan(body, on_progress=None, job_id=None, user_id=user_id)
     except Exception as e:
         logger.exception("SmallCap scan failed")
         return sanitize_for_json(
@@ -320,3 +353,25 @@ def run_smallcap_scan(body: ScanRequest):
                 "error": str(e),
             }
         )
+
+
+@router.get("/smallcap/history")
+def list_smallcap_scan_history(
+    limit: int = Query(20, ge=1, le=200),
+    user_id: Optional[str] = Depends(get_current_user_id),
+):
+    """List recent saved scan runs (metadata only)."""
+    rows = get_signal_history_storage().list_runs(limit=limit, user_id=user_id)
+    return sanitize_for_json({"runs": rows, "count": len(rows)})
+
+
+@router.get("/smallcap/history/{run_id}")
+def get_smallcap_scan_history(
+    run_id: int,
+    user_id: Optional[str] = Depends(get_current_user_id),
+):
+    """Fetch one saved scan run including full signals payload."""
+    row = get_signal_history_storage().get_run(run_id, user_id=user_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Unknown run_id")
+    return sanitize_for_json(row)

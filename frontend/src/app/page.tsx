@@ -1,7 +1,7 @@
 "use client";
 import { usePerformance, usePending, useRegime } from "@/hooks/useApi";
-import type { PerformanceSummary, Trade } from "@/lib/api";
-import { TrendingUp, TrendingDown, Activity, Clock, BarChart2, Target } from "lucide-react";
+import type { Trade } from "@/lib/api";
+import { TrendingUp, TrendingDown, Activity, Clock, Target } from "lucide-react";
 
 function MetricCard({
   label, value, sub, positive, icon: Icon, color = "blue"
@@ -159,6 +159,11 @@ export default function DashboardPage() {
                 5d {regime.spy_5d_return >= 0 ? "+" : ""}{regime.spy_5d_return.toFixed(1)}%
               </span>
             )}
+            {regime.stale_fallback ? (
+              <span style={{ fontSize: "0.68rem", color: "var(--yellow)", opacity: 0.9 }}>
+                (önbellek — canlı SPY/VIX alınamadı)
+              </span>
+            ) : null}
           </div>
           ) : null}
         </div>
