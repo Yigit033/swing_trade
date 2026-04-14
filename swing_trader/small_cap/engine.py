@@ -7,7 +7,7 @@ for short-term momentum swings (2-14 days).
 """
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, MutableMapping
 from datetime import datetime
 import pandas as pd
 
@@ -24,6 +24,12 @@ from .regime_logic import rs_bonus_vs_spy
 from .settings_config import load_settings
 
 logger = logging.getLogger(__name__)
+
+
+def _bump_scan_reject(reject_counts: Optional[MutableMapping[str, int]], key: str) -> None:
+    if reject_counts is None:
+        return
+    reject_counts[key] = reject_counts.get(key, 0) + 1
 
 
 class SmallCapEngine:
@@ -327,6 +333,7 @@ class SmallCapEngine:
         backtest_mode: bool = False,
         portfolio_value: float = 10000,
         spy_df_window: Optional[pd.DataFrame] = None,
+        reject_counts: Optional[MutableMapping[str, int]] = None,
     ) -> Optional[Dict]:
         """
         Scan a single stock for small-cap momentum signal.
@@ -337,6 +344,7 @@ class SmallCapEngine:
         """
         if df is None or len(df) < 20:
             logger.debug(f"{ticker}: Insufficient data")
+            _bump_scan_reject(reject_counts, "insufficient_data")
             return None
         
         try:
@@ -378,6 +386,7 @@ class SmallCapEngine:
             
             if not filter_passed:
                 logger.debug(f"{ticker}: Failed filter - {filter_results.get('filters', {})}")
+                _bump_scan_reject(reject_counts, "filter_failed")
                 return None
             
             # Step 2: Check signal triggers
@@ -385,6 +394,7 @@ class SmallCapEngine:
             
             if not triggered:
                 logger.debug(f"{ticker}: No trigger - {trigger_details.get('triggers', {})}")
+                _bump_scan_reject(reject_counts, "no_trigger")
                 return None
             
             # Step 3: Get boosters (includes swing confirmation)
@@ -403,6 +413,7 @@ class SmallCapEngine:
                     f"{ticker}: Failed swing confirmation - "
                     f"5d_mom={five_day.get('passed')}, ma20={ma20.get('passed')}"
                 )
+                _bump_scan_reject(reject_counts, "swing_not_ready")
                 return None
             
             # Step 4: Calculate quality score (includes penalties)
@@ -508,6 +519,7 @@ class SmallCapEngine:
             max_rsi = self.settings.max_entry_rsi
             if rsi > max_rsi and swing_type != 'S':
                 logger.debug(f"{ticker}: RSI {rsi:.0f} > {max_rsi} — rejected (overbought, not squeeze)")
+                _bump_scan_reject(reject_counts, "rsi_gate")
                 return None
 
             # V4: Hard overextension gate — reject late entries (except squeeze candidates)
@@ -535,6 +547,7 @@ class SmallCapEngine:
                     f"{ticker}: OBV Distribution — hard reject "
                     f"(smart money exiting, type={swing_type})"
                 )
+                _bump_scan_reject(reject_counts, "obv_distribution")
                 return None
 
             # ================================================================
@@ -551,6 +564,7 @@ class SmallCapEngine:
                         f"{ticker}: Weak trend phase '{trend_phase}' "
                         f"(strength={trend_strength}) — rejected"
                     )
+                    _bump_scan_reject(reject_counts, "trend_phase_weak")
                     return None
 
             # Inject swing_type into boosters so scoring uses correct RSI penalty bands
@@ -718,6 +732,7 @@ class SmallCapEngine:
             
         except Exception as e:
             logger.error(f"Error scanning {ticker}: {e}", exc_info=True)
+            _bump_scan_reject(reject_counts, "scan_error")
             return None
     
     def scan_universe(
@@ -739,7 +754,7 @@ class SmallCapEngine:
         """
         signals = []
         scanned = 0
-        filter_failed = 0
+        reject_counts: Dict[str, int] = {}
 
         logger.info(f"SmallCapEngine: Scanning {len(tickers)} stocks")
 
@@ -754,7 +769,7 @@ class SmallCapEngine:
             df = data_dict[ticker]
             scanned += 1
 
-            signal = self.scan_stock(ticker, df)
+            signal = self.scan_stock(ticker, df, reject_counts=reject_counts)
 
             if signal:
                 # Keep regime info for UI, but do not modify score (regime effect removed).
@@ -765,17 +780,20 @@ class SmallCapEngine:
                 if portfolio_value != 10000:
                     signal = self.risk.add_risk_management(signal, df, portfolio_value)
                 signals.append(signal)
-            else:
-                filter_failed += 1
 
         # Sort by quality score (highest first)
         signals.sort(key=lambda x: x.get('quality_score', 0), reverse=True)
 
+        self._last_scan_reject_counts = reject_counts
+        no_signal = scanned - len(signals)
+        top_rejects = sorted(reject_counts.items(), key=lambda kv: -kv[1])[:5]
+        reject_summary = ", ".join(f"{k}={v}" for k, v in top_rejects) if top_rejects else ""
         logger.info(
             f"SmallCapEngine: Scanned {scanned} | "
             f"Signals: {len(signals)} | "
-            f"Filtered: {filter_failed} | "
+            f"No signal: {no_signal} | "
             f"Regime: {market_regime['regime']}"
+            + (f" | Rejects: {reject_summary}" if reject_summary else "")
         )
 
         return signals

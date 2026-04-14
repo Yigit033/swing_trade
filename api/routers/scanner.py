@@ -254,11 +254,13 @@ def _execute_smallcap_scan(
     except Exception:
         logger.debug("Regime save skipped (non-critical)")
 
+    reject_counts = getattr(engine, "_last_scan_reject_counts", None) or {}
     stats = {
         "stocks_scanned": len(tickers),
         "stocks_with_data": len(data_dict),
         "raw_signals": len(signals),
         "filtered_signals": len(filtered),
+        "reject_counts": dict(sorted(reject_counts.items(), key=lambda kv: (-kv[1], kv[0]))),
         "reason": "success" if filtered else "no_qualifying",
         "regime_multiplier": regime_multiplier,
         "regime_confidence": regime_confidence,

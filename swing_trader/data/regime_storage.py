@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS regime_history (
     vix             REAL,
     spy_5d_return   REAL,
     detect_error    TEXT,
+    score_multiplier REAL NOT NULL DEFAULT 1.0,
     created_at      TEXT DEFAULT CURRENT_TIMESTAMP
 )
 """
@@ -105,6 +106,7 @@ CREATE TABLE IF NOT EXISTS regime_history (
     vix             REAL,
     spy_5d_return   REAL,
     detect_error    TEXT,
+    score_multiplier REAL NOT NULL DEFAULT 1.0,
     created_at      TEXT DEFAULT CURRENT_TIMESTAMP
 )
 """
@@ -127,6 +129,24 @@ def _migrate_add_detect_error(cursor) -> None:
         cursor.execute("ALTER TABLE regime_history ADD COLUMN detect_error TEXT")
 
 
+def _migrate_ensure_score_multiplier(cursor) -> None:
+    """
+    Legacy Supabase / older DBs may have score_multiplier NOT NULL; app always
+    persists 1.0 (regime no longer scales scores).
+    """
+    if _MODE == "pg":
+        cursor.execute(
+            "ALTER TABLE regime_history ADD COLUMN IF NOT EXISTS score_multiplier REAL DEFAULT 1.0"
+        )
+        return
+    cursor.execute("PRAGMA table_info(regime_history)")
+    cols = {r[1] for r in cursor.fetchall()}
+    if "score_multiplier" not in cols:
+        cursor.execute(
+            "ALTER TABLE regime_history ADD COLUMN score_multiplier REAL NOT NULL DEFAULT 1.0"
+        )
+
+
 class RegimeHistoryStorage:
     """Persist and query market regime history."""
 
@@ -142,6 +162,7 @@ class RegimeHistoryStorage:
             cursor.execute(sql)
             cursor.execute(_CREATE_INDEX)
             _migrate_add_detect_error(cursor)
+            _migrate_ensure_score_multiplier(cursor)
             conn.commit()
             conn.close()
         except Exception as e:
@@ -161,6 +182,10 @@ class RegimeHistoryStorage:
         ma200 = regime_data.get('ma200', 0)
         vix = regime_data.get('vix', 0)
         spy_5d_return = regime_data.get('spy_5d_return', 0)
+        try:
+            score_multiplier = float(regime_data.get("score_multiplier", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            score_multiplier = 1.0
         raw_err = regime_data.get("detect_error")
         detect_error: Optional[str]
         if raw_err is None or (isinstance(raw_err, str) and not raw_err.strip()):
@@ -198,10 +223,10 @@ class RegimeHistoryStorage:
                     return None
 
             p = _ph()
-            placeholders = ", ".join([p] * 9)
+            placeholders = ", ".join([p] * 10)
             insert_sql = f"""
                 INSERT INTO regime_history
-                (detected_at, regime, confidence, spy_price, ma50, ma200, vix, spy_5d_return, detect_error)
+                (detected_at, regime, confidence, spy_price, ma50, ma200, vix, spy_5d_return, detect_error, score_multiplier)
                 VALUES ({placeholders})
             """
             params = (
@@ -214,6 +239,7 @@ class RegimeHistoryStorage:
                 vix,
                 spy_5d_return,
                 detect_error,
+                score_multiplier,
             )
             if _MODE == "pg":
                 cursor.execute(insert_sql + " RETURNING id", params)

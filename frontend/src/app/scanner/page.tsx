@@ -7,6 +7,30 @@ import type { Signal } from "@/lib/api";
 import { Search, Plus, TrendingUp, AlertTriangle, Settings, ChevronDown, ChevronUp, Star, Zap, Shield, Target, BarChart2, SlidersHorizontal, Sparkles } from "lucide-react";
 
 /* ───── helpers ───── */
+/** Engine scan_stock early-exit reasons (API stats.reject_counts). */
+const SCAN_REJECT_LABELS: Record<string, string> = {
+    insufficient_data: "Veri yetersiz",
+    filter_failed: "Evren filtresi",
+    no_trigger: "Tetik yok",
+    swing_not_ready: "Swing onayı",
+    rsi_gate: "RSI eşiği",
+    late_entry: "Geç giriş",
+    obv_distribution: "OBV dağıtım",
+    trend_phase_weak: "Zayıf trend",
+    scan_error: "Tarama hatası",
+};
+
+function formatRejectSummary(stats: Record<string, unknown>): string | null {
+    const rc = stats.reject_counts;
+    if (!rc || typeof rc !== "object" || Array.isArray(rc)) return null;
+    const entries = Object.entries(rc as Record<string, unknown>)
+        .filter(([, v]) => typeof v === "number" && (v as number) > 0)
+        .sort((a, b) => (b[1] as number) - (a[1] as number))
+        .slice(0, 8);
+    if (entries.length === 0) return null;
+    return entries.map(([k, v]) => `${SCAN_REJECT_LABELS[k] ?? k}: ${v}`).join(" · ");
+}
+
 function QualityBadge({ score }: { score: number }) {
     const cls = score >= 80 ? "badge-green" : score >= 65 ? "badge-blue" : "badge-yellow";
     const emoji = score >= 80 ? "🔥" : score >= 65 ? "✅" : "⚠️";
@@ -822,7 +846,7 @@ export default function ScannerPage() {
                                 </span>
                                 {regime === "UNKNOWN" ? (
                                     <span style={{ fontSize: "0.6rem", color: "var(--text-muted)", fontWeight: 500 }}>
-                                        Veri yok · ×1
+                                        Veri yok
                                     </span>
                                 ) : regimeConfidence === "TENTATIVE" ? (
                                     <span style={{ fontSize: "0.6rem", color: "var(--text-muted)", background: "rgba(255,255,255,0.06)", padding: "2px 6px", borderRadius: 4, fontWeight: 500 }}>
@@ -841,6 +865,28 @@ export default function ScannerPage() {
                             <div style={{ fontSize: "1.4rem", fontWeight: 800 }}>{(result.stats as Record<string, number>).raw_signals || "—"}</div>
                         </div>
                     </div>
+
+                    {(() => {
+                        const rejectLine = formatRejectSummary(result.stats as Record<string, unknown>);
+                        if (!rejectLine) return null;
+                        return (
+                            <div
+                                style={{
+                                    fontSize: "0.8rem",
+                                    color: "var(--text-muted)",
+                                    marginBottom: 16,
+                                    lineHeight: 1.5,
+                                    padding: "10px 14px",
+                                    background: "rgba(255,255,255,0.03)",
+                                    border: "1px solid var(--border)",
+                                    borderRadius: 10,
+                                }}
+                            >
+                                <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>Ham sinyal öncesi elenmeler: </span>
+                                {rejectLine}
+                            </div>
+                        );
+                    })()}
 
                     <AppliedThresholdPanel
                         stats={result.stats}
