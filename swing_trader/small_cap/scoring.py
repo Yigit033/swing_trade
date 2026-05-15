@@ -134,25 +134,31 @@ class SmallCapScoring:
     def score_momentum_continuity(self, df: pd.DataFrame) -> float:
         """
         Score momentum continuity (0-15 points).
-        Higher highs / higher closes = momentum persisting.
+
+        Uses a 5-bar window (not 3) to reduce noise and capture the actual
+        price structure trend rather than reacting to a single outlier candle.
+        Scores on majority-vote higher highs/closes across the window.
         """
         mp = self._st.momentum_points
-        if df is None or len(df) < 3:
+        if df is None or len(df) < 5:
             return float(mp.insufficient_bars_score)
 
         score = 0
 
         try:
-            highs = df["High"].tail(3).values
-            if highs[2] > highs[1] > highs[0]:
+            # 5-bar window: majority-vote higher highs (3 of 4 transitions)
+            highs = df["High"].tail(5).values
+            hh_transitions = sum(1 for i in range(1, len(highs)) if highs[i] > highs[i - 1])
+            if hh_transitions >= 4:          # 4/4 — strong trend
                 score += mp.higher_highs_full
-            elif highs[2] > highs[1]:
+            elif hh_transitions >= 3:        # 3/4 — majority
                 score += mp.higher_highs_partial
 
-            closes = df["Close"].tail(3).values
-            if closes[2] > closes[1] > closes[0]:
+            closes = df["Close"].tail(5).values
+            hc_transitions = sum(1 for i in range(1, len(closes)) if closes[i] > closes[i - 1])
+            if hc_transitions >= 4:
                 score += mp.higher_closes_full
-            elif closes[2] > closes[1]:
+            elif hc_transitions >= 3:
                 score += mp.higher_closes_partial
 
             today_close = df["Close"].iloc[-1]
@@ -396,6 +402,14 @@ class SmallCapScoring:
             # OBV Trend (v3.0 — Smart Money detection)
             obv_bonus = boosters.get('obv_bonus', 0)
             bonus += obv_bonus  # +8 accumulation, +4 confirm, -5 distribution
+
+            # VCP Pattern (Minervini) — tight base before breakout
+            vcp_bonus = boosters.get('vcp_bonus', 0)
+            bonus += vcp_bonus  # +15 perfect, +10 strong, +6 valid, +3 forming
+
+            # Weinstein Stage — only buy Stage 2 markup
+            weinstein_bonus = boosters.get('weinstein_bonus', 0)
+            bonus += weinstein_bonus  # +10 Stage 2, +3 Stage 1, -3 Stage 3, -10 Stage 4
 
             # v5.0: Golden Cross bonus
             trend_data = boosters.get('swing_details', {}).get('trend_quality', {})

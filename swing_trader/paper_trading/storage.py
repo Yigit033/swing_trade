@@ -658,3 +658,46 @@ class PaperTradeStorage:
         finally:
             if conn:
                 conn.close()
+
+    def check_cooldown_active(
+        self, ticker: str, cooldown_days: int, user_id: Optional[str] = None
+    ) -> bool:
+        """
+        Return True if ticker has a recently CLOSED trade within the cooldown window.
+
+        Prevents rapid re-entry into the same ticker after a recent loss.
+        Checks exit_date (when we got out), not entry_date, so the cooldown
+        clock starts from when the trade was actually closed.
+        """
+        from datetime import timedelta
+        cutoff = (datetime.now() - timedelta(days=cooldown_days)).strftime('%Y-%m-%d')
+        ph = _ph()
+        conn = None
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            if user_id:
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM paper_trades
+                    WHERE ticker = {ph}
+                    AND exit_date IS NOT NULL
+                    AND exit_date >= {ph}
+                    AND status NOT IN ('OPEN', 'PENDING')
+                    AND (user_id IS NULL OR user_id = {ph})
+                """, (ticker, cutoff, user_id))
+            else:
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM paper_trades
+                    WHERE ticker = {ph}
+                    AND exit_date IS NOT NULL
+                    AND exit_date >= {ph}
+                    AND status NOT IN ('OPEN', 'PENDING')
+                """, (ticker, cutoff))
+            count = cursor.fetchone()[0]
+            return count > 0
+        except Exception as e:
+            logger.error(f"Error checking cooldown for {ticker}: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()

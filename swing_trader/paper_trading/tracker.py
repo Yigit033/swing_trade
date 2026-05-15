@@ -171,6 +171,9 @@ class PaperTradeTracker:
 
             # ── 1. CHECK STOP LOSS first (before trail update — correct temporal order) ──
             if low <= active_stop:
+                # Gap-down through stop: exit at Open (realistic slippage) — VERIFIED CORRECT.
+                # If Open > stop (stock opened above stop, traded down intraday), exit at stop.
+                # This accurately models overnight gap risk (e.g. UMAC -16%: gap opened below stop).
                 if today_open <= active_stop:
                     exit_price = today_open
                 else:
@@ -436,12 +439,28 @@ class PaperTradeTracker:
             'status': 'PENDING'
         }
         
-        # Check for duplicate (sadece tarih kısmıyla karşılaştır)
+        # Check for same-day duplicate (OPEN/PENDING only)
         date_only = trade['entry_date'][:10]
         if self.storage.check_duplicate(trade['ticker'], date_only, user_id):
             logger.warning(f"Trade already exists: {trade['ticker']} on {date_only}")
             return -1
-        
+
+        # Cooldown: block re-entry within N days of a recently CLOSED trade.
+        # Clock starts from exit_date (not entry_date) so a 5-day hold doesn't
+        # eat the entire cooldown window before we even get out.
+        try:
+            from ..small_cap.settings_config import load_settings
+            cooldown_days = load_settings().cooldown_days
+        except Exception:
+            cooldown_days = 5
+        if cooldown_days > 0 and self.storage.check_cooldown_active(
+            trade['ticker'], cooldown_days, user_id
+        ):
+            logger.warning(
+                f"Cooldown active for {trade['ticker']}: closed within last {cooldown_days} days"
+            )
+            return -2
+
         return self.storage.add_trade(trade, user_id)
     
     def confirm_pending_trades(self, user_id: Optional[str] = None) -> List[Dict]:
@@ -563,6 +582,8 @@ class PaperTradeTracker:
                 # Recalculate stop/target based on actual entry (Open)
                 atr = trade.get('atr') or 0
                 swing_type = trade.get('swing_type', 'A')
+                orig_stop_pct = (signal_price - trade['stop_loss']) / signal_price if signal_price > 0 else 0.08
+                orig_target_pct = (trade['target'] - signal_price) / signal_price if signal_price > 0 else 0.15
                 if atr > 0:
                     stop_loss = round(open_price - (atr * CONFIRM_ATR_MULTIPLIER), 2)
                     max_stop_pct = MAX_STOP_BY_TYPE.get(swing_type, MAX_STOP_DEFAULT)
@@ -570,12 +591,18 @@ class PaperTradeTracker:
                     if stop_loss < max_stop:
                         stop_loss = round(max_stop, 2)
 
+                    # Scale original signal T1 to the actual open price.
+                    # The signal already applied type-specific ATR caps (e.g. 8% for Type C),
+                    # so using those percentages prevents confirming with an inflated 2R target
+                    # that exceeds the type cap and prevents T1 partial from ever triggering.
+                    target = round(open_price * (1 + orig_target_pct), 2)
+                    # Floor: target must be at least 1R beyond entry (not 2R — that was too far)
                     risk_distance = open_price - stop_loss
-                    target = round(open_price + (risk_distance * CONFIRM_TARGET_R), 2)
+                    min_target = round(open_price + risk_distance, 2)
+                    if target < min_target:
+                        target = min_target
                 else:
                     # Fallback: use percentage-based from original signal
-                    orig_stop_pct = (signal_price - trade['stop_loss']) / signal_price
-                    orig_target_pct = (trade['target'] - signal_price) / signal_price
                     stop_loss = round(open_price * (1 - orig_stop_pct), 2)
                     target = round(open_price * (1 + orig_target_pct), 2)
 

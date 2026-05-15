@@ -22,6 +22,7 @@ from .narrative import generate_signal_narrative
 from .technical_levels import calculate_technical_levels
 from .regime_logic import rs_bonus_vs_spy
 from .settings_config import load_settings
+from .patterns import detect_vcp, detect_weinstein_stage
 
 logger = logging.getLogger(__name__)
 
@@ -551,17 +552,23 @@ class SmallCapEngine:
                 return None
 
             # ================================================================
-            # V5.0: TREND QUALITY GATE — Reject weak trend phases
-            # If trend phase is "distribution" or "markdown", reject
-            # unless it's a squeeze candidate.
+            # V5.0: TREND QUALITY GATE — Reject only extreme downtrend cases.
+            #
+            # CHANGED: "distribution" is now excluded from hard reject because
+            # the Wyckoff "distribution" label here means "price fell + volume
+            # expanded" — which can also be panic selling (a buy opportunity).
+            # "markdown" (price fell + low volume) is kept but threshold lowered
+            # from 30 → 10, and Type C is exempt (pullback entry is its purpose).
+            #
+            # Both phases are already penalized in scoring (-8 pts).
             # ================================================================
             trend_data = swing_details.get("trend_quality", {})
             trend_phase = trend_data.get("trend_phase", "unknown")
-            if trend_phase in ("distribution", "markdown") and swing_type != 'S':
+            if trend_phase == "markdown" and swing_type not in ('S', 'C'):
                 trend_strength = trend_data.get("trend_strength", 50)
-                if trend_strength < 30:
+                if trend_strength < 10:
                     logger.debug(
-                        f"{ticker}: Weak trend phase '{trend_phase}' "
+                        f"{ticker}: Extreme markdown phase "
                         f"(strength={trend_strength}) — rejected"
                     )
                     _bump_scan_reject(reject_counts, "trend_phase_weak")
@@ -569,6 +576,22 @@ class SmallCapEngine:
 
             # Inject swing_type into boosters so scoring uses correct RSI penalty bands
             boosters['swing_type'] = swing_type
+
+            # ================================================================
+            # VCP (Minervini) + Weinstein Stage Analysis
+            # ================================================================
+            vcp_data = detect_vcp(df)
+            stage_data = detect_weinstein_stage(df)
+            boosters['vcp_detected'] = vcp_data['detected']
+            boosters['vcp_contractions'] = vcp_data['contractions']
+            boosters['vcp_final_range_pct'] = vcp_data['final_range_pct']
+            boosters['vcp_volume_declining'] = vcp_data['volume_declining']
+            boosters['vcp_bonus'] = vcp_data['bonus']
+            boosters['weinstein_stage'] = stage_data['stage']
+            boosters['weinstein_stage_label'] = stage_data['stage_label']
+            boosters['weinstein_ma30'] = stage_data['ma30']
+            boosters['weinstein_ma30_rising'] = stage_data['ma30_rising']
+            boosters['weinstein_bonus'] = stage_data['bonus']
 
             quality_score = self.scoring.calculate_quality_score(
                 df, volume_surge, atr_percent, float_shares, boosters
@@ -644,6 +667,20 @@ class SmallCapEngine:
                 'obv_accumulation': boosters.get('obv_accumulation', False),
                 'obv_distribution': boosters.get('obv_distribution', False),
                 'obv_bonus': boosters.get('obv_bonus', 0),
+
+                # VCP Pattern (Minervini)
+                'vcp_detected': boosters.get('vcp_detected', False),
+                'vcp_contractions': boosters.get('vcp_contractions', 0),
+                'vcp_final_range_pct': boosters.get('vcp_final_range_pct', 0.0),
+                'vcp_volume_declining': boosters.get('vcp_volume_declining', False),
+                'vcp_bonus': boosters.get('vcp_bonus', 0),
+
+                # Weinstein Stage
+                'weinstein_stage': boosters.get('weinstein_stage', 0),
+                'weinstein_stage_label': boosters.get('weinstein_stage_label', 'Unknown'),
+                'weinstein_ma30': boosters.get('weinstein_ma30', 0.0),
+                'weinstein_ma30_rising': boosters.get('weinstein_ma30_rising', False),
+                'weinstein_bonus': boosters.get('weinstein_bonus', 0),
                 
                 # Filter/trigger details
                 'filter_results': filter_results,

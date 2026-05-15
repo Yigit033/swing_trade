@@ -59,16 +59,24 @@ class SmallCapSignals:
         logger.info("SmallCapSignals initialized (Senior Trader v2.0)")
     
     def calculate_volume_surge(self, df: pd.DataFrame, period: int = 20) -> float:
-        """Calculate current volume relative to 20-day average."""
+        """
+        Calculate current volume relative to the 20-day MEDIAN baseline.
+
+        Uses median instead of mean to prevent recent spike days from inflating
+        the baseline and making current elevated volume look "normal."
+        Example: a stock with a 5M spike 10 days ago has an inflated mean (~900K)
+        even if it normally trades 500K, so today's 750K looks like only 0.83x
+        instead of the correct 1.5x. Median is robust to these outliers.
+        """
         if df is None or len(df) < period + 1:
             return 0.0
-        
+
         try:
             current_vol = df['Volume'].iloc[-1]
-            avg_vol = df['Volume'].tail(period + 1).head(period).mean()
-            
-            return current_vol / avg_vol if avg_vol > 0 else 0.0
-            
+            baseline = df['Volume'].tail(period + 1).head(period).median()
+
+            return current_vol / baseline if baseline > 0 else 0.0
+
         except Exception as e:
             logger.error(f"Error calculating volume surge: {e}")
             return 0.0
@@ -710,42 +718,45 @@ class SmallCapSignals:
         ma20_distance = details["above_ma20"].get("distance", 0)
         ma20_ok = passed_ma or ma20_distance >= -self._ma20_max_below_pct
 
-        # NEW GATES:
-        # Gate A: MA20 slope must be rising (prevents entering fading trends)
-        ma20_slope_ok = trend.get("ma20_slope_ok", True)
-
-        # Gate B: Must not be too far below MA50 (rejects long-term downtrend bounce)
+        # MA50 gate: Must not be too far below MA50 (rejects long-term downtrend bounces)
         ma50_ok = trend.get("ma50_ok", True)
 
-        # Gate C: No rejection candle (bull trap / distribution candle)
+        # Soft signals (penalized in scoring but NOT hard gates):
+        # MA20 slope and rejection candle are scoring factors only.
+        # Removing them from hard gate prevents over-filtering after market corrections —
+        # post-selloff many stocks have flat/declining MA20 and recent red candles even
+        # while starting to turn bullish (exactly the Type C early entry setup).
+        ma20_slope_ok = trend.get("ma20_slope_ok", True)
         no_rejection = not trend.get("rejection_candle", False)
 
         details['swing_ready'] = (
             passed_5d
             and ma20_ok
-            and ma20_slope_ok
             and ma50_ok
-            and no_rejection
         )
 
-        # Log rejection reasons for debugging
+        # Log all gate results for debugging (soft gates shown as advisory only)
         if not details['swing_ready']:
             fail_reasons = []
             if not passed_5d:
                 fail_reasons.append(f"5d_mom={return_5d:+.1f}%")
             if not ma20_ok:
                 fail_reasons.append(f"MA20_dist={ma20_distance:+.1f}%")
-            if not ma20_slope_ok:
-                fail_reasons.append(f"MA20_slope={trend.get('ma20_slope_value', 0):+.3f}%")
             if not ma50_ok:
                 fail_reasons.append(f"MA50_dist={trend.get('ma50_distance_pct', 0):+.1f}%")
+            logger.debug("Swing confirmation failed: %s", " | ".join(fail_reasons))
+        else:
+            # Log soft advisory warnings (don't block, but will penalize score)
+            soft_warnings = []
+            if not ma20_slope_ok:
+                soft_warnings.append(f"MA20_slope={trend.get('ma20_slope_value', 0):+.3f}%")
             if not no_rejection:
                 rej = trend.get("rejection_details", {})
-                fail_reasons.append(
-                    f"rejection(gap={rej.get('gap_pct', 0):+.1f}%,"
-                    f"close_pos={rej.get('close_position', 0):.2f})"
+                soft_warnings.append(
+                    f"rejection_candle(close_pos={rej.get('close_position', 0):.2f})"
                 )
-            logger.debug("Swing confirmation failed: %s", " | ".join(fail_reasons))
+            if soft_warnings:
+                logger.debug("Swing soft warnings (scoring penalty applied): %s", " | ".join(soft_warnings))
         
         return details['swing_ready'], details
     

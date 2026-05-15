@@ -139,12 +139,24 @@ class SmallCapUniverse:
         """
         Calculate composite momentum score using multiple factors.
 
+        PHILOSOPHY (v4.1 — "Early Entry" Rebalance):
+        A senior trader enters BEFORE the crowd, not after. The composite score
+        now penalizes stocks that are already extended and rewards stocks that
+        are setting up (high RVOL but modest price change = accumulation phase).
+
         COMPOSITE SCORE = (
-            Relative_Volume_Score (40%) +    # Abnormal volume = institutional interest
-            Price_Change_Score (30%) +        # Today's move strength
-            Volume_Weight (20%) +             # Absolute liquidity
-            Close_Position_Score (10%)        # Close near high = buyer control
+            RVOL_Score         (rank_weight_rvol)   — abnormal volume = early institutional interest
+            Change_Score       (rank_weight_change)  — today's move, with hard chasing penalties
+            Volume_Score       (rank_weight_volume)  — absolute liquidity floor
+            MCap_Score         (rank_weight_mcap)    — sweet spot $300M-$800M
         )
+
+        KEY CHANGE vs v4.0:
+        - "Early Accumulation Bonus": high RVOL + modest change (+1% to +8%) = best setup
+          These are stocks being accumulated quietly before the move — highest priority.
+        - Change score penalizes > +10% harder (chasing zone).
+        - Source column is tracked so Setup-query stocks (RSI not overbought) get a
+          small early-entry bias in tie-breaking.
         """
         import numpy as np
 
@@ -164,7 +176,6 @@ class SmallCapUniverse:
         elif 'Relative Volume' in df.columns:
             df['rel_vol'] = pd.to_numeric(df['Relative Volume'], errors='coerce').fillna(1.0)
         else:
-            # Estimate relative volume from raw volume (less accurate)
             df['rel_vol'] = 1.0
 
         if 'Market Cap' in df.columns:
@@ -173,48 +184,50 @@ class SmallCapUniverse:
             df['mcap_numeric'] = 0.0
 
         # ============================================================
-        # COMPONENT 1: Relative Volume Score (40% weight)
-        # RVOL is the #1 signal for institutional interest
-        # ============================================================
+        # COMPONENT 1: Relative Volume Score (RVOL weight)
         # Scale: 1x=0, 1.5x=25, 2x=50, 3x=75, 5x+=100
+        # ============================================================
         df['rvol_score'] = np.clip((df['rel_vol'] - 1.0) / 4.0 * 100, 0, 100)
 
         # ============================================================
-        # COMPONENT 2: Price Change Score (25% weight — reduced from 30%)
-        # Sweet spot: +2% to +10% (early entry zone)
-        # V4: steeper chasing penalties — don't rank "already pumped" at top
+        # COMPONENT 2: Price Change Score (change weight)
+        # Sweet zone: +1% to +8% = early accumulation, not yet chased.
+        # > +10%: steep penalty (stock already pumped, late entry risk).
+        # Negative change on high RVOL = shakeout / accumulation (still ok).
         # ============================================================
         us = self._us
         change_pct = df['change_pct']
+
+        # Base score: scaled by absolute change, up moves get 1.5x bias
         change_abs = change_pct.abs()
         up_bias = (change_pct > 0).astype(float) * 1.5 + 0.5
-        df['change_score'] = np.clip(change_abs * up_bias * 5, 0, 100)
+        df['change_score'] = np.clip(change_abs * up_bias * 6, 0, 100)
+
+        # Chasing penalty: stocks that already moved big today get ranked lower
         chase_penalty = np.where(
-            change_pct > us.chase_penalty_change_pct_high,
-            us.chase_penalty_points_high,
+            change_pct > us.chase_penalty_change_pct_high,   # default 15%
+            us.chase_penalty_points_high,                     # default -50 pts
             np.where(
-                change_pct > us.chase_penalty_change_pct_mid,
-                us.chase_penalty_points_mid,
+                change_pct > us.chase_penalty_change_pct_mid,  # default 10%
+                us.chase_penalty_points_mid,                    # default -25 pts
                 0,
             ),
         )
         df['change_score'] = np.clip(df['change_score'] - chase_penalty, 0, 100)
 
         # ============================================================
-        # COMPONENT 3: Volume Weight (20% weight)
-        # Higher absolute volume = better liquidity & easier execution
-        # ============================================================
+        # COMPONENT 3: Volume Score (volume weight) — absolute liquidity
         # Log scale: 500K=0, 1M=40, 5M=70, 10M+=100
+        # ============================================================
         df['vol_score'] = np.clip(
             np.log10(df['vol_numeric'].clip(lower=1)) / np.log10(10_000_000) * 100,
             0, 100
         )
 
         # ============================================================
-        # COMPONENT 4: Market Cap Sweet Spot (10% weight)
-        # Ideal: $300M-$1.5B (true small-cap explosion zone)
+        # COMPONENT 4: Market Cap Sweet Spot (mcap weight)
+        # $300M-$800M: 100 (explosion potential), $800M-$1.5B: 70, $1.5B-$2.5B: 40
         # ============================================================
-        # $300M-$800M: 100, $800M-$1.5B: 70, $1.5B-$2.5B: 40
         mcap_m = df['mcap_numeric'] / 1_000_000
         df['mcap_score'] = np.where(
             mcap_m <= 800, 100,
@@ -223,14 +236,28 @@ class SmallCapUniverse:
         )
 
         # ============================================================
-        # COMPOSITE SCORE (V4 rebalanced — less chasing, more liquidity)
-        # RVOL 30% (was 40%), Change 25% (was 30%), Volume 25% (was 20%), MCap 20% (was 10%)
+        # EARLY ACCUMULATION BONUS (v4.1 — new)
+        # High RVOL (> 1.5x) + modest positive change (+1% to +8%)
+        # = institutional accumulation before the crowd notices.
+        # This is exactly the Type C setup we want at the top of the list.
+        # Bonus: +15 pts — enough to break ties in favor of early-entry setups.
+        # ============================================================
+        early_accumulation = (
+            (df['rel_vol'] >= 1.5) &
+            (df['change_pct'] >= 1.0) &
+            (df['change_pct'] <= 8.0)
+        )
+        df['early_bonus'] = np.where(early_accumulation, 15, 0)
+
+        # ============================================================
+        # COMPOSITE SCORE
         # ============================================================
         df['composite_score'] = (
             df['rvol_score'] * us.rank_weight_rvol
             + df['change_score'] * us.rank_weight_change
             + df['vol_score'] * us.rank_weight_volume
             + df['mcap_score'] * us.rank_weight_mcap
+            + df['early_bonus']
         )
 
         return df
@@ -299,6 +326,26 @@ class SmallCapUniverse:
                 df3 = self._run_finviz_query(q3_filters, "WIDER NET")
                 if len(df3) > 0:
                     frames.append(df3)
+
+            # ============================================================
+            # QUERY 4: EARLY SETUP / PULLBACK (v4.1 — NEW)
+            # Finds stocks that are setting up BEFORE the big move.
+            # Key insight: RSI 35-55 = cooling off after prior strength.
+            # These stocks show up in downstream engine as Type C (early entry).
+            # NOT filtered by today's volatility — we want quiet accumulation.
+            # ============================================================
+            q4_filters = {
+                'Market Cap.': 'Small ($300mln to $2bln)',
+                'Float': 'Under 100M',
+                'Price': 'Over $3',
+                'Country': 'USA',
+                'Average Volume': 'Over 500K',
+                'RSI (14)': '30-50 (Oversold)',
+                'Relative Volume': 'Over 1',
+            }
+            df4 = self._run_finviz_query(q4_filters, "EARLY SETUP")
+            if len(df4) > 0:
+                frames.append(df4)
 
             # ============================================================
             # MERGE & DEDUPLICATE
