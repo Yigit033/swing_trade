@@ -761,6 +761,161 @@ class SmallCapSignals:
         return details['swing_ready'], details
     
     # ============================================================
+    # PULLBACK-TO-MA20 ENTRY DETECTION (v6.0 — High Win-Rate)
+    # ============================================================
+    def detect_pullback_setup(self, df: pd.DataFrame) -> Dict:
+        """
+        Detect pullback-to-MA20 entry setup — higher win-rate alternative to breakout.
+
+        A pullback entry is the opposite of a breakout entry:
+        - Breakout: price explodes above resistance on HIGH volume → 20-35% win rate
+        - Pullback: price dips to MA20 support on LOW volume, then bounces → 40-55% win rate
+
+        Required criteria (all must pass):
+        1. Above MA50: prior uptrend context (no catching falling knives)
+        2. MA20 touch: price Low was within 5% below MA20 in last 5 bars
+        3. Bounce today: green candle (Close > Open)
+        4. Close above MA20: bounce is confirmed (not a dead-cat)
+        5. RSI: 33-65 (oversold bounce OK, but not overbought)
+
+        Bonus criteria (improve quality tier):
+        - Low pullback volume (5d avg < 90% of 20d baseline = healthy dry-up)
+        - Strong close position (upper 60%+ of today's range)
+        - Volume expansion on bounce (today >= 1.2x recent pullback average)
+        - RSI < 52 (more room to run before hitting overbought)
+        """
+        result = {
+            'detected': False,
+            'quality': '',
+            'bonus': 0,
+            'above_ma50': False,
+            'ma20_touched': False,
+            'pullback_volume_ok': False,
+            'bounce_today': False,
+            'close_above_ma20': False,
+            'rsi': 50.0,
+            'reason': ''
+        }
+
+        if df is None or len(df) < 52:
+            result['reason'] = 'Insufficient data'
+            return result
+
+        try:
+            close = df['Close']
+            low = df['Low']
+            high = df['High']
+            volume = df['Volume']
+
+            ma20 = close.rolling(20).mean()
+            ma50 = close.rolling(50).mean()
+
+            current_close = float(close.iloc[-1])
+            current_open = float(df['Open'].iloc[-1])
+            current_low = float(low.iloc[-1])
+            current_high = float(high.iloc[-1])
+            current_ma20 = float(ma20.iloc[-1])
+            current_ma50 = float(ma50.iloc[-1])
+
+            # 1. Above MA50 (uptrend context required)
+            above_ma50 = current_close > current_ma50
+            result['above_ma50'] = above_ma50
+            if not above_ma50:
+                result['reason'] = f'Below MA50 ({current_close:.2f} < {current_ma50:.2f})'
+                return result
+
+            # 2. MA20 touch: any of last 5 bars had Low within 5% below MA20
+            ma20_touched = False
+            for i in range(-5, 0):
+                bar_low = float(low.iloc[i])
+                bar_ma20 = float(ma20.iloc[i])
+                if bar_ma20 > 0:
+                    distance_pct = (bar_low - bar_ma20) / bar_ma20 * 100
+                    if -5.0 <= distance_pct <= 1.5:  # within 5% below or slightly above
+                        ma20_touched = True
+                        break
+            result['ma20_touched'] = ma20_touched
+            if not ma20_touched:
+                result['reason'] = 'No MA20 touch in last 5 bars'
+                return result
+
+            # 3. Bounce today: green candle
+            bounce_today = current_close > current_open
+            result['bounce_today'] = bounce_today
+            if not bounce_today:
+                result['reason'] = 'No bounce today (red candle)'
+                return result
+
+            # 4. Close above MA20 (confirmed bounce off the MA)
+            close_above_ma20 = current_close >= current_ma20 * 0.995  # 0.5% tolerance
+            result['close_above_ma20'] = close_above_ma20
+            if not close_above_ma20:
+                result['reason'] = f'Close below MA20 ({current_close:.2f} < {current_ma20:.2f})'
+                return result
+
+            # 5. RSI check
+            rsi = self.calculate_rsi(df)
+            result['rsi'] = rsi
+            if rsi > 65 or rsi < 33:
+                result['reason'] = f'RSI out of range ({rsi:.1f})'
+                return result
+
+            # All required criteria met
+            result['detected'] = True
+
+            # — Quality scoring —
+            ma20_distance = (current_close - current_ma20) / current_ma20 * 100
+
+            # Pullback volume dry-up (last 5d vs 20d baseline)
+            pullback_volume_ok = False
+            pullback_vol_ratio = 1.0
+            if len(volume) >= 25:
+                recent_5d_vol = float(volume.iloc[-5:].mean())
+                baseline_20d = float(volume.iloc[-25:-5].mean())
+                if baseline_20d > 0:
+                    pullback_vol_ratio = recent_5d_vol / baseline_20d
+                    pullback_volume_ok = pullback_vol_ratio < 0.90
+            result['pullback_volume_ok'] = pullback_volume_ok
+
+            # Volume expansion on bounce day
+            today_vol_ratio = 1.0
+            if len(volume) >= 6:
+                recent_avg = float(volume.iloc[-6:-1].mean())
+                today_vol = float(volume.iloc[-1])
+                if recent_avg > 0:
+                    today_vol_ratio = today_vol / recent_avg
+
+            # Close strength (upper portion of range)
+            day_range = current_high - current_low
+            close_pos = (current_close - current_low) / day_range if day_range > 0 else 0.5
+
+            if (pullback_volume_ok and rsi < 52 and ma20_distance < 2.5
+                    and today_vol_ratio >= 1.3 and close_pos >= 0.65):
+                result['quality'] = 'perfect'
+                result['bonus'] = 20
+                result['reason'] = (
+                    f'Perfect pullback: RSI={rsi:.0f}, '
+                    f'MA20_dist={ma20_distance:+.1f}%, vol_bounce={today_vol_ratio:.1f}x'
+                )
+            elif rsi < 58 and close_pos >= 0.55 and (pullback_volume_ok or today_vol_ratio >= 1.2):
+                result['quality'] = 'clean'
+                result['bonus'] = 15
+                result['reason'] = (
+                    f'Clean pullback: RSI={rsi:.0f}, close_pos={close_pos:.0%}'
+                )
+            else:
+                result['quality'] = 'basic'
+                result['bonus'] = 8
+                result['reason'] = f'Basic pullback: RSI={rsi:.0f}, MA20 touched'
+
+            return result
+
+        except Exception as e:
+            logger.error(f'Error detecting pullback setup: {e}')
+            result['reason'] = str(e)
+            return result
+
+    # ============================================================
     # OBV TREND ANALYSIS (v3.0 — Smart Money Detection)
     # ============================================================
     def calculate_obv_trend(self, df: pd.DataFrame, period: int = 10) -> Dict:

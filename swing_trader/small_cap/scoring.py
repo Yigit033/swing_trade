@@ -420,6 +420,14 @@ class SmallCapScoring:
             trigger_details = boosters.get('trigger_details', {})
             if trigger_details and trigger_details.get('has_breakout', False):
                 bonus += st.bonus_confirmed_breakout
+
+            # v6.0: Pullback entry bonus — higher win-rate setup rewards
+            pullback_bonus = boosters.get('pullback_bonus', 0)
+            bonus += pullback_bonus  # +20 perfect, +15 clean, +8 basic
+
+            # v6.0: Active sector rotation bonus/penalty
+            sector_rotation_bonus = boosters.get('sector_rotation_bonus', 0)
+            bonus += sector_rotation_bonus  # +5 top sector, -10 weak sector
         
         # ============================================================
         # PENALTY SYSTEM (max -60, expanded in v5.0)

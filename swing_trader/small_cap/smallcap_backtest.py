@@ -600,14 +600,18 @@ class SmallCapBacktester:
                 self._diag["entry_skip_risk"] += 1
                 continue
             
-            # R:R check with actual entry-based values
+            # R:R check with actual entry-based values.
+            # Use T2 reward (not T1) to match the scanner's min_rr_at_entry gate,
+            # which was calibrated against T2 R:R.  T1 alone would be ~1.2-1.5R
+            # for most setups and would reject every valid signal at 2.5× minimum.
             risk_px = entry_price - sl
-            reward_px = t1 - entry_price
+            reward_t1 = t1 - entry_price
+            reward_t2 = t2 - entry_price
             min_rr = self.settings.min_rr_type_c if swing_type == 'C' else self.settings.min_rr_at_entry
-            if risk_px <= 0 or reward_px / risk_px < min_rr:
+            if risk_px <= 0 or reward_t2 / risk_px < min_rr:
                 self._diag["entry_skip_rr"] += 1
                 logger.debug(
-                    f"{ticker}: Entry R:R {reward_px/risk_px:.2f} < min {min_rr} — skipped"
+                    f"{ticker}: Entry R:R(T2) {reward_t2/max(risk_px,1e-9):.2f} < min {min_rr} — skipped"
                 )
                 continue
             self._open_trade(sig, current_date, df_today)

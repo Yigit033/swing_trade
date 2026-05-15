@@ -2,7 +2,7 @@
   "schema_version": 1,
   "max_entry_rsi": 70,
   "volume_surge_trigger": 1.5,
-  "min_volume_surge_soft": 1.2,
+  "min_volume_surge_soft": 1.5,
   "min_atr_percent": 0.03,
   "max_risk_per_trade": 0.015,
   "stop_atr_multiplier": 1.5,
@@ -39,19 +39,19 @@
     },
     "C": {
       "t1_max_pct": 0.08,
-      "t2_max_pct": 0.15
+      "t2_max_pct": 0.20
     },
     "A": {
-      "t1_max_pct": 0.1,
-      "t2_max_pct": 0.18
+      "t1_max_pct": 0.10,
+      "t2_max_pct": 0.22
     }
   },
-  "min_rr_at_entry": 1.2,
-  "min_rr_type_c": 1.5,
+  "min_rr_at_entry": 2.5,
+  "min_rr_type_c": 2.0,
   "partial_at_t1_fraction": 0.5,
-  "min_quality_type_c": 65,
-  "min_quality_type_a": 60,
-  "min_quality_type_b": 60,
+  "min_quality_type_c": 72,
+  "min_quality_type_a": 68,
+  "min_quality_type_b": 68,
   "max_gap_up_pct": 5.0,
   "max_gap_down_pct": 4.0,
   "max_loss_per_trade_pct": 0.07,
@@ -209,7 +209,7 @@
     "min_price": 3.0,
     "max_price": 200.0,
     "max_float_shares": 150000000,
-    "earnings_exclusion_days": 3,
+    "earnings_exclusion_days": 7,
     "atr_period": 10
   },
   "signal_confirmation": {

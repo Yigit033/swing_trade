@@ -16,7 +16,7 @@ from .signals import SmallCapSignals
 from .scoring import SmallCapScoring
 from .risk import SmallCapRisk
 from .universe import SmallCapUniverse
-from .sector_rs import SectorRS
+from .sector_rs import SectorRS, SECTOR_ETF_MAP
 from .catalysts import CatalystDetector
 from .narrative import generate_signal_narrative
 from .technical_levels import calculate_technical_levels
@@ -306,6 +306,38 @@ class SmallCapEngine:
 
         return ("A", hold_days, "🐢 Continuation: " + ", ".join(type_a_reasons[:2]))
     
+    def _compute_sector_rankings(self) -> Dict[str, int]:
+        """
+        Rank all sector ETFs by weighted composite return (5d×50% + 10d×30% + 20d×20%).
+
+        Called ONCE per scan_universe() to avoid repeated API calls per ticker.
+        Returns: {etf_symbol: rank} where rank 1 = strongest sector.
+        SPY is excluded since it's the benchmark, not a sector.
+        """
+        etfs = list({v for v in SECTOR_ETF_MAP.values() if v != 'SPY'})
+        etf_scores: Dict[str, float] = {}
+        for etf in etfs:
+            try:
+                returns = SectorRS._get_multi_period_return(etf)
+                r5 = returns.get('5d') or 0.0
+                r10 = returns.get('10d') or 0.0
+                r20 = returns.get('20d') or 0.0
+                etf_scores[etf] = r5 * 0.50 + r10 * 0.30 + r20 * 0.20
+            except Exception:
+                etf_scores[etf] = 0.0
+
+        sorted_etfs = sorted(etf_scores, key=lambda e: etf_scores[e], reverse=True)
+        rankings = {etf: rank + 1 for rank, etf in enumerate(sorted_etfs)}
+        n = len(rankings)
+        top3 = " | ".join(
+            f"{e}({etf_scores[e]:+.1f}%)" for e in sorted_etfs[:3]
+        )
+        bot3 = " | ".join(
+            f"{e}({etf_scores[e]:+.1f}%)" for e in sorted_etfs[-3:]
+        )
+        logger.info(f"Sector rotation: {n} ETFs ranked — TOP: {top3} | BOT: {bot3}")
+        return rankings
+
     def get_stock_info(self, ticker: str) -> Dict:
         """Get stock info from yfinance."""
         try:
@@ -390,32 +422,47 @@ class SmallCapEngine:
                 _bump_scan_reject(reject_counts, "filter_failed")
                 return None
             
+            # Step 1b: Pullback-to-MA20 setup detection (done before trigger gate
+            # so it can bypass the volume-surge requirement that breakouts need).
+            pullback_data = self.signals.detect_pullback_setup(df)
+
             # Step 2: Check signal triggers
             triggered, trigger_details = self.signals.check_all_triggers(df)
-            
+
             if not triggered:
-                logger.debug(f"{ticker}: No trigger - {trigger_details.get('triggers', {})}")
-                _bump_scan_reject(reject_counts, "no_trigger")
-                return None
-            
+                if not pullback_data['detected']:
+                    logger.debug(f"{ticker}: No trigger - {trigger_details.get('triggers', {})}")
+                    _bump_scan_reject(reject_counts, "no_trigger")
+                    return None
+                # Pullback entry: bypass volume-surge trigger gate (low volume = healthy pullback)
+                logger.debug(f"{ticker}: Pullback entry ({pullback_data['quality']}) bypasses trigger gate")
+
             # Step 3: Get boosters (includes swing confirmation)
             boosters = self.signals.check_boosters(df)
-            
+
+            # Inject pullback data into boosters immediately so gates below can use it
+            boosters['pullback_detected'] = pullback_data['detected']
+            boosters['pullback_quality'] = pullback_data.get('quality', '')
+            boosters['pullback_bonus'] = pullback_data.get('bonus', 0)
+
             # Step 3.5: SWING CONFIRMATION GATE (NEW)
             # Must pass 5-day momentum > 0 AND Close > MA20
             swing_ready = boosters.get('swing_ready', False)
             swing_details = boosters.get('swing_details', {})
-            
+
             if not swing_ready:
-                # Log why it failed
-                five_day = swing_details.get('five_day_momentum', {})
-                ma20 = swing_details.get('above_ma20', {})
-                logger.debug(
-                    f"{ticker}: Failed swing confirmation - "
-                    f"5d_mom={five_day.get('passed')}, ma20={ma20.get('passed')}"
-                )
-                _bump_scan_reject(reject_counts, "swing_not_ready")
-                return None
+                if not pullback_data['detected']:
+                    # Log why it failed
+                    five_day = swing_details.get('five_day_momentum', {})
+                    ma20 = swing_details.get('above_ma20', {})
+                    logger.debug(
+                        f"{ticker}: Failed swing confirmation - "
+                        f"5d_mom={five_day.get('passed')}, ma20={ma20.get('passed')}"
+                    )
+                    _bump_scan_reject(reject_counts, "swing_not_ready")
+                    return None
+                # Pullback entry: bypass swing gate (MA20 proximity is exactly the point)
+                logger.debug(f"{ticker}: Pullback entry bypasses swing gate")
             
             # Step 4: Calculate quality score (includes penalties)
             volume_surge = trigger_details.get('volume_surge', 2.0)
@@ -474,6 +521,27 @@ class SmallCapEngine:
                 boosters["has_recent_news"] = catalyst_data["news"]["has_recent_news"]
                 boosters["total_catalyst_bonus"] = catalyst_data["total_catalyst_bonus"]
             
+            # ── SECTOR ROTATION RANK (computed once per scan_universe, reused here) ──
+            # Top 3 sectors → +5 pts (hot money flowing in)
+            # Bottom 3 sectors → -10 pts (sector rotation headwind)
+            # Skipped in backtest mode since _sector_rankings holds live data
+            sector_etf_sym = SECTOR_ETF_MAP.get(sector, 'SPY')
+            sector_rankings = getattr(self, '_sector_rankings', {})
+            sector_rank = sector_rankings.get(sector_etf_sym, 0)
+            total_ranked = len(sector_rankings)
+            if sector_rank > 0 and total_ranked > 0 and not backtest_mode:
+                if sector_rank <= 3:
+                    sector_rotation_bonus = 5
+                elif sector_rank >= total_ranked - 2:   # bottom 3
+                    sector_rotation_bonus = -10
+                else:
+                    sector_rotation_bonus = 0
+            else:
+                sector_rotation_bonus = 0
+                sector_rank = 0
+            boosters['sector_rotation_bonus'] = sector_rotation_bonus
+            boosters['sector_rank'] = sector_rank
+
             # RSI Divergence (already in signals but ensure it's in boosters)
             rsi_div = self.signals.detect_rsi_divergence(df, lookback=14)
             boosters['rsi_divergence'] = rsi_div['divergence_found']
@@ -681,7 +749,16 @@ class SmallCapEngine:
                 'weinstein_ma30': boosters.get('weinstein_ma30', 0.0),
                 'weinstein_ma30_rising': boosters.get('weinstein_ma30_rising', False),
                 'weinstein_bonus': boosters.get('weinstein_bonus', 0),
-                
+
+                # Pullback Entry (v6.0 — high win-rate setup)
+                'pullback_detected': boosters.get('pullback_detected', False),
+                'pullback_quality': boosters.get('pullback_quality', ''),
+                'pullback_bonus': boosters.get('pullback_bonus', 0),
+
+                # Sector Rotation (v6.0 — active sector filter)
+                'sector_rank': boosters.get('sector_rank', 0),
+                'sector_rotation_bonus': boosters.get('sector_rotation_bonus', 0),
+
                 # Filter/trigger details
                 'filter_results': filter_results,
                 'trigger_details': trigger_details,
@@ -729,6 +806,24 @@ class SmallCapEngine:
                 signal['expected_hold_min'] = hold_days[0]
                 signal['expected_hold_max'] = hold_days[1]
             
+            # ================================================================
+            # HARD R:R GATE — Never enter a trade where the math can't win.
+            # At ~27% historical win rate, break-even requires avg_win > 2.7×
+            # avg_loss. We enforce a minimum T2/risk ratio of 2.5 so every
+            # trade we take has a theoretical path to profitability.
+            # Exception: Type S (short squeeze) — asymmetric payoff profile.
+            # ================================================================
+            rr_t2 = signal.get('risk_reward_t2', 0)
+            min_rr = self.settings.min_rr_at_entry
+            if rr_t2 < min_rr and swing_type != 'S':
+                logger.debug(
+                    f"{ticker}: R:R(T2)={rr_t2:.1f} < {min_rr} minimum "
+                    f"(stop={signal.get('stop_loss_pct',0):.1f}% "
+                    f"T2={signal.get('target_2_pct',0):.1f}%) — rejected"
+                )
+                _bump_scan_reject(reject_counts, "rr_too_low")
+                return None
+
             # Enhanced logging with type
             type_emoji = "🐢" if swing_type == 'A' else "🚀"
             safe_status = "✓" if overext.get('safe') else "⚠"
@@ -798,6 +893,13 @@ class SmallCapEngine:
         # v4.0: Detect market regime ONCE for all stocks
         market_regime = self.signals.detect_market_regime()
         self._last_regime = market_regime  # expose for callers (e.g. scanner API)
+
+        # v6.0: Compute sector rotation rankings ONCE (avoids N×11 API calls)
+        try:
+            self._sector_rankings = self._compute_sector_rankings()
+        except Exception as _e:
+            logger.warning(f"Sector rankings unavailable: {_e}")
+            self._sector_rankings = {}
 
         for ticker in tickers:
             if ticker not in data_dict:
