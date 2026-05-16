@@ -27,31 +27,31 @@
     "A": 1.8,
     "C": 1.5
   },
-  "t2_atr_ratio": 2.0,
+  "t2_atr_ratio": 1.7,
   "type_target_caps": {
     "S": {
       "t1_max_pct": 0.12,
-      "t2_max_pct": 0.22
+      "t2_max_pct": 0.20
     },
     "B": {
-      "t1_max_pct": 0.1,
-      "t2_max_pct": 0.18
+      "t1_max_pct": 0.10,
+      "t2_max_pct": 0.14
     },
     "C": {
       "t1_max_pct": 0.08,
-      "t2_max_pct": 0.20
+      "t2_max_pct": 0.12
     },
     "A": {
       "t1_max_pct": 0.10,
-      "t2_max_pct": 0.22
+      "t2_max_pct": 0.15
     }
   },
-  "min_rr_at_entry": 2.5,
-  "min_rr_type_c": 2.0,
+  "min_rr_at_entry": 1.8,
+  "min_rr_type_c": 1.6,
   "partial_at_t1_fraction": 0.5,
-  "min_quality_type_c": 72,
-  "min_quality_type_a": 68,
-  "min_quality_type_b": 68,
+  "min_quality_type_c": 80,
+  "min_quality_type_a": 84,
+  "min_quality_type_b": 80,
   "max_gap_up_pct": 5.0,
   "max_gap_down_pct": 4.0,
   "max_loss_per_trade_pct": 0.07,
@@ -389,12 +389,12 @@
     "bear_block_new_entries": true
   },
   "backtest_type_quality": {
-    "type_c_bear": 82,
-    "type_c_caution": 75,
-    "type_a_bear": 72,
-    "type_a_caution": 66,
-    "type_b_bear": 67,
-    "type_b_caution": 60
+    "type_c_bear": 86,
+    "type_c_caution": 82,
+    "type_a_bear": 90,
+    "type_a_caution": 87,
+    "type_b_bear": 85,
+    "type_b_caution": 82
   },
   "backtest_entry": {
     "type_c_min_open_vs_signal_close_ratio": 0.98,
@@ -411,14 +411,14 @@
     "trail_high_minus_atr_25": 0.8,
     "trail_peak_atr_20": 2.0,
     "trail_peak_frac_20": 0.5,
-    "trail_peak_atr_15": 1.5,
-    "trail_peak_frac_15": 0.3,
-    "breakeven_peak_atr": 1.5,
-    "light_protect_peak_atr": 1.0,
-    "light_protect_below_entry_atr": 0.2,
+    "trail_peak_atr_15": 1.8,
+    "trail_peak_frac_15": 0.35,
+    "breakeven_peak_atr": 2.0,
+    "light_protect_peak_atr": 1.5,
+    "light_protect_below_entry_atr": 0.15,
     "close_gain_atr_20": 2.0,
     "close_trail_atr_20": 1.0,
-    "close_gain_atr_15": 1.5,
-    "close_trail_atr_15": 1.2
+    "close_gain_atr_15": 1.8,
+    "close_trail_atr_15": 1.3
   }
 }
