@@ -570,13 +570,18 @@ export default function TradesPage() {
                                                             ${(t.entry_price || 0).toFixed(2)}
                                                         </span>
                                                     ) : isPending ? (
-                                                        <span style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>
-                                                            ${(t.signal_price || t.entry_price || 0).toFixed(2)}
-                                                        </span>
-                                                    ) : isClosed && exitPrice != null && exitPrice > 0 ? (
-                                                        <span style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>
-                                                            ${exitPrice.toFixed(2)}
-                                                        </span>
+                                                        currentPrice != null && currentPrice > 0 ? (
+                                                            <span style={{
+                                                                fontWeight: 700,
+                                                                color: currentPrice >= (t.signal_price || t.entry_price || 0) ? "#22c55e" : "#ef4444",
+                                                            }}>
+                                                                ${currentPrice.toFixed(2)}
+                                                            </span>
+                                                        ) : (
+                                                            <span style={{ color: "var(--text-muted)" }}>—</span>
+                                                        )
+                                                    ) : isClosed ? (
+                                                        <span style={{ color: "var(--text-muted)" }}>—</span>
                                                     ) : (
                                                         <span style={{ color: "var(--text-muted)" }}>—</span>
                                                     )}
