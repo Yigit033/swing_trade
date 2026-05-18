@@ -3,6 +3,7 @@ Data fetcher module for downloading stock data from various APIs.
 """
 
 import logging
+import time
 from typing import Optional, List, Dict
 from datetime import datetime, timedelta
 import pandas as pd
@@ -11,6 +12,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
+
+# Suppress urllib3 connection pool full warnings from yf.download parallel threads
+logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
 
 
 class DataFetcher:
@@ -22,17 +26,19 @@ class DataFetcher:
         alpha_vantage_key (str): API key for Alpha Vantage
     """
     
-    def __init__(self, source: str = "yfinance", alpha_vantage_key: Optional[str] = None):
-        """
-        Initialize DataFetcher.
-        
-        Args:
-            source: Primary data source ('yfinance' or 'alphavantage')
-            alpha_vantage_key: API key for Alpha Vantage backup
-        """
+    def __init__(
+        self,
+        source: str = "yfinance",
+        alpha_vantage_key: Optional[str] = None,
+        tiingo_key: Optional[str] = None,
+        finnhub_key: Optional[str] = None,
+    ):
         self.source = source
         self.alpha_vantage_key = alpha_vantage_key
-        logger.info(f"DataFetcher initialized with source: {source}")
+        self.tiingo_key = tiingo_key or ""
+        self.finnhub_key = finnhub_key or ""
+        fallbacks = [s for s, k in [("tiingo", self.tiingo_key), ("finnhub", self.finnhub_key)] if k]
+        logger.info(f"DataFetcher initialized: primary=yfinance fallbacks={fallbacks or ['none']}")
     
     def fetch_stock_data(
         self,
@@ -61,62 +67,70 @@ class DataFetcher:
         if not ticker:
             raise ValueError("Ticker symbol cannot be empty")
         
-        try:
-            logger.debug(f"Fetching data for {ticker}")
-            
-            # Use yf.Ticker().history() - SAFER than yf.download()
-            # This method is guaranteed to return data for the specific ticker
-            stock = yf.Ticker(ticker)
-            
-            if start_date and end_date:
-                data = stock.history(start=start_date, end=end_date)
-            else:
-                data = stock.history(period=period)
-            
-            if data.empty:
-                logger.warning(f"No data received for {ticker}")
-                return None
-            
-            # Columns from .history() are already single-level: Open, High, Low, Close, Volume
-            # No MultiIndex handling needed
-            
-            # Validate data
-            if not self._validate_ohlcv_data(data):
-                logger.warning(f"Invalid data received for {ticker}")
-                return None
-            
-            # VERIFICATION: Check that prices are reasonable for this ticker
-            # This catches any remaining data issues
-            avg_price = data['Close'].mean()
-            last_price = data['Close'].iloc[-1]
-            
-            # Sanity check: price should be positive
-            if last_price <= 0 or avg_price <= 0:
-                logger.warning(f"{ticker}: Invalid price data (last=${last_price:.2f})")
-                return None
-            
-            # Reset index to have date as column
-            data = data.reset_index()
-            
-            # Rename 'Datetime' or 'Date' column to 'Date'
-            if 'Datetime' in data.columns:
-                data.rename(columns={'Datetime': 'Date'}, inplace=True)
-            
-            # Remove timezone from Date column if present
-            if pd.api.types.is_datetime64_any_dtype(data['Date']):
-                data['Date'] = data['Date'].dt.tz_localize(None)
-            
-            # Keep only required columns
-            required_cols = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
-            available_cols = [c for c in required_cols if c in data.columns]
-            data = data[available_cols]
-            
-            logger.info(f"Successfully fetched {len(data)} rows for {ticker} (last=${last_price:.2f})")
-            return data
-            
-        except Exception as e:
-            logger.error(f"Failed to fetch {ticker}: {str(e)}", exc_info=True)
-            return None
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                logger.debug(f"Fetching data for {ticker}")
+                stock = yf.Ticker(ticker)
+
+                if start_date and end_date:
+                    data = stock.history(start=start_date, end=end_date)
+                else:
+                    data = stock.history(period=period)
+
+                if data.empty:
+                    logger.warning(f"No data received for {ticker}")
+                    return None
+
+                if not self._validate_ohlcv_data(data):
+                    logger.warning(f"Invalid data received for {ticker}")
+                    return None
+
+                avg_price = data['Close'].mean()
+                last_price = data['Close'].iloc[-1]
+                if last_price <= 0 or avg_price <= 0:
+                    logger.warning(f"{ticker}: Invalid price data (last=${last_price:.2f})")
+                    return None
+
+                data = data.reset_index()
+                if 'Datetime' in data.columns:
+                    data.rename(columns={'Datetime': 'Date'}, inplace=True)
+                if pd.api.types.is_datetime64_any_dtype(data['Date']):
+                    data['Date'] = data['Date'].dt.tz_localize(None)
+
+                required_cols = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+                available_cols = [c for c in required_cols if c in data.columns]
+                data = data[available_cols]
+
+                logger.info(f"Successfully fetched {len(data)} rows for {ticker} (last=${last_price:.2f})")
+                return data
+
+            except Exception as e:
+                err = str(e).lower()
+                if ('rate' in err or 'too many' in err or '429' in err) and attempt < max_retries - 1:
+                    wait = 5 * (2 ** attempt)
+                    logger.warning(f"{ticker}: Rate limited, retrying in {wait}s (attempt {attempt+1}/{max_retries})")
+                    time.sleep(wait)
+                    continue
+                logger.warning(f"yfinance failed for {ticker}: {str(e)}")
+                break  # fall through to fallback sources
+
+        # yfinance exhausted — try Tiingo then Finnhub
+        s_date, e_date = (start_date, end_date) if (start_date and end_date) else self._period_to_dates(period)
+
+        if self.tiingo_key:
+            data = self._fetch_tiingo_single(ticker, s_date, e_date)
+            if data is not None:
+                logger.info(f"[Tiingo] {ticker}: {len(data)} rows")
+                return data
+
+        if self.finnhub_key:
+            data = self._fetch_finnhub_single(ticker, s_date, e_date)
+            if data is not None:
+                logger.info(f"[Finnhub] {ticker}: {len(data)} rows")
+                return data
+
+        return None
     
     def fetch_multiple_stocks(
         self,
@@ -124,7 +138,7 @@ class DataFetcher:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         period: str = "1y",
-        max_workers: int = 10
+        max_workers: int = 3
     ) -> Dict[str, pd.DataFrame]:
         """
         Fetch data for multiple stocks concurrently.
@@ -177,7 +191,88 @@ class DataFetcher:
         
         logger.info(f"Successfully fetched {len(results)}/{len(tickers)} stocks")
         return results
-    
+
+    def fetch_multiple_stocks_batch(
+        self,
+        tickers: List[str],
+        period: str = "3mo",
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        chunk_size: int = 25,
+    ) -> Dict[str, pd.DataFrame]:
+        """
+        Fetch data for many tickers using yf.download() in chunks.
+        One HTTP request per chunk vs N individual requests — much less likely to hit rate limits.
+        Falls back to empty dict on failure so caller can use individual fetches.
+        """
+        if not tickers:
+            return {}
+
+        results: Dict[str, pd.DataFrame] = {}
+        chunks = [tickers[i:i + chunk_size] for i in range(0, len(tickers), chunk_size)]
+        logger.info(f"Batch fetching {len(tickers)} tickers in {len(chunks)} chunk(s) of {chunk_size}")
+
+        for chunk_idx, chunk in enumerate(chunks):
+            for attempt in range(3):
+                try:
+                    if start_date and end_date:
+                        raw = yf.download(chunk, start=start_date, end=end_date,
+                                          group_by='ticker', auto_adjust=True, progress=False)
+                    else:
+                        raw = yf.download(chunk, period=period,
+                                          group_by='ticker', auto_adjust=True, progress=False)
+
+                    if raw is None or raw.empty:
+                        break
+
+                    for ticker in chunk:
+                        try:
+                            df = raw[ticker] if len(chunk) > 1 else raw
+                            df = df.dropna(how='all').reset_index()
+
+                            if 'Datetime' in df.columns:
+                                df.rename(columns={'Datetime': 'Date'}, inplace=True)
+                            if 'Date' in df.columns and pd.api.types.is_datetime64_any_dtype(df['Date']):
+                                df['Date'] = df['Date'].dt.tz_localize(None)
+
+                            required = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+                            df = df[[c for c in required if c in df.columns]]
+
+                            if len(df) >= 20:
+                                results[ticker] = df
+                        except Exception:
+                            pass
+
+                    break  # chunk succeeded
+
+                except Exception as e:
+                    err = str(e).lower()
+                    if ('rate' in err or 'too many' in err or '429' in err) and attempt < 2:
+                        wait = 10 * (2 ** attempt)
+                        logger.warning(f"Batch chunk {chunk_idx+1}: rate limited, waiting {wait}s")
+                        time.sleep(wait)
+                    else:
+                        logger.warning(f"Batch chunk {chunk_idx+1} failed: {e}")
+                        break
+
+            if chunk_idx < len(chunks) - 1:
+                time.sleep(1)  # 1s between chunks to be polite
+
+        # yfinance returned nothing — try alternative sources before giving up
+        if not results:
+            s_date, e_date = (start_date, end_date) if (start_date and end_date) else self._period_to_dates(period)
+
+            if self.tiingo_key:
+                logger.warning("yfinance batch returned 0 tickers — trying Tiingo")
+                results = self._batch_tiingo(tickers, s_date, e_date)
+
+            if not results and self.finnhub_key:
+                logger.warning("Tiingo batch empty — trying Finnhub")
+                results = self._batch_finnhub(tickers, s_date, e_date)
+
+        logger.info(f"Batch fetch complete: {len(results)}/{len(tickers)} tickers")
+        return results
+
     def get_sp500_tickers(self) -> List[str]:
         """
         Get list of S&P 500 ticker symbols.
@@ -276,6 +371,114 @@ class DataFetcher:
             logger.error(f"Failed to fetch info for {ticker}: {e}")
             return None
     
+    # ------------------------------------------------------------------
+    # Fallback data source helpers
+    # ------------------------------------------------------------------
+
+    def _period_to_dates(self, period: str) -> tuple:
+        """Convert yfinance period string to (start_date, end_date) YYYY-MM-DD strings."""
+        days = {"1d": 1, "5d": 5, "1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "2y": 730, "5y": 1825}
+        end = datetime.now()
+        start = end - timedelta(days=days.get(period, 90))
+        return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
+    def _fetch_tiingo_single(self, ticker: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
+        """Fetch OHLCV from Tiingo REST API. Free tier: 1000 req/day, 50 req/min, 500 symbols."""
+        if not self.tiingo_key:
+            return None
+        import requests
+        url = f"https://api.tiingo.com/tiingo/daily/{ticker}/prices"
+        params = {"startDate": start_date, "endDate": end_date, "token": self.tiingo_key,
+                  "columns": "date,open,high,low,close,volume"}
+        try:
+            resp = requests.get(url, params=params, timeout=15)
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            raw = resp.json()
+            if not raw:
+                return None
+            df = pd.DataFrame(raw)
+            df.rename(columns={"date": "Date", "open": "Open", "high": "High",
+                                "low": "Low", "close": "Close", "volume": "Volume"}, inplace=True)
+            df["Date"] = pd.to_datetime(df["Date"]).dt.tz_localize(None)
+            required = ["Date", "Open", "High", "Low", "Close", "Volume"]
+            df = df[[c for c in required if c in df.columns]]
+            return df if len(df) >= 20 else None
+        except Exception as e:
+            logger.debug(f"Tiingo failed for {ticker}: {e}")
+            return None
+
+    def _fetch_finnhub_single(self, ticker: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
+        """Fetch OHLCV from Finnhub REST API. Free tier: 60 req/min."""
+        if not self.finnhub_key:
+            return None
+        import requests
+        from_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp())
+        to_ts   = int(datetime.strptime(end_date,   "%Y-%m-%d").timestamp())
+        url = "https://finnhub.io/api/v1/stock/candle"
+        params = {"symbol": ticker, "resolution": "D", "from": from_ts, "to": to_ts,
+                  "token": self.finnhub_key}
+        try:
+            resp = requests.get(url, params=params, timeout=15)
+            resp.raise_for_status()
+            raw = resp.json()
+            if raw.get("s") != "ok" or not raw.get("t"):
+                return None
+            df = pd.DataFrame({
+                "Date":   pd.to_datetime(raw["t"], unit="s"),
+                "Open":   raw["o"], "High": raw["h"],
+                "Low":    raw["l"], "Close": raw["c"], "Volume": raw["v"],
+            })
+            return df if len(df) >= 20 else None
+        except Exception as e:
+            logger.debug(f"Finnhub failed for {ticker}: {e}")
+            return None
+
+    def _batch_tiingo(self, tickers: List[str], start_date: str, end_date: str,
+                      max_workers: int = 5) -> Dict[str, pd.DataFrame]:
+        """Concurrent Tiingo fetch for multiple tickers."""
+        if not self.tiingo_key:
+            return {}
+        results: Dict[str, pd.DataFrame] = {}
+        logger.info(f"Tiingo: fetching {len(tickers)} tickers ({start_date} → {end_date})")
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._fetch_tiingo_single, t, start_date, end_date): t
+                       for t in tickers}
+            for future in as_completed(futures):
+                ticker = futures[future]
+                try:
+                    df = future.result()
+                    if df is not None:
+                        results[ticker] = df
+                except Exception:
+                    pass
+        logger.info(f"Tiingo: {len(results)}/{len(tickers)} tickers fetched")
+        return results
+
+    def _batch_finnhub(self, tickers: List[str], start_date: str, end_date: str,
+                       max_workers: int = 3) -> Dict[str, pd.DataFrame]:
+        """Concurrent Finnhub fetch for multiple tickers (max 60 req/min — keep workers low)."""
+        if not self.finnhub_key:
+            return {}
+        results: Dict[str, pd.DataFrame] = {}
+        logger.info(f"Finnhub: fetching {len(tickers)} tickers ({start_date} → {end_date})")
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._fetch_finnhub_single, t, start_date, end_date): t
+                       for t in tickers}
+            for future in as_completed(futures):
+                ticker = futures[future]
+                try:
+                    df = future.result()
+                    if df is not None:
+                        results[ticker] = df
+                except Exception:
+                    pass
+        logger.info(f"Finnhub: {len(results)}/{len(tickers)} tickers fetched")
+        return results
+
+    # ------------------------------------------------------------------
+
     def _validate_ohlcv_data(self, df: pd.DataFrame) -> bool:
         """
         Validate OHLCV data integrity.

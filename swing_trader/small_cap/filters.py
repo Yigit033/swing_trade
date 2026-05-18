@@ -114,7 +114,7 @@ class SmallCapFilters:
     def check_market_cap(self, market_cap: float) -> Tuple[bool, str]:
         """Check if market cap is within small-cap range."""
         if market_cap is None or market_cap <= 0:
-            return False, "Unknown market cap"
+            return True, "Market cap unknown (allowing — ticker pre-screened)"
         
         if market_cap < self.MIN_MARKET_CAP:
             return False, f"Market cap too small (${market_cap/1e6:.0f}M < $250M)"

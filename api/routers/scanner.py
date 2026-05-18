@@ -215,21 +215,23 @@ def _execute_smallcap_scan(
     logger.info(f"SmallCap universe: {len(tickers)} tickers")
     prog(6, "universe", f"Universe: {len(tickers)} tickers")
 
-    data_dict: dict[str, pd.DataFrame] = {}
-    n = len(tickers)
-    for i, ticker in enumerate(tickers):
-        try:
-            df = fetcher.fetch_stock_data(ticker, period="3mo")
-            if df is not None and len(df) >= 20:
-                data_dict[ticker] = df
-        except Exception:
-            continue
-        if n > 0 and (i % 2 == 0 or i == n - 1):
-            pct = 8 + int(75 * (i + 1) / n)
-            prog(pct, "fetch", f"Price data {i + 1}/{n} ({ticker})…")
+    prog(8, "fetch", f"Fetching price data for {len(tickers)} tickers…")
+    data_dict: dict[str, pd.DataFrame] = fetcher.fetch_multiple_stocks_batch(tickers, period="3mo")
 
     if not data_dict:
-        return {"signals": [], "stats": {"reason": "no_data"}, "market_regime": "UNKNOWN"}
+        # All chunks failed — IP is rate-limited for 5-10+ minutes.
+        # Waiting 60s then retrying is pointless; fail fast with a clear error.
+        logger.error("Batch fetch returned 0 tickers — Yahoo Finance IP rate limit in effect.")
+        return {
+            "signals": [],
+            "stats": {
+                "reason": "rate_limited",
+                "message": "Yahoo Finance rate limited. Wait 5-10 minutes and try again.",
+            },
+            "market_regime": "UNKNOWN",
+        }
+
+    prog(83, "fetch", f"Price data ready: {len(data_dict)}/{len(tickers)} tickers")
 
     prog(84, "scan", "Running momentum engine…")
     signals = engine.scan_universe(

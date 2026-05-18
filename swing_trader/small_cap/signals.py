@@ -1026,41 +1026,84 @@ class SmallCapSignals:
         """
         from .regime_logic import regime_from_spy_close, regime_unknown
 
-        try:
-            import yfinance as yf
+        import time as _time
 
-            spy = yf.Ticker("SPY")
-            hist = spy.history(period="1y")
-            if hist is None or len(hist) < 50:
-                r = regime_unknown("insufficient_spy_history")
-                logger.warning("Market regime unavailable: %s", r.get("detect_error"))
-                return r
-
-            close = hist["Close"]
-            vix_val: float = 0.0
+        _yf_error: Optional[str] = None
+        for _attempt in range(3):
             try:
-                vix = yf.Ticker("^VIX")
-                vix_hist = vix.history(period="5d")
-                if vix_hist is not None and len(vix_hist) > 0:
-                    vix_val = float(vix_hist["Close"].iloc[-1])
-            except Exception:
-                pass
+                import yfinance as yf
 
-            result = regime_from_spy_close(close, vix_val)
-            if result.get("detect_error"):
-                logger.warning("Market regime unavailable: %s", result.get("detect_error"))
-            else:
-                logger.info(
-                    f"Market Regime: {result['regime']} ({result['confidence']}) | "
-                    f"SPY ${result['spy_price']:.2f} vs MA50 ${result['ma50']:.2f} / MA200 ${result['ma200']:.2f} | "
-                    f"VIX: {result['vix']:.1f}"
+                spy = yf.Ticker("SPY")
+                hist = spy.history(period="1y")
+                if hist is None or len(hist) < 50:
+                    r = regime_unknown("insufficient_spy_history")
+                    logger.warning("Market regime unavailable: %s", r.get("detect_error"))
+                    return r
+
+                close = hist["Close"]
+                vix_val: float = 0.0
+                try:
+                    vix = yf.Ticker("^VIX")
+                    vix_hist = vix.history(period="5d")
+                    if vix_hist is not None and len(vix_hist) > 0:
+                        vix_val = float(vix_hist["Close"].iloc[-1])
+                except Exception:
+                    pass
+
+                result = regime_from_spy_close(close, vix_val)
+                if result.get("detect_error"):
+                    logger.warning("Market regime unavailable: %s", result.get("detect_error"))
+                else:
+                    logger.info(
+                        f"Market Regime: {result['regime']} ({result['confidence']}) | "
+                        f"SPY ${result['spy_price']:.2f} vs MA50 ${result['ma50']:.2f} / MA200 ${result['ma200']:.2f} | "
+                        f"VIX: {result['vix']:.1f}"
+                    )
+                return result
+
+            except Exception as e:
+                err = str(e).lower()
+                if ('rate' in err or 'too many' in err or '429' in err) and _attempt < 2:
+                    wait = 10 * (2 ** _attempt)
+                    logger.warning("Market regime rate limited, retrying in %ds (attempt %d/3)", wait, _attempt + 1)
+                    _time.sleep(wait)
+                    continue
+                _yf_error = str(e)
+                break
+
+        # yfinance failed — try Tiingo for SPY history
+        tiingo_key = (self.config.get('api_keys') or {}).get('tiingo', '')
+        if tiingo_key:
+            try:
+                import requests as _req
+                from datetime import date as _date, timedelta as _td
+                end = _date.today().isoformat()
+                start = (_date.today() - _td(days=400)).isoformat()
+                resp = _req.get(
+                    f'https://api.tiingo.com/tiingo/daily/SPY/prices',
+                    params={'startDate': start, 'endDate': end, 'token': tiingo_key},
+                    timeout=15,
                 )
-            return result
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data and len(data) >= 50:
+                        closes = pd.Series(
+                            [d.get('adjClose') or d.get('close') for d in data],
+                            index=pd.to_datetime([d['date'] for d in data]),
+                        )
+                        result = regime_from_spy_close(closes, 0.0)
+                        if not result.get('detect_error'):
+                            logger.info(
+                                f"Market Regime (Tiingo): {result['regime']} ({result['confidence']}) | "
+                                f"SPY ${result['spy_price']:.2f} vs MA50 ${result['ma50']:.2f} / MA200 ${result['ma200']:.2f}"
+                            )
+                            return result
+            except Exception as te:
+                logger.debug(f"Tiingo SPY fallback failed: {te}")
 
-        except Exception as e:
-            r = regime_unknown(str(e))
-            logger.warning("Market regime unavailable: %s", r.get("detect_error"))
-            return r
+        r = regime_unknown(_yf_error or "rate_limit_exhausted")
+        logger.warning("Market regime unavailable: %s", r.get("detect_error"))
+        return r
 
     # Optional Boosters
     def check_boosters(self, df: pd.DataFrame) -> Dict:

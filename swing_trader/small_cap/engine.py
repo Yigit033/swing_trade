@@ -70,6 +70,10 @@ class SmallCapEngine:
         self.risk = SmallCapRisk(config, self.settings)
         self.universe_provider = SmallCapUniverse(config, self.settings)
 
+        # Wire Tiingo key into SectorRS so ETF fallback works when Yahoo is rate-limited
+        tiingo_key = (self.config.get('api_keys') or {}).get('tiingo', '')
+        SectorRS.set_tiingo_key(tiingo_key)
+
         logger.info("SmallCapEngine initialized (momentum breakout engine)")
     
     def _classify_swing_type(
@@ -339,23 +343,47 @@ class SmallCapEngine:
         return rankings
 
     def get_stock_info(self, ticker: str) -> Dict:
-        """Get stock info from yfinance."""
+        """Get stock info — yfinance primary, Finnhub fallback when rate-limited."""
         try:
             import yfinance as yf
             stock = yf.Ticker(ticker)
             info = stock.info
-            
             return {
                 'ticker': ticker,
                 'marketCap': info.get('marketCap', 0),
                 'floatShares': info.get('floatShares', 0),
                 'shortName': info.get('shortName', ticker),
                 'sector': info.get('sector', 'Unknown'),
-                'industry': info.get('industry', 'Unknown')
+                'industry': info.get('industry', 'Unknown'),
             }
-        except Exception as e:
-            logger.debug(f"Could not get info for {ticker}: {e}")
-            return {'ticker': ticker, 'marketCap': 0, 'floatShares': 0}
+        except Exception:
+            pass  # fall through to Finnhub
+
+        # Finnhub profile fallback (marketCapitalization in millions)
+        finnhub_key = (self.config.get('api_keys') or {}).get('finnhub', '')
+        if finnhub_key:
+            try:
+                import requests
+                resp = requests.get(
+                    'https://finnhub.io/api/v1/stock/profile2',
+                    params={'symbol': ticker, 'token': finnhub_key},
+                    timeout=8,
+                )
+                if resp.status_code == 200:
+                    d = resp.json()
+                    mcap = d.get('marketCapitalization') or 0
+                    return {
+                        'ticker': ticker,
+                        'marketCap': int(mcap * 1_000_000),
+                        'floatShares': int((d.get('shareOutstanding') or 0) * 1_000_000),
+                        'shortName': d.get('name', ticker),
+                        'sector': d.get('finnhubIndustry', 'Unknown'),
+                        'industry': d.get('finnhubIndustry', 'Unknown'),
+                    }
+            except Exception as e:
+                logger.debug(f"Finnhub profile failed for {ticker}: {e}")
+
+        return {'ticker': ticker, 'marketCap': 0, 'floatShares': 0}
     
     def scan_stock(
         self,
@@ -391,7 +419,9 @@ class SmallCapEngine:
                         "sector": "Unknown",
                     }
                 else:
-                    stock_info = self.get_stock_info(ticker)
+                    # Finviz cache is free (no API call) — use it when available
+                    finviz_meta = self.universe_provider.get_ticker_metadata(ticker)
+                    stock_info = finviz_meta if finviz_meta is not None else self.get_stock_info(ticker)
             
             # Get signal date - handle both index-based and column-based Date
             try:

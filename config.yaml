@@ -8,6 +8,13 @@ data:
   lookback_days: 250
   database_path: "data/stocks.db"
 
+# Fallback data source API keys — yfinance is primary, these kick in when it is rate-limited.
+# Tiingo:  free at tiingo.com  — 1000 req/day, 50 req/min, 500 symbols (best free fallback)
+# Finnhub: free at finnhub.io  — 60 req/min (second fallback, different infrastructure)
+api_keys:
+  tiingo: "dd07f46cb3f5193aa45d565189cd1d1c07afda13"
+  finnhub: "d85456hr01qrqbno8o7gd85456hr01qrqbno8o80"
+
 filters:
   min_volume: 500000
   min_price: 10.0

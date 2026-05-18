@@ -36,18 +36,20 @@ SECTOR_ETF_MAP = {
 class SectorRS:
     """
     Calculate Sector Relative Strength for a stock.
-    
+
     Logic:
     1. Get stock's 5-day return
     2. Get sector ETF's 5-day return
     3. RS = (stock_return - sector_return)
     4. If RS > +15%, award +12 bonus points
-    
+
     Why: Sector rotation provides +25% extra momentum in small caps.
     """
-    
+
     # Cache for sector ETF data (avoid repeated API calls)
     _sector_cache: Dict[str, Dict] = {}
+    # Tiingo key — set by SmallCapEngine.__init__ when config provides it
+    _tiingo_key: str = ""
     
     @classmethod
     def get_sector_etf(cls, sector: str) -> str:
@@ -75,19 +77,44 @@ class SectorRS:
     
     @classmethod
     def _get_multi_period_return(cls, ticker: str) -> Dict[str, Optional[float]]:
-        """Get 5d, 10d, 20d returns in a single API call (efficient)."""
-        try:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period='25d')
-            if hist is None or len(hist) < 5:
-                return {'5d': None, '10d': None, '20d': None}
-            closes = hist['Close']
+        """Get 5d, 10d, 20d returns — yfinance primary, Tiingo fallback."""
+        def _compute(closes) -> Dict[str, Optional[float]]:
             def ret(n):
                 return ((float(closes.iloc[-1]) / float(closes.iloc[-n]) - 1) * 100
                         if len(closes) >= n else None)
             return {'5d': ret(5), '10d': ret(10), '20d': ret(20)}
+
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period='25d')
+            if hist is not None and len(hist) >= 5:
+                return _compute(hist['Close'])
         except Exception:
-            return {'5d': None, '10d': None, '20d': None}
+            pass
+
+        if cls._tiingo_key:
+            try:
+                import requests as _req
+                from datetime import date as _date, timedelta as _td
+                end = _date.today().isoformat()
+                start = (_date.today() - _td(days=40)).isoformat()
+                resp = _req.get(
+                    f'https://api.tiingo.com/tiingo/daily/{ticker}/prices',
+                    params={'startDate': start, 'endDate': end, 'token': cls._tiingo_key},
+                    timeout=8,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data and len(data) >= 5:
+                        import pandas as _pd
+                        closes = _pd.Series(
+                            [d.get('adjClose') or d.get('close') for d in data],
+                        )
+                        return _compute(closes)
+            except Exception:
+                pass
+
+        return {'5d': None, '10d': None, '20d': None}
 
     @classmethod
     def calculate_sector_rs(cls, ticker: str, sector: str, ticker_5d_return: float = None) -> Dict:
@@ -181,6 +208,11 @@ class SectorRS:
     def clear_cache(cls):
         """Clear the sector ETF cache."""
         cls._sector_cache.clear()
+
+    @classmethod
+    def set_tiingo_key(cls, key: str) -> None:
+        """Configure Tiingo API key for fallback ETF data fetches."""
+        cls._tiingo_key = key or ""
 
 
 def get_sector_rs_bonus(ticker: str, sector: str, ticker_5d_return: float = None) -> int:

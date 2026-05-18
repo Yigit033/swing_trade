@@ -53,7 +53,21 @@ def invalidate_smallcap_engine_cache() -> None:
 @lru_cache(maxsize=1)
 def get_fetcher():
     from swing_trader.data.fetcher import DataFetcher
-    return DataFetcher(get_config())
+    import os
+    config = get_config()
+    data_cfg = config.get("data", {}) if isinstance(config, dict) else {}
+    keys_cfg = config.get("api_keys", {}) if isinstance(config, dict) else {}
+    source = data_cfg.get("source", "yfinance")
+    alpha_vantage_key = data_cfg.get("alpha_vantage_key") or data_cfg.get("alpha_vantage_api_key")
+    # Env vars override config.yaml (easier for production secrets)
+    tiingo_key  = os.environ.get("TIINGO_API_KEY")  or keys_cfg.get("tiingo", "")
+    finnhub_key = os.environ.get("FINNHUB_API_KEY") or keys_cfg.get("finnhub", "")
+    return DataFetcher(
+        source=source,
+        alpha_vantage_key=alpha_vantage_key,
+        tiingo_key=tiingo_key,
+        finnhub_key=finnhub_key,
+    )
 
 
 @lru_cache(maxsize=1)

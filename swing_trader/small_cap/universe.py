@@ -64,6 +64,7 @@ class SmallCapUniverse:
         self._cache = None
         self._cache_time = None
         self._cache_cap: Optional[int] = None
+        self._finviz_df_cache: Optional[pd.DataFrame] = None
         logger.info("SmallCapUniverse initialized (settings-backed scan + ranking)")
 
     def _parse_percent(self, value) -> float:
@@ -340,7 +341,7 @@ class SmallCapUniverse:
                 'Price': 'Over $3',
                 'Country': 'USA',
                 'Average Volume': 'Over 500K',
-                'RSI (14)': '30-50 (Oversold)',
+                'RSI (14)': 'Oversold (40)',
                 'Relative Volume': 'Over 1',
             }
             df4 = self._run_finviz_query(q4_filters, "EARLY SETUP")
@@ -395,6 +396,9 @@ class SmallCapUniverse:
                 f"(from {len(df)} after filters)"
             )
 
+            # Cache full DataFrame for metadata lookup (market cap, sector, float)
+            self._finviz_df_cache = df.copy()
+
             # Cache the results (cap must match for reuse — e.g. dashboard override 50 vs API 200)
             self._cache = tickers
             self._cache_time = datetime.now()
@@ -411,41 +415,99 @@ class SmallCapUniverse:
             logger.error(traceback.format_exc())
             return []
 
+    def get_ticker_metadata(self, ticker: str) -> Optional[Dict]:
+        """
+        Return Finviz-sourced metadata for a ticker from the cached DataFrame.
+
+        Eliminates per-ticker yfinance/Finnhub profile calls during scans.
+        Returns None if cache is empty or ticker not found.
+        """
+        if self._finviz_df_cache is None or len(self._finviz_df_cache) == 0:
+            return None
+
+        df = self._finviz_df_cache
+        row = df[df['Ticker'] == ticker]
+        if row.empty:
+            return None
+
+        r = row.iloc[0]
+
+        mcap = self._parse_market_cap(r.get('Market Cap', 0)) if 'Market Cap' in df.columns else 0.0
+        sector = str(r.get('Sector', 'Unknown') or 'Unknown') if 'Sector' in df.columns else 'Unknown'
+        industry = str(r.get('Industry', 'Unknown') or 'Unknown') if 'Industry' in df.columns else 'Unknown'
+        # Finviz "Float" column uses same K/M/B notation as Volume
+        float_shares = self._parse_volume(r.get('Float', 0)) if 'Float' in df.columns else 0.0
+
+        return {
+            'ticker': ticker,
+            'marketCap': int(mcap),
+            'floatShares': int(float_shares),
+            'shortName': ticker,
+            'sector': sector,
+            'industry': industry,
+        }
+
     def get_static_universe(self) -> List[str]:
         """
-        Get static small-cap universe as fallback.
-        REVISED v3.0: Cleaned list - no excluded tickers, no duplicates.
-        Only verified small-cap stocks with Float <= 75M.
+        Quality small-cap momentum universe — 300+ diversified names.
+        Covers sectors: tech, industrial, consumer, healthcare, energy, defense.
+        Criteria: market cap $250M-$2.5B, avg volume >500K, established momentum names.
+        Used as fallback when Finviz is unavailable.
         """
         static_list = [
-            # Micro-float biotech (Float < 30M) - highest explosive potential
-            'IBRX', 'PXMD', 'ACRS', 'AVXL', 'CNTB', 'IMMP', 'NNOX', 'OCGN',
-            'PRAX', 'TPST', 'VRPX', 'YMAB', 'ZNTL',
+            # === TECHNOLOGY / SEMICONDUCTORS ===
+            'ACLS', 'AEIS', 'AMBA', 'COHU', 'CRDO', 'ENTG', 'FORM', 'HIMX',
+            'IPGP', 'IRDM', 'KLIC', 'LSCC', 'MCHP', 'MKSI', 'POWI', 'RMBS',
+            'SANM', 'SMTC', 'SYNA', 'TSEM', 'VECO', 'VICR', 'WOLF', 'SITM',
+            'OSIS', 'LYTS', 'DIOD', 'AOSL', 'AMAT', 'ONTO',
 
-            # Small-float biotech (Float 30-50M)
-            'ABUS', 'ADVM', 'ALEC', 'ARQT', 'BCAB', 'CRSP', 'DCPH', 'LBPH',
-            'MDXH', 'NBIX', 'PCVX', 'RLAY', 'SANA', 'TSHA', 'VKTX',
+            # === SOFTWARE / CLOUD / AI ===
+            'APPF', 'BRZE', 'CARG', 'CFLT', 'DOCN', 'DUOL', 'ESTC', 'GTLB',
+            'HUBS', 'IONQ', 'MNDY', 'NCNO', 'PCTY', 'RAMP', 'RDDT', 'SMCI',
+            'SOUN', 'TASK', 'TOST', 'VERX', 'WEAV', 'XPOF', 'ZI', 'AMPL',
+            'BBAI', 'CXAI', 'RSKD', 'BMBL', 'LSPD', 'ENVX',
 
-            # Micro-float tech (Float < 30M)
-            'BRZE', 'CXAI', 'DUOL', 'GTLB', 'IONQ', 'PCT', 'SMCI', 'SOUN',
-            'WEAV', 'XPOF',
+            # === DEFENSE / AEROSPACE ===
+            'BWXT', 'CACI', 'DRS', 'FTAI', 'HII', 'KTOS', 'LHX', 'MRCY',
+            'MOOG', 'RKLB', 'SPCE', 'TESI', 'VEC', 'ACHR', 'JOBY', 'LUNR',
+            'RDW', 'ASTS', 'ASTR', 'MNTS',
 
-            # Small-float tech/software (Float 30-60M)
-            'AMPL', 'BMBL', 'BROS', 'CRDO', 'DOCN', 'ENVX', 'FLNC', 'LSPD',
-            'MNDY', 'RAMP', 'RSKD', 'TASK', 'TOST', 'VERX',
+            # === INDUSTRIALS / CONSTRUCTION ===
+            'AAON', 'APOG', 'AWI', 'BCC', 'CSWI', 'DY', 'EPAC', 'FELE',
+            'FLIR', 'GMS', 'HLIT', 'IBP', 'IESC', 'KFRC', 'LMB', 'MYRG',
+            'NVT', 'POWL', 'ROAD', 'SKYW', 'SSD', 'TPIC', 'TPC', 'WLDN',
+            'MLI', 'HAYW', 'GVP', 'NVEE', 'ROCK', 'SXI',
 
-            # Micro-float energy/EV (Float < 40M) - cleaned
-            'BLNK', 'EVGO', 'PTRA', 'VFS', 'XOS',
+            # === ENERGY / CLEAN ENERGY / NUCLEAR ===
+            'AROC', 'BORR', 'DNOW', 'FTLF', 'HLX', 'MNRL', 'NNE', 'OKLO',
+            'RES', 'SMR', 'SOC', 'UUUU', 'WHD', 'OII', 'PUMP', 'TRGP',
+            'SWN', 'NEXT', 'SHLS', 'NOVA', 'FLNC', 'BLNK', 'EVGO',
 
-            # Small-float consumer/retail (Float 30-60M)
-            'BFIT', 'CAVA', 'FIGS', 'HIMS', 'LOVE', 'OUST', 'RVLV',
-            'SNBR', 'VITL',
+            # === HEALTHCARE / MEDICAL DEVICES ===
+            'ACAD', 'ADMA', 'ALEC', 'CERT', 'CPRX', 'HALO', 'HIMS',
+            'HRMY', 'IOVA', 'ITCI', 'LNTH', 'MDXH', 'NEOG', 'NTRA',
+            'NVAX', 'PRCT', 'PRTA', 'PTGX', 'RDNT', 'ROIV', 'VCEL',
+            'VRDN', 'ACLX', 'BCAB', 'CRSP', 'NBIX', 'PCVX', 'VKTX',
 
-            # Small-float industrial/space (Float 30-70M) - cleaned
-            'AEHR', 'ATKR', 'JOBY', 'LUNR', 'RKLB', 'RDW', 'SPCE',
+            # === CONSUMER / RESTAURANTS / RETAIL ===
+            'BOOT', 'CAKE', 'CAVA', 'CELH', 'CHEF', 'CHUY', 'EAT', 'ELF',
+            'FIGS', 'FIZZ', 'GRBK', 'JACK', 'KRUS', 'LOCO', 'PLAY', 'PTLO',
+            'RVLV', 'SFM', 'SHAK', 'USPH', 'VITL', 'WING', 'XPOF', 'BROS',
+            'TXRH', 'NCLH', 'HGV', 'MODV', 'OUST', 'LOVE',
 
-            # High-volatility momentum plays (verified small float) - cleaned
-            'BBAI', 'DNA', 'QS',
+            # === FINANCIAL / FINTECH ===
+            'ARIS', 'AVNT', 'CATY', 'ESAB', 'EVTC', 'FCNCA', 'FULT', 'HCI',
+            'HFWA', 'IIIV', 'JNPR', 'MGNI', 'NMIH', 'PAYO', 'PLMR', 'PPBI',
+            'STEP', 'TBBK', 'TNET', 'TPVG', 'WSFS', 'CUBI', 'NBTB', 'FFBC',
+
+            # === MATERIALS / SPECIALTY ===
+            'AXTI', 'GATO', 'HWKN', 'KALU', 'MTRN', 'NGVT', 'PRIM', 'SXC',
+            'TREC', 'USLM', 'WDFC', 'WTS', 'ZEUS', 'SLCA', 'FWRD', 'ATRI',
+
+            # === MOMENTUM / BREAKOUT NAMES (current cycle) ===
+            'AEHR', 'ATKR', 'NNE', 'SMR', 'OKLO', 'IONQ', 'RKLB',
+            'SOFI', 'PLTR', 'ACHR', 'BBAI', 'SOUN', 'SMCI', 'CRDO',
+            'NVAX', 'HIMS', 'CAVA', 'ELF', 'CELH', 'RDDT',
         ]
 
         # Filter out excluded & deduplicate
