@@ -293,7 +293,7 @@ class SmallCapUniverse:
                 q1_filters = {
                     'Market Cap.': 'Small ($300mln to $2bln)',
                     'Float': 'Under 100M',
-                    'Price': 'Over $8',
+                    'Price': 'Over $7',
                     'Country': 'USA',
                     'Relative Volume': 'Over 1.5',
                     'Volatility': 'Week - Over 5%',
@@ -310,7 +310,7 @@ class SmallCapUniverse:
                 q2_filters = {
                     'Market Cap.': 'Small ($300mln to $2bln)',
                     'Float': 'Under 100M',
-                    'Price': 'Over $8',
+                    'Price': 'Over $7',
                     'Country': 'USA',
                     'Average Volume': 'Over 750K',
                     'RSI (14)': 'Not Overbought (<60)',
@@ -326,7 +326,7 @@ class SmallCapUniverse:
             if self._us.enable_finviz_query_wider:
                 q3_filters = {
                     'Market Cap.': 'Small ($300mln to $2bln)',
-                    'Price': 'Over $8',
+                    'Price': 'Over $7',
                     'Country': 'USA',
                     'Relative Volume': 'Over 2',
                     'Average Volume': 'Over 1M',
@@ -346,7 +346,7 @@ class SmallCapUniverse:
             q4_filters = {
                 'Market Cap.': 'Small ($300mln to $2bln)',
                 'Float': 'Under 100M',
-                'Price': 'Over $8',
+                'Price': 'Over $7',
                 'Country': 'USA',
                 'Average Volume': 'Over 500K',
                 'RSI (14)': 'Oversold (40)',

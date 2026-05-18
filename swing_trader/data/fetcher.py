@@ -436,24 +436,29 @@ class DataFetcher:
             return None
 
     def _batch_tiingo(self, tickers: List[str], start_date: str, end_date: str,
-                      max_workers: int = 5) -> Dict[str, pd.DataFrame]:
-        """Concurrent Tiingo fetch for multiple tickers."""
+                      max_workers: int = 1) -> Dict[str, pd.DataFrame]:
+        """
+        Sequential Tiingo fetch with throttling to stay under the 50 req/min free-tier limit.
+
+        Old approach (max_workers=5, concurrent) caused 429 errors after ~95/200 tickers.
+        Sequential with 1.3s delay = ~46 req/min — reliably under the limit.
+        Tradeoff: 200 tickers takes ~4 min, but all 200 are fetched vs partial failure.
+        """
         if not self.tiingo_key:
             return {}
         results: Dict[str, pd.DataFrame] = {}
-        logger.info(f"Tiingo: fetching {len(tickers)} tickers ({start_date} → {end_date})")
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(self._fetch_tiingo_single, t, start_date, end_date): t
-                       for t in tickers}
-            for future in as_completed(futures):
-                ticker = futures[future]
-                try:
-                    df = future.result()
-                    if df is not None:
-                        results[ticker] = df
-                except Exception:
-                    pass
-        logger.info(f"Tiingo: {len(results)}/{len(tickers)} tickers fetched")
+        total = len(tickers)
+        logger.info(
+            f"Tiingo: fetching {total} tickers sequentially with throttle "
+            f"({start_date} → {end_date}, ~{total * 1.3 / 60:.1f} min expected)"
+        )
+        for idx, ticker in enumerate(tickers):
+            df = self._fetch_tiingo_single(ticker, start_date, end_date)
+            if df is not None:
+                results[ticker] = df
+            if idx < total - 1:
+                time.sleep(1.3)  # 1 req per 1.3s = ~46 req/min (safely under 50/min free limit)
+        logger.info(f"Tiingo: {len(results)}/{total} tickers fetched")
         return results
 
     def _batch_finnhub(self, tickers: List[str], start_date: str, end_date: str,

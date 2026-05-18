@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 
 from fastapi import APIRouter
-from api.deps import get_regime_storage
+from api.deps import get_regime_storage, get_config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/regime", tags=["regime"])
@@ -24,7 +24,7 @@ def get_current_regime():
     try:
         from swing_trader.small_cap.signals import SmallCapSignals
 
-        result = SmallCapSignals().detect_market_regime()
+        result = SmallCapSignals(get_config()).detect_market_regime()
     except Exception as e:
         logger.error("Live regime detection failed: %s", e)
         latest = storage.get_latest()

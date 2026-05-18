@@ -1099,7 +1099,7 @@ class SmallCapSignals:
                             )
                             return result
             except Exception as te:
-                logger.debug(f"Tiingo SPY fallback failed: {te}")
+                logger.warning(f"Tiingo SPY fallback failed: {te}")
 
         r = regime_unknown(_yf_error or "rate_limit_exhausted")
         logger.warning("Market regime unavailable: %s", r.get("detect_error"))
