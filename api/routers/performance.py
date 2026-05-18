@@ -28,26 +28,21 @@ def _fetch_live_prices(tickers: list) -> dict:
         return {}
     try:
         import yfinance as yf
-        tickers_str = " ".join(tickers)
-        data = yf.download(tickers_str, period="5d",
-                           progress=False, auto_adjust=True)
+        # yfinance 1.x: data["Close"] is always a DataFrame (even single ticker).
+        # Pass list (not string join) and access each ticker uniformly.
+        data = yf.download(tickers, period="5d", progress=False, auto_adjust=True)
         if data.empty:
             return {}
         prices = {}
-        close = data["Close"]
-        if len(tickers) == 1:
-            # Single ticker — Close is a Series
-            val = close.dropna()
-            if not val.empty:
-                prices[tickers[0]] = round(float(val.iloc[-1].item()), 4)
-        else:
-            for t in tickers:
-                try:
-                    val = close[t].dropna()
-                    if not val.empty:
-                        prices[t] = round(float(val.iloc[-1].item()), 4)
-                except Exception:
-                    pass
+        close = data["Close"]  # DataFrame: columns = ticker names
+        for t in tickers:
+            try:
+                col = close[t] if t in close.columns else close.iloc[:, 0]
+                val = col.dropna()
+                if not val.empty:
+                    prices[t] = round(float(val.iloc[-1].item()), 4)
+            except Exception:
+                pass
         return prices
     except Exception as e:
         logger.warning(f"yfinance live price fetch failed: {e}")

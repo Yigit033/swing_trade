@@ -227,7 +227,9 @@ class DataFetcher:
 
                     for ticker in chunk:
                         try:
-                            df = raw[ticker] if len(chunk) > 1 else raw
+                            # yfinance 1.x: group_by='ticker' puts ticker at level-0 of MultiIndex.
+                            # raw[ticker] works for both single and multi-ticker chunks.
+                            df = raw[ticker]
                             df = df.dropna(how='all').reset_index()
 
                             if 'Datetime' in df.columns:

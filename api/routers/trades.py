@@ -64,24 +64,20 @@ def _enrich_open_trades_inline(trades: list) -> list:
         return trades
     try:
         import yfinance as yf
-        data = yf.download(" ".join(tickers), period="5d",
-                           progress=False, auto_adjust=True)
+        # yfinance 1.x: data["Close"] is always a DataFrame (even single ticker).
+        data = yf.download(tickers, period="5d", progress=False, auto_adjust=True)
         if data.empty:
             return trades
         prices = {}
-        close = data["Close"]
-        if len(tickers) == 1:
-            val = close.dropna()
-            if not val.empty:
-                prices[tickers[0]] = round(float(val.iloc[-1].item()), 4)
-        else:
-            for tk in tickers:
-                try:
-                    val = close[tk].dropna()
-                    if not val.empty:
-                        prices[tk] = round(float(val.iloc[-1].item()), 4)
-                except Exception:
-                    pass
+        close = data["Close"]  # DataFrame: columns = ticker names
+        for tk in tickers:
+            try:
+                col = close[tk] if tk in close.columns else close.iloc[:, 0]
+                val = col.dropna()
+                if not val.empty:
+                    prices[tk] = round(float(val.iloc[-1].item()), 4)
+            except Exception:
+                pass
         for t in trades:
             if t.get("status") in ("OPEN", "PENDING"):
                 cp = prices.get(t["ticker"])
