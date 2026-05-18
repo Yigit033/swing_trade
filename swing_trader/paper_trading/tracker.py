@@ -92,35 +92,72 @@ class PaperTradeTracker:
         """
         try:
             stock = yf.Ticker(ticker)
-            
+
             # yfinance 'end' is EXCLUSIVE — add 2 days to cover weekends/holidays
             if end_date is None:
                 end_dt = datetime.now() + timedelta(days=2)
             else:
                 end_dt = datetime.strptime(end_date[:10], '%Y-%m-%d') + timedelta(days=2)
-            
+
             end_date_adj = end_dt.strftime('%Y-%m-%d')
-            
+
             df = stock.history(start=start_date, end=end_date_adj)
-            
+
             # Fallback: if start/end approach returns empty, use period
             if df is None or len(df) == 0:
                 logger.warning(f"No data with start/end for {ticker}, trying period='1mo'")
                 df = stock.history(period='1mo')
-            
-            if df is None or len(df) == 0:
-                logger.warning(f"No price data for {ticker}")
-                return None
-            
-            # Reset index to have Date as column
-            df = df.reset_index()
-            df['Date'] = pd.to_datetime(df['Date']).dt.date
-            
-            return df
-            
+
+            if df is not None and len(df) > 0:
+                df = df.reset_index()
+                df['Date'] = pd.to_datetime(df['Date']).dt.date
+                return df
+
         except Exception as e:
             logger.error(f"Error fetching price history for {ticker}: {e}")
-            return None
+
+        # yfinance failed — try Tiingo (tracks open trades; needs real price data)
+        tiingo_key = self._get_tiingo_key()
+        if tiingo_key:
+            try:
+                import requests as _req
+                end_for_tiingo = end_date or (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+                resp = _req.get(
+                    f'https://api.tiingo.com/tiingo/daily/{ticker}/prices',
+                    params={
+                        'startDate': start_date,
+                        'endDate': end_for_tiingo,
+                        'token': tiingo_key,
+                        'columns': 'date,open,high,low,close,volume',
+                    },
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    raw = resp.json()
+                    if raw:
+                        df = pd.DataFrame(raw)
+                        df.rename(columns={'date': 'Date', 'open': 'Open', 'high': 'High',
+                                           'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
+                        df['Date'] = pd.to_datetime(df['Date']).dt.tz_convert(None).dt.date
+                        logger.info(f"[Tiingo] Price history for {ticker}: {len(df)} rows")
+                        return df
+            except Exception as te:
+                logger.warning(f"Tiingo price history failed for {ticker}: {te}")
+
+        logger.warning(f"No price data for {ticker} (yfinance and Tiingo both failed)")
+        return None
+
+    def _get_tiingo_key(self) -> str:
+        """Read Tiingo API key from config.yaml (no circular import)."""
+        try:
+            import yaml
+            from pathlib import Path
+            config_path = Path(__file__).parent.parent.parent / 'config.yaml'
+            with open(config_path, encoding='utf-8') as f:
+                cfg = yaml.safe_load(f) or {}
+            return cfg.get('api_keys', {}).get('tiingo', '')
+        except Exception:
+            return ''
     
     def check_exit_conditions(
         self,

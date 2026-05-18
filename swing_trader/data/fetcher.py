@@ -406,7 +406,7 @@ class DataFetcher:
             df = df[[c for c in required if c in df.columns]]
             return df if len(df) >= 20 else None
         except Exception as e:
-            logger.debug(f"Tiingo failed for {ticker}: {e}")
+            logger.warning(f"Tiingo failed for {ticker}: {e}")
             return None
 
     def _fetch_finnhub_single(self, ticker: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
@@ -432,7 +432,7 @@ class DataFetcher:
             })
             return df if len(df) >= 20 else None
         except Exception as e:
-            logger.debug(f"Finnhub failed for {ticker}: {e}")
+            logger.warning(f"Finnhub failed for {ticker}: {e}")
             return None
 
     def _batch_tiingo(self, tickers: List[str], start_date: str, end_date: str,

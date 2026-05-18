@@ -37,16 +37,15 @@ class SmallCapFilters:
     """
     
     # SENIOR TRADER FILTER CONSTANTS
-    MIN_MARKET_CAP = 250_000_000      # $250M (was $300M)
-    MAX_MARKET_CAP = 2_500_000_000    # $2.5B (was $3B)
-    MIN_AVG_VOLUME = 750_000          # 750K shares (was 1M)
+    MIN_MARKET_CAP = 250_000_000      # $250M
+    MAX_MARKET_CAP = 2_500_000_000    # $2.5B
+    MIN_DOLLAR_VOLUME = 5_000_000     # $5M/day — price×shares, real liquidity (replaces share count)
     MIN_ATR_PERCENT = 0.03            # Default; live value from SmallCapSettings.min_atr_percent
-    MAX_FLOAT = 150_000_000            # 150M shares (was 80M - raised based on data analysis)
-    IDEAL_FLOAT = 60_000_000          # 60M - main filter for explosion potential
-    MIN_PRICE = 3.00                  # $3 (avoid penny stocks)
-    MAX_PRICE = 200.00                # $200 (realistic small-cap)
-    EARNINGS_EXCLUSION_DAYS = 3       # ±3 days (was 7 - tightened to only block pre-event risk)
-    ATR_PERIOD = 10                   # 10-period ATR (was 14, faster reaction)
+    MAX_FLOAT = 80_000_000            # 80M shares — true small-cap explosion potential (was 150M)
+    MIN_PRICE = 8.00                  # $8 — institutional participation floor (was $3)
+    MAX_PRICE = 200.00                # $200
+    EARNINGS_EXCLUSION_DAYS = 3       # pre-earnings only: 0→+3 days (post-earnings NOT blocked)
+    ATR_PERIOD = 10                   # 10-period ATR (faster reaction)
     
     # FLOAT TIERING THRESHOLDS (for scoring bonus)
     FLOAT_TIER_ATOMIC = 15_000_000    # ≤15M: +20 pts
@@ -102,12 +101,28 @@ class SmallCapFilters:
             return 0.0
     
     def calculate_avg_volume(self, df: pd.DataFrame, period: int = 20) -> float:
-        """Calculate average volume over period."""
+        """Calculate average share volume over period (kept for display/logging)."""
         if df is None or len(df) < period:
             return 0.0
-        
         try:
             return float(df['Volume'].tail(period).mean())
+        except Exception:
+            return 0.0
+
+    def calculate_avg_dollar_volume(self, df: pd.DataFrame, period: int = 20) -> float:
+        """
+        Calculate average DOLLAR volume (price × shares) over period.
+
+        Dollar volume is the correct liquidity measure:
+        - A $4 stock trading 10M shares = $40M DV → excellent
+        - A $15 stock trading 250K shares = $3.75M DV → too thin
+        Share-count-only filters get this backwards.
+        """
+        if df is None or len(df) < period:
+            return 0.0
+        try:
+            tail = df.tail(period)
+            return float((tail['Volume'] * tail['Close']).mean())
         except Exception:
             return 0.0
     
@@ -124,11 +139,16 @@ class SmallCapFilters:
         
         return True, f"Market cap OK (${market_cap/1e6:.0f}M)"
     
-    def check_volume(self, avg_volume: float) -> Tuple[bool, str]:
-        """Check if average volume meets minimum threshold."""
-        if avg_volume < self.MIN_AVG_VOLUME:
-            return False, f"Volume too low ({avg_volume/1e6:.2f}M < 750K)"
-        return True, f"Volume OK ({avg_volume/1e6:.2f}M)"
+    def check_dollar_volume(self, avg_dollar_vol: float) -> Tuple[bool, str]:
+        """
+        Check minimum dollar volume — the real liquidity gate.
+        $5M/day ensures entries/exits don't move the price and
+        confirms real institutional interest (not just penny stock noise).
+        """
+        min_dv = self.MIN_DOLLAR_VOLUME
+        if avg_dollar_vol < min_dv:
+            return False, f"Dollar volume too low (${avg_dollar_vol/1e6:.1f}M/day < $5M)"
+        return True, f"Dollar volume OK (${avg_dollar_vol/1e6:.1f}M/day)"
     
     def check_atr_percent(self, atr_pct: float) -> Tuple[bool, str]:
         """Check if ATR% meets volatility threshold."""
@@ -138,14 +158,19 @@ class SmallCapFilters:
         return True, f"ATR% OK ({atr_pct*100:.1f}%)"
     
     def check_float(self, float_shares: float) -> Tuple[bool, str]:
-        """Check if float is within small-cap range (≤150M, ideal ≤60M)."""
+        """
+        Check if float is within explosion range (≤80M).
+
+        80M is the hard ceiling. Above this, a stock behaves like mid-cap —
+        institutional supply absorbs retail buying and kills the explosive move.
+        Below 20M, a single catalyst can double the stock in days.
+        """
         if float_shares is None or float_shares <= 0:
-            return True, "Float unknown (allowing)"  # Allow if unknown
-        
+            return True, "Float unknown (allowing)"
+
         if float_shares > self.MAX_FLOAT:
-            return False, f"Float too large ({float_shares/1e6:.0f}M > 150M)"
-        
-        # Show tier info
+            return False, f"Float too large ({float_shares/1e6:.0f}M > 80M — mid-cap behavior, no explosion)"
+
         if float_shares <= self.FLOAT_TIER_ATOMIC:
             return True, f"Float ATOMIC ({float_shares/1e6:.0f}M) +20pts"
         elif float_shares <= self.FLOAT_TIER_MICRO:
@@ -154,30 +179,26 @@ class SmallCapFilters:
             return True, f"Float SMALL ({float_shares/1e6:.0f}M) +10pts"
         elif float_shares <= self.FLOAT_TIER_TIGHT:
             return True, f"Float TIGHT ({float_shares/1e6:.0f}M) +5pts"
-        elif float_shares <= 80_000_000:
+        else:  # 60-80M
             return True, f"Float OK ({float_shares/1e6:.0f}M) +0pts"
-        else:
-            return True, f"Float WIDE ({float_shares/1e6:.0f}M) -5pts penalty"
     
     def get_float_tier_bonus(self, float_shares: float) -> int:
-        """Get bonus points for float tier. Negative bonus for wide floats."""
+        """Get bonus points for float tier. Hard filter at 80M means no penalty tier needed."""
         if float_shares is None or float_shares <= 0:
             return 0
-        
-        if float_shares <= self.FLOAT_TIER_ATOMIC:
-            return 20  # ATOMIC
-        elif float_shares <= self.FLOAT_TIER_MICRO:
-            return 15  # MICRO
-        elif float_shares <= self.FLOAT_TIER_SMALL:
-            return 10  # SMALL
-        elif float_shares <= self.FLOAT_TIER_TIGHT:
-            return 5   # TIGHT
-        elif float_shares <= 80_000_000:
-            return 0   # OK - no bonus no penalty
-        elif float_shares <= self.MAX_FLOAT: # 80M < float_shares <= 150M
-            return -5  # WIDE - penalty but not rejected
+
+        if float_shares <= self.FLOAT_TIER_ATOMIC:   # ≤15M
+            return 20
+        elif float_shares <= self.FLOAT_TIER_MICRO:  # ≤30M
+            return 15
+        elif float_shares <= self.FLOAT_TIER_SMALL:  # ≤45M
+            return 10
+        elif float_shares <= self.FLOAT_TIER_TIGHT:  # ≤60M
+            return 5
+        elif float_shares <= self.MAX_FLOAT:          # 60-80M
+            return 0
         else:
-            return -100 # Rejected by hard filter, but return a large penalty if somehow reached
+            return -100  # hard filter should have caught this
     
     def check_price(self, price: float) -> Tuple[bool, str]:
         """Check if price is within acceptable range ($3-$200)."""
@@ -185,7 +206,7 @@ class SmallCapFilters:
             return False, "Unknown price"
         
         if price < self.MIN_PRICE:
-            return False, f"Price too low (${price:.2f} < $3 - penny stock risk)"
+            return False, f"Price too low (${price:.2f} < ${self.MIN_PRICE:.0f} — below institutional participation floor)"
         
         if price > self.MAX_PRICE:
             return False, f"Price too high (${price:.2f} > $200)"
@@ -210,14 +231,12 @@ class SmallCapFilters:
                     for earn_date in earnings_dates.index:
                         earn_dt = earn_date.to_pydatetime().replace(tzinfo=None)
                         days_diff = (earn_dt.date() - signal_date.date()).days
-                        
-                        # Only block PRE-earnings (upcoming 3 days)
+
+                        # Block PRE-earnings only (0 to +3 days upcoming)
+                        # Post-earnings (negative days_diff) are NOT blocked —
+                        # post-earnings gap+continuation is one of the best swing setups.
                         if 0 <= days_diff <= self.EARNINGS_EXCLUSION_DAYS:
                             return False, f"Earnings in {days_diff} days (pre-event risk)"
-                        
-                        # Also block day-of (just happened today)
-                        if days_diff == -1:
-                            return False, f"Earnings yesterday (wait for dust to settle)"
             except:
                 pass
             
@@ -269,10 +288,11 @@ class SmallCapFilters:
         if not passed:
             return False, results
         
-        # 2. Average Volume
+        # 2. Dollar Volume — real liquidity gate ($5M/day minimum)
         avg_vol = self.calculate_avg_volume(df)
-        passed, reason = self.check_volume(avg_vol)
-        results['filters']['avg_volume'] = {'passed': passed, 'reason': reason, 'value': avg_vol}
+        avg_dollar_vol = self.calculate_avg_dollar_volume(df)
+        passed, reason = self.check_dollar_volume(avg_dollar_vol)
+        results['filters']['avg_volume'] = {'passed': passed, 'reason': reason, 'value': avg_dollar_vol}
         if not passed:
             return False, results
         

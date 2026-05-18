@@ -217,11 +217,19 @@ class SmallCapUniverse:
         df['change_score'] = np.clip(df['change_score'] - chase_penalty, 0, 100)
 
         # ============================================================
-        # COMPONENT 3: Volume Score (volume weight) — absolute liquidity
-        # Log scale: 500K=0, 1M=40, 5M=70, 10M+=100
+        # COMPONENT 3: Dollar Volume Score — REAL liquidity signal
+        # Price × Shares = actual money flowing into the stock.
+        # This correctly ranks a $4 stock with 10M shares ($40M DV)
+        # over a $20 stock with 200K shares ($4M DV).
+        # Log scale: $1M=29, $5M=50, $10M=59, $50M+=100
         # ============================================================
+        if 'Price' in df.columns:
+            df['price_numeric'] = pd.to_numeric(df['Price'], errors='coerce').fillna(15.0)
+        else:
+            df['price_numeric'] = 15.0
+        df['dollar_vol_numeric'] = df['vol_numeric'] * df['price_numeric']
         df['vol_score'] = np.clip(
-            np.log10(df['vol_numeric'].clip(lower=1)) / np.log10(10_000_000) * 100,
+            np.log10(df['dollar_vol_numeric'].clip(lower=1)) / np.log10(50_000_000) * 100,
             0, 100
         )
 
@@ -285,11 +293,11 @@ class SmallCapUniverse:
                 q1_filters = {
                     'Market Cap.': 'Small ($300mln to $2bln)',
                     'Float': 'Under 100M',
-                    'Price': 'Over $3',
+                    'Price': 'Over $8',
                     'Country': 'USA',
                     'Relative Volume': 'Over 1.5',
                     'Volatility': 'Week - Over 5%',
-                    'Average Volume': 'Over 200K',
+                    'Average Volume': 'Over 500K',
                 }
                 df1 = self._run_finviz_query(q1_filters, "MOMENTUM HUNTERS")
                 if len(df1) > 0:
@@ -302,7 +310,7 @@ class SmallCapUniverse:
                 q2_filters = {
                     'Market Cap.': 'Small ($300mln to $2bln)',
                     'Float': 'Under 100M',
-                    'Price': 'Over $3',
+                    'Price': 'Over $8',
                     'Country': 'USA',
                     'Average Volume': 'Over 750K',
                     'RSI (14)': 'Not Overbought (<60)',
@@ -318,7 +326,7 @@ class SmallCapUniverse:
             if self._us.enable_finviz_query_wider:
                 q3_filters = {
                     'Market Cap.': 'Small ($300mln to $2bln)',
-                    'Price': 'Over $3',
+                    'Price': 'Over $8',
                     'Country': 'USA',
                     'Relative Volume': 'Over 2',
                     'Average Volume': 'Over 1M',
@@ -338,7 +346,7 @@ class SmallCapUniverse:
             q4_filters = {
                 'Market Cap.': 'Small ($300mln to $2bln)',
                 'Float': 'Under 100M',
-                'Price': 'Over $3',
+                'Price': 'Over $8',
                 'Country': 'USA',
                 'Average Volume': 'Over 500K',
                 'RSI (14)': 'Oversold (40)',
