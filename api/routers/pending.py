@@ -35,7 +35,12 @@ def confirm_trade(
     trade_id: int,
     user_id: Optional[str] = Depends(get_current_user_id),
 ):
-    """Manually confirm a single pending trade → move to OPEN at entry_price."""
+    """
+    Manually confirm a single pending trade.
+
+    Runs the same gap-filter + stop/target recalculation logic as the auto-scheduler.
+    Old behavior: just flipped status=OPEN without recalculating stop/target at actual Open price.
+    """
     storage = get_paper_storage()
     trade = storage.get_trade_by_id(trade_id, user_id)
     if not trade:
@@ -43,10 +48,30 @@ def confirm_trade(
     if trade.get("status") != "PENDING":
         raise HTTPException(status_code=400, detail=f"Trade is {trade.get('status')}, not PENDING")
 
-    ok = storage.update_trade(trade_id, {
-        "status": "OPEN",
-        "updated_at": datetime.now().isoformat(),
-    }, user_id)
-    if not ok:
-        raise HTTPException(status_code=500, detail="Failed to update trade")
-    return {"message": "Trade confirmed and moved to OPEN", "trade": storage.get_trade_by_id(trade_id, user_id)}
+    tracker = get_paper_tracker()
+    results = tracker.confirm_pending_trades(user_id)
+
+    # Find the result for this specific trade
+    result = next((r for r in results if r.get("id") == trade_id), None)
+    if result is None:
+        # confirm_pending_trades didn't process this trade (already confirmed by another call?)
+        refreshed = storage.get_trade_by_id(trade_id, user_id)
+        return {"message": "Trade already processed", "trade": refreshed}
+
+    confirm_status = result.get("confirm_status")
+    if confirm_status == "confirmed":
+        return {
+            "message": f"Confirmed at Open ${result.get('entry_price', '?')} (gap {result.get('gap_pct', 0):+.1f}%)",
+            "trade": storage.get_trade_by_id(trade_id, user_id),
+        }
+    elif confirm_status == "rejected":
+        return {
+            "message": f"Rejected: {result.get('reject_reason', 'gap filter')}",
+            "trade": storage.get_trade_by_id(trade_id, user_id),
+        }
+    else:
+        # waiting — next trading day not yet available
+        return {
+            "message": "No next trading day yet — trade stays PENDING until market opens",
+            "trade": storage.get_trade_by_id(trade_id, user_id),
+        }

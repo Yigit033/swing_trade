@@ -630,8 +630,17 @@ class PaperTradeStorage:
             if conn:
                 conn.close()
 
-    def check_duplicate(self, ticker: str, entry_date: str, user_id: Optional[str] = None) -> bool:
-        """Return True if a PENDING/OPEN trade for this ticker+date already exists."""
+    def check_duplicate(self, ticker: str, entry_date: str = None, user_id: Optional[str] = None) -> bool:
+        """
+        Return True if this ticker already has an active PENDING or OPEN trade.
+
+        entry_date parameter is kept for API compatibility but intentionally ignored:
+        the old query matched entry_date (date-only string) against stored values that
+        include a time component (e.g. "2026-05-18 17:56:02"), so the exact-match
+        ALWAYS returned 0 — duplicate check silently never fired.
+
+        Correct rule: one active trade per ticker at a time, regardless of date.
+        """
         ph = _ph()
         conn = None
         try:
@@ -640,16 +649,16 @@ class PaperTradeStorage:
             if user_id:
                 cursor.execute(f"""
                     SELECT COUNT(*) FROM paper_trades
-                    WHERE ticker = {ph} AND entry_date = {ph}
+                    WHERE ticker = {ph}
                     AND status IN ('OPEN', 'PENDING')
                     AND (user_id IS NULL OR user_id = {ph})
-                """, (ticker, entry_date, user_id))
+                """, (ticker, user_id))
             else:
                 cursor.execute(f"""
                     SELECT COUNT(*) FROM paper_trades
-                    WHERE ticker = {ph} AND entry_date = {ph}
+                    WHERE ticker = {ph}
                     AND status IN ('OPEN', 'PENDING')
-                """, (ticker, entry_date))
+                """, (ticker,))
             count = cursor.fetchone()[0]
             return count > 0
         except Exception as e:

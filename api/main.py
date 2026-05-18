@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 _PENDING_SCHEDULER_ENABLED = _os.environ.get("ENABLE_PENDING_SCHEDULER", "1").strip().lower() not in (
     "0", "false", "no",
 )
-_PENDING_INTERVAL_SEC = int(_os.environ.get("PENDING_CONFIRM_INTERVAL_SEC", "3600"))
+_PENDING_INTERVAL_SEC = int(_os.environ.get("PENDING_CONFIRM_INTERVAL_SEC", "300"))
 
 
 async def _scheduled_pending_confirm_loop() -> None:

@@ -33,7 +33,7 @@ NYSE_OPEN_TIME = "09:30"  # NYSE opens 09:30 ET (= 16:30 Turkey time in winter)
 
 # V4 Constants
 MAX_GAP_UP_PCT = 5.0     # Skip if gap-up > 5%
-MAX_GAP_DOWN_PCT = 3.0   # Skip if gap-down > 3%
+MAX_GAP_DOWN_PCT = 5.0   # Skip if gap-down > 5% (small-caps have 3-5% ATR; 3% was too tight)
 
 CONFIRM_ATR_MULTIPLIER = 1.5   # Stop distance at confirmation (aligned with signal generator)
 CONFIRM_TARGET_R = 2.0         # Target = entry + R × this (was 3.0 — too greedy)
@@ -457,29 +457,45 @@ class PaperTradeTracker:
         except Exception as e:
             logger.warning(f"Could not calculate ATR for {signal['ticker']}: {e}")
         
+        # Compute expected confirmation date (next weekday after signal_date)
+        signal_date_str = signal.get('date', datetime.now(tz=_NYSE_TZ).strftime('%Y-%m-%d'))
+        signal_dt = datetime.strptime(signal_date_str, '%Y-%m-%d')
+        days_ahead = 1
+        confirm_dt = signal_dt + timedelta(days=days_ahead)
+        while confirm_dt.weekday() >= 5:  # skip Saturday (5) and Sunday (6)
+            days_ahead += 1
+            confirm_dt = signal_dt + timedelta(days=days_ahead)
+        confirm_date_str = confirm_dt.strftime('%d %B %Y')  # e.g. "19 May 2026"
+
         trade = {
             'ticker': signal['ticker'],
-            'entry_date': signal.get('date', datetime.now(tz=_NYSE_TZ).strftime('%Y-%m-%d')) + ' ' + datetime.now(tz=_NYSE_TZ).strftime('%H:%M'),
+            'entry_date': signal_date_str + ' ' + datetime.now(tz=_NYSE_TZ).strftime('%H:%M'),
             'entry_price': signal_price,  # Will be updated at confirmation
             'stop_loss': signal['stop_loss'],
             'target': signal['target_1'],
-            'target_2': signal.get('target_2', signal['target_1']),  # v3.1: store T2
+            'target_2': signal.get('target_2', signal['target_1']),
             'swing_type': signal.get('swing_type', 'A'),
             'quality_score': signal.get('quality_score', 0),
             'position_size': signal.get('position_size', 100),
             'max_hold_days': signal.get('hold_days_max', 7),
-            'notes': f"PENDING — Ertesi gün açılışta girilecek. Sinyal: ${signal_price:.2f}",
+            'notes': (
+                f"PENDING — {confirm_date_str} açılışında onaylanacak. "
+                f"Sinyal fiyatı: ${signal_price:.2f} | "
+                f"Gap filtresi: -{MAX_GAP_DOWN_PCT}% / +{MAX_GAP_UP_PCT}%"
+            ),
             'trailing_stop': signal['stop_loss'],
             'initial_stop': signal['stop_loss'],
             'atr': round(atr, 4) if atr else 0,
             'signal_price': signal_price,
             'status': 'PENDING'
         }
-        
-        # Check for same-day duplicate (OPEN/PENDING only)
-        date_only = trade['entry_date'][:10]
-        if self.storage.check_duplicate(trade['ticker'], date_only, user_id):
-            logger.warning(f"Trade already exists: {trade['ticker']} on {date_only}")
+
+        # Block if ticker already has an active PENDING or OPEN trade.
+        # NOTE: old check used date-only string vs stored datetime — always missed. Fixed in storage.
+        if self.storage.check_duplicate(trade['ticker'], user_id=user_id):
+            logger.warning(
+                f"Duplicate blocked: {trade['ticker']} already has an active PENDING/OPEN trade"
+            )
             return -1
 
         # Cooldown: block re-entry within N days of a recently CLOSED trade.
