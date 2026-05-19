@@ -61,13 +61,13 @@ class RegimeThresholds(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    bear_tentative_min_quality: int = Field(default=70, ge=50, le=100)
+    bear_tentative_min_quality: int = Field(default=78, ge=50, le=100)
     bear_tentative_top_n_max: int = Field(default=4, ge=1, le=50)
-    bear_confirmed_min_quality: int = Field(default=72, ge=50, le=100)
+    bear_confirmed_min_quality: int = Field(default=80, ge=50, le=100)
     bear_confirmed_top_n_max: int = Field(default=3, ge=1, le=50)
-    caution_confirmed_min_quality: int = Field(default=68, ge=50, le=100)
+    caution_confirmed_min_quality: int = Field(default=75, ge=50, le=100)
     caution_confirmed_top_n_max: int = Field(default=4, ge=1, le=50)
-    caution_other_min_quality: int = Field(default=63, ge=50, le=100)
+    caution_other_min_quality: int = Field(default=73, ge=50, le=100)
     caution_other_top_n_max: int = Field(default=5, ge=1, le=50)
 
 
@@ -88,7 +88,7 @@ class SmallCapSettings(BaseModel):
         description="Hard reject in scan_stock when RSI above this (Type S exempt).",
     )
     volume_surge_trigger: float = Field(
-        default=1.5,
+        default=2.0,
         ge=1.0,
         le=5.0,
         description="Minimum volume vs 20d avg to pass check_all_triggers.",
@@ -126,10 +126,10 @@ class SmallCapSettings(BaseModel):
     t2_atr_ratio: float = Field(default=2.0, ge=1.0, le=4.0)
     type_target_caps: Dict[str, TypeTargetCaps] = Field(
         default_factory=lambda: {
-            "S": TypeTargetCaps(t1_max_pct=0.12, t2_max_pct=0.22),
-            "B": TypeTargetCaps(t1_max_pct=0.10, t2_max_pct=0.18),
-            "C": TypeTargetCaps(t1_max_pct=0.08, t2_max_pct=0.15),
-            "A": TypeTargetCaps(t1_max_pct=0.10, t2_max_pct=0.18),
+            "S": TypeTargetCaps(t1_max_pct=0.12, t2_max_pct=0.40),
+            "B": TypeTargetCaps(t1_max_pct=0.10, t2_max_pct=0.28),
+            "C": TypeTargetCaps(t1_max_pct=0.08, t2_max_pct=0.22),
+            "A": TypeTargetCaps(t1_max_pct=0.10, t2_max_pct=0.28),
         }
     )
 

@@ -18,11 +18,28 @@ def effective_scan_thresholds(
     rq = request_min_quality
     rt = request_top_n
 
-    # Rejim yalnızca bilgi ve top_n kısıtlaması içindir.
-    # Min_quality kullanıcıdan geldiği gibi ham skora uygulanır (rejim bunu değiştirmez).
-    eff_min = rq
+    # Regime-driven quality floor: bear/caution markets require higher quality signals.
+    # Takes max(request, regime_floor) so user can never lower below regime minimum.
+    if regime_caps is not None:
+        if regime == "BEAR":
+            regime_min = (
+                regime_caps.bear_tentative_min_quality
+                if regime_confidence == "TENTATIVE"
+                else regime_caps.bear_confirmed_min_quality
+            )
+        elif regime == "CAUTION":
+            regime_min = (
+                regime_caps.caution_confirmed_min_quality
+                if regime_confidence == "CONFIRMED"
+                else regime_caps.caution_other_min_quality
+            )
+        else:
+            regime_min = 0  # BULL / UNKNOWN — no floor applied
+        eff_min = max(rq, regime_min)
+    else:
+        eff_min = rq
 
-    # Hard-coded caps (explicit product rule).
+    # Hard top_n caps per regime (explicit product rule).
     if regime == "BEAR":
         if regime_confidence == "TENTATIVE":
             eff_top = min(rt, 4)

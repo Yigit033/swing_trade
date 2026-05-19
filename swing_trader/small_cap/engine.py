@@ -395,6 +395,7 @@ class SmallCapEngine:
         portfolio_value: float = 10000,
         spy_df_window: Optional[pd.DataFrame] = None,
         reject_counts: Optional[MutableMapping[str, int]] = None,
+        regime: str = '',
     ) -> Optional[Dict]:
         """
         Scan a single stock for small-cap momentum signal.
@@ -695,6 +696,23 @@ class SmallCapEngine:
                 df, volume_surge, atr_percent, float_shares, boosters
             )
 
+            # Type-specific quality floor — backtest-derived minimums for each swing type.
+            # Type S (short squeeze) is exempt: squeeze mechanics produce asymmetric payoffs
+            # that the quality score doesn't fully capture.
+            _type_min_map = {
+                'C': self.settings.min_quality_type_c,
+                'A': self.settings.min_quality_type_a,
+                'B': self.settings.min_quality_type_b,
+                'S': 0,
+            }
+            _type_min_q = _type_min_map.get(swing_type, 0)
+            if quality_score < _type_min_q:
+                logger.debug(
+                    f"{ticker}: Q={quality_score:.0f} < type_{swing_type} min {_type_min_q} — rejected"
+                )
+                _bump_scan_reject(reject_counts, f"quality_type_{swing_type.lower()}")
+                return None
+
             type_labels = {
                 'S': 'Short Squeeze',
                 'A': 'Continuation',
@@ -844,7 +862,9 @@ class SmallCapEngine:
             # Exception: Type S (short squeeze) — asymmetric payoff profile.
             # ================================================================
             rr_t2 = signal.get('risk_reward_t2', 0)
-            min_rr = self.settings.min_rr_at_entry
+            # Regime-aware R:R minimum: BULL tolerates lower R:R; BEAR demands more margin.
+            _regime_rr = {"BULL": 1.0, "CAUTION": 1.5, "BEAR": 2.0}
+            min_rr = _regime_rr.get(regime, self.settings.min_rr_at_entry)
             if rr_t2 < min_rr and swing_type != 'S':
                 logger.debug(
                     f"{ticker}: R:R(T2)={rr_t2:.1f} < {min_rr} minimum "
@@ -931,6 +951,8 @@ class SmallCapEngine:
             logger.warning(f"Sector rankings unavailable: {_e}")
             self._sector_rankings = {}
 
+        current_regime = market_regime.get('regime', '')
+
         for ticker in tickers:
             if ticker not in data_dict:
                 continue
@@ -938,16 +960,15 @@ class SmallCapEngine:
             df = data_dict[ticker]
             scanned += 1
 
-            signal = self.scan_stock(ticker, df, reject_counts=reject_counts)
+            signal = self.scan_stock(ticker, df, reject_counts=reject_counts, regime=current_regime)
 
             if signal:
-                # Keep regime info for UI, but do not modify score (regime effect removed).
-                signal['market_regime'] = market_regime['regime']
+                signal['market_regime'] = current_regime
                 signal['regime_confidence'] = market_regime.get('confidence', 'CONFIRMED')
 
-                # Re-apply risk with real portfolio value if different from default
+                # Re-apply risk with real portfolio value and regime for accurate T2 scaling
                 if portfolio_value != 10000:
-                    signal = self.risk.add_risk_management(signal, df, portfolio_value)
+                    signal = self.risk.add_risk_management(signal, df, portfolio_value, regime=current_regime)
                 signals.append(signal)
 
         # Sort by quality score (highest first)

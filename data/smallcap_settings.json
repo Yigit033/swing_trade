@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "max_entry_rsi": 70,
-  "volume_surge_trigger": 1.5,
+  "volume_surge_trigger": 2.0,
   "min_volume_surge_soft": 1.5,
   "min_atr_percent": 0.03,
   "max_risk_per_trade": 0.015,
@@ -31,19 +31,19 @@
   "type_target_caps": {
     "S": {
       "t1_max_pct": 0.12,
-      "t2_max_pct": 0.2
+      "t2_max_pct": 0.40
     },
     "B": {
       "t1_max_pct": 0.1,
-      "t2_max_pct": 0.14
+      "t2_max_pct": 0.28
     },
     "C": {
       "t1_max_pct": 0.08,
-      "t2_max_pct": 0.12
+      "t2_max_pct": 0.22
     },
     "A": {
       "t1_max_pct": 0.1,
-      "t2_max_pct": 0.15
+      "t2_max_pct": 0.28
     }
   },
   "min_rr_at_entry": 1.8,
@@ -62,13 +62,13 @@
   "slippage_bps_per_side": 5,
   "min_shares_for_partial": 2,
   "regime_thresholds": {
-    "bear_tentative_min_quality": 70,
+    "bear_tentative_min_quality": 78,
     "bear_tentative_top_n_max": 4,
-    "bear_confirmed_min_quality": 72,
+    "bear_confirmed_min_quality": 80,
     "bear_confirmed_top_n_max": 3,
-    "caution_confirmed_min_quality": 68,
+    "caution_confirmed_min_quality": 75,
     "caution_confirmed_top_n_max": 4,
-    "caution_other_min_quality": 63,
+    "caution_other_min_quality": 73,
     "caution_other_top_n_max": 5
   },
   "scan_gates": {
@@ -232,8 +232,8 @@
     "chase_penalty_points_mid": 25
   },
   "signal_confirmation": {
-    "ma20_max_distance_below_pct": 3.0,
-    "ma50_max_below_pct": 8.0,
+    "ma20_max_distance_below_pct": 0.0,
+    "ma50_max_below_pct": 3.0,
     "overext_today_change_max": 15.0,
     "overext_single_day_max": 25.0,
     "overext_five_day_total_max": 40.0
@@ -347,17 +347,17 @@
       "raw_cap": 15,
       "insufficient_bars_score": 5
     },
-    "weight_volume": 0.2,
-    "weight_volatility": 0.15,
-    "weight_float": 0.15,
-    "weight_momentum": 0.2,
-    "weight_risk": 0.1,
+    "weight_volume": 0.12,
+    "weight_volatility": 0.13,
+    "weight_float": 0.25,
+    "weight_momentum": 0.25,
+    "weight_risk": 0.10,
     "max_volume_score": 30.0,
     "max_volatility_score": 25.0,
     "max_float_score": 20.0,
     "max_momentum_score": 15.0,
     "max_risk_score": 15.0,
-    "bonus_cap": 40,
+    "bonus_cap": 30,
     "final_score_max": 140,
     "risk_score_atr_mult": 1.5,
     "bonus_high_rvol": 3,
@@ -391,7 +391,7 @@
     "pen_parabolic": 15,
     "parabolic_day3_min_pct": 10.0,
     "pen_not_swing_ready": 5,
-    "weight_trend": 0.2,
+    "weight_trend": 0.15,
     "max_trend_score": 25.0,
     "bonus_golden_cross": 5,
     "bonus_confirmed_breakout": 8,

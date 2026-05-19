@@ -325,10 +325,10 @@ class UniverseScanSettings(BaseModel):
 class SignalsConfirmationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    ma20_max_distance_below_pct: float = 3.0
+    ma20_max_distance_below_pct: float = 0.0
     ma50_max_below_pct: float = Field(
-        default=8.0,
-        ge=1.0,
+        default=3.0,
+        ge=0.0,
         le=25.0,
         description="Max %% below MA50 before rejecting swing confirmation.",
     )
@@ -357,17 +357,17 @@ class ScoringTuningSettings(BaseModel):
     momentum_points: ScoringMomentumPoints = Field(default_factory=ScoringMomentumPoints)
     risk_bands: ScoringRiskBands = Field(default_factory=ScoringRiskBands)
 
-    weight_volume: float = 0.30
-    weight_volatility: float = 0.20
-    weight_float: float = 0.20
-    weight_momentum: float = 0.15
-    weight_risk: float = 0.15
+    weight_volume: float = 0.12
+    weight_volatility: float = 0.13
+    weight_float: float = 0.25
+    weight_momentum: float = 0.25
+    weight_risk: float = 0.10
     max_volume_score: float = 30
     max_volatility_score: float = 25
     max_float_score: float = 20
     max_momentum_score: float = 15
     max_risk_score: float = 15
-    bonus_cap: int = 40
+    bonus_cap: int = 30
     final_score_max: int = 140
     risk_score_atr_mult: float = 1.5
     # Booster bonuses (subset — catalyst/sector still from live data)
@@ -404,7 +404,7 @@ class ScoringTuningSettings(BaseModel):
     parabolic_day3_min_pct: float = 10.0
     pen_not_swing_ready: int = 5
     # v5.0: Directional scoring fields
-    weight_trend: float = Field(default=0.20, ge=0.0, le=1.0)
+    weight_trend: float = Field(default=0.15, ge=0.0, le=1.0)
     max_trend_score: float = Field(default=25.0, ge=1.0, le=100.0)
     bonus_golden_cross: int = Field(default=5, ge=0, le=20)
     bonus_confirmed_breakout: int = Field(default=8, ge=0, le=20)

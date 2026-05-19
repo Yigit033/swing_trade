@@ -918,7 +918,7 @@ class SmallCapSignals:
     # ============================================================
     # OBV TREND ANALYSIS (v3.0 — Smart Money Detection)
     # ============================================================
-    def calculate_obv_trend(self, df: pd.DataFrame, period: int = 10) -> Dict:
+    def calculate_obv_trend(self, df: pd.DataFrame, period: int = 20) -> Dict:
         """
         Calculate On-Balance Volume trend slope.
 
