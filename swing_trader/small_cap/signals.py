@@ -453,6 +453,59 @@ class SmallCapSignals:
             return True, f"ATR% {atr_pct*100:.1f}% >= {threshold_pct:.1f}%"
         return False, f"ATR% {atr_pct*100:.1f}% < {threshold_pct:.1f}%"
     
+    def check_continuation_setup(self, df: pd.DataFrame) -> Tuple[bool, str]:
+        """
+        Trend continuation entry — stock already in established uptrend,
+        today extends the trend with strength (no fresh breakout needed).
+
+        Senior trader logic: in bull regimes most setups are NOT fresh breakouts
+        but continuation moves on established trends (Minervini Stage 2, O'Neil
+        leadership). Volume/breakout pathways alone systematically miss these
+        because Finviz pre-screens for stocks already in motion — they made
+        their 5-bar high days ago and are now consolidating up.
+
+        Requires (all must pass):
+        - Close > MA20  (in uptrend, not just a dead-cat bounce)
+        - Close > prev_close  (green day, momentum holding)
+        - Close in upper 50% of today's range  (close strength, not weak fade)
+        - MA20 distance <= 12%  (not parabolic / overextended above support)
+
+        Downstream gates (swing_confirmation, RSI, distribution, quality bar)
+        filter out the weak continuations.
+        """
+        if df is None or len(df) < 21:
+            return False, "Insufficient data"
+        try:
+            close_today = float(df['Close'].iloc[-1])
+            close_prev = float(df['Close'].iloc[-2])
+            high_today = float(df['High'].iloc[-1])
+            low_today = float(df['Low'].iloc[-1])
+            ma20 = float(df['Close'].rolling(20).mean().iloc[-1])
+
+            if close_today <= ma20:
+                return False, f"Below MA20 ({close_today:.2f} <= {ma20:.2f})"
+
+            if close_today <= close_prev:
+                return False, f"Red/flat day (close {close_today:.2f} <= prev {close_prev:.2f})"
+
+            day_range = high_today - low_today
+            if day_range > 0:
+                close_pos = (close_today - low_today) / day_range
+                if close_pos < 0.5:
+                    return False, f"Weak close ({close_pos:.0%} of range, need 50%+)"
+
+            ma20_dist_pct = (close_today / ma20 - 1) * 100
+            if ma20_dist_pct > 12.0:
+                return False, f"Overextended above MA20 (+{ma20_dist_pct:.1f}% > 12%)"
+
+            return True, (
+                f"Continuation: +{ma20_dist_pct:.1f}% above MA20, "
+                f"green +{(close_today/close_prev-1)*100:.1f}%, close strong"
+            )
+        except Exception as e:
+            logger.error(f"Error checking continuation: {e}")
+            return False, str(e)
+
     def check_all_triggers(self, df: pd.DataFrame) -> Tuple[bool, Dict]:
         """
         Check signal conditions for scoring.
@@ -472,7 +525,8 @@ class SmallCapSignals:
         volume_surge = self.calculate_volume_surge(df, period=self._settings.volume_surge_baseline_days)
         atr_pct = self.calculate_atr_percent(df)
         breakout_passed, breakout_reason = self.check_breakout(df)
-        
+        continuation_passed, continuation_reason = self.check_continuation_setup(df)
+
         vol_need = self._settings.volume_surge_trigger
         atr_need = self._settings.min_atr_percent
         # Store all metrics
@@ -481,19 +535,25 @@ class SmallCapSignals:
             'reason': f"Volume surge {volume_surge:.1f}x (need {vol_need}x)",
             'value': volume_surge
         }
-        
+
         details['triggers']['atr_percent'] = {
             'passed': atr_pct >= atr_need,
             'reason': f"ATR% {atr_pct*100:.1f}% (need {atr_need*100:.1f}%)",
             'value': atr_pct
         }
-        
+
         details['triggers']['breakout'] = {
-            'passed': breakout_passed, 
+            'passed': breakout_passed,
             'reason': breakout_reason,
             'optional': True
         }
-        
+
+        details['triggers']['continuation'] = {
+            'passed': continuation_passed,
+            'reason': continuation_reason,
+            'optional': True
+        }
+
         min_vol_ok = volume_surge >= vol_need
         min_atr_ok = atr_pct >= atr_need
 
@@ -501,21 +561,25 @@ class SmallCapSignals:
         details['volume_surge'] = volume_surge
         details['atr_percent'] = atr_pct
         details['has_breakout'] = breakout_passed
+        details['has_continuation'] = continuation_passed
 
-        # Senior trader trigger logic:
+        # Senior trader 3-pathway trigger logic:
         #   ATR is universally required (need volatility for swing targets).
-        #   Then EITHER pathway is sufficient:
-        #     A) Volume ignition  — vol_surge >= 2x on 50d median
+        #   Then ANY ONE of these pathways is sufficient:
+        #     A) Volume ignition   — vol_surge >= 2x on 50d median
         #     B) Technical breakout — Close > 5-bar high with vol 1.2x + close strength
-        #          (check_breakout has its own embedded volume/range/noise gates)
-        #   Finviz pre-screens for elevated RVOL, so requiring 2x on top of an
-        #   already-active baseline filters out most clean breakouts. Adding the
-        #   breakout pathway captures pure technical entries without volume spikes.
-        if min_atr_ok and (min_vol_ok or breakout_passed):
+        #     C) Trend continuation — already above MA20, green close, close strong
+        #   Pathway C closes the gap left by A+B: in bull regimes, Finviz stocks
+        #   are mostly in continuation (already past their 5-bar high), so A/B
+        #   miss them. Quality bar + swing_confirmation filter weak continuations.
+        if min_atr_ok and (min_vol_ok or breakout_passed or continuation_passed):
             details['triggered'] = True
-            details['trigger_pathway'] = (
-                'volume_ignition' if min_vol_ok else 'technical_breakout'
-            )
+            if min_vol_ok:
+                details['trigger_pathway'] = 'volume_ignition'
+            elif breakout_passed:
+                details['trigger_pathway'] = 'technical_breakout'
+            else:
+                details['trigger_pathway'] = 'trend_continuation'
 
         return details['triggered'], details
     

@@ -752,19 +752,28 @@ class SmallCapEngine:
                 df, volume_surge, atr_percent, float_shares, boosters
             )
 
-            # Type-specific quality floor — backtest-derived minimums for each swing type.
-            # Type S (short squeeze) is exempt: squeeze mechanics produce asymmetric payoffs
-            # that the quality score doesn't fully capture.
+            # Regime-aware quality floor — backtest-derived minimums adjusted for regime.
+            # Senior trader logic: in BULL, trend itself is the catalyst (uptrend doing the
+            # work), so quality bar can be lower. In BEAR, demand more confirmation since
+            # most setups fail. CAUTION uses base values.
+            #   BULL:    base - 10  (more permissive; trend is the catalyst)
+            #   CAUTION: base       (current backtest-derived defaults)
+            #   BEAR:    base + 5   (extra-high bar; only strongest setups)
+            # Type S (short squeeze) is exempt regardless of regime.
+            _regime_q_adj = {"BULL": -10, "CAUTION": 0, "BEAR": +5}.get(regime, 0)
             _type_min_map = {
-                'C': self.settings.min_quality_type_c,
-                'A': self.settings.min_quality_type_a,
-                'B': self.settings.min_quality_type_b,
+                'C': self.settings.min_quality_type_c + _regime_q_adj,
+                'A': self.settings.min_quality_type_a + _regime_q_adj,
+                'B': self.settings.min_quality_type_b + _regime_q_adj,
                 'S': 0,
             }
             _type_min_q = _type_min_map.get(swing_type, 0)
             if quality_score < _type_min_q:
-                logger.debug(
-                    f"{ticker}: Q={quality_score:.0f} < type_{swing_type} min {_type_min_q} — rejected"
+                # INFO level — surface quality scores in normal logs so we can see
+                # the distribution of "almost made it" stocks and tune the bar.
+                logger.info(
+                    f"{ticker}: Q={quality_score:.0f} < type_{swing_type} min {_type_min_q} "
+                    f"(regime={regime}, adj={_regime_q_adj:+d}) — rejected"
                 )
                 _bump_scan_reject(reject_counts, f"quality_type_{swing_type.lower()}")
                 return None
