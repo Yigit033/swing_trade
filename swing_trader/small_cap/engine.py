@@ -772,7 +772,7 @@ class SmallCapEngine:
                 # INFO level — surface quality scores in normal logs so we can see
                 # the distribution of "almost made it" stocks and tune the bar.
                 logger.info(
-                    f"{ticker}: Q={quality_score:.0f} < type_{swing_type} min {_type_min_q} "
+                    f"{ticker}: Q={quality_score:.1f} < type_{swing_type} min {_type_min_q} "
                     f"(regime={regime}, adj={_regime_q_adj:+d}) — rejected"
                 )
                 _bump_scan_reject(reject_counts, f"quality_type_{swing_type.lower()}")
