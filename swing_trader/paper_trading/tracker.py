@@ -50,6 +50,16 @@ MAX_STOP_DEFAULT = 0.10
 MAX_STALE_PENDING_CALENDAR_DAYS = 14
 
 
+def _exit_ts(exit_date, hour: int, minute: int) -> str:
+    """Convert date + NYSE-local hour:minute → UTC ISO-8601 string."""
+    from datetime import timezone as _utctz
+    if isinstance(exit_date, str):
+        exit_date = datetime.strptime(exit_date[:10], '%Y-%m-%d').date()
+    dt_nyse = datetime(exit_date.year, exit_date.month, exit_date.day,
+                       hour, minute, 0, tzinfo=_NYSE_TZ)
+    return dt_nyse.astimezone(_utctz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
 class PaperTradeTracker:
     """
     Track paper trades and detect exits.
@@ -213,11 +223,12 @@ class PaperTradeTracker:
                 # This accurately models overnight gap risk (e.g. UMAC -16%: gap opened below stop).
                 if today_open <= active_stop:
                     exit_price = today_open
+                    exit_date = _exit_ts(current_date, 9, 30)  # gap-down: gapped through at open
                 else:
                     exit_price = active_stop
+                    exit_date = _exit_ts(current_date, 16, 0)  # intraday breach: proxy to close
 
                 is_trail = active_stop > initial_stop
-                exit_date = str(current_date)
                 pnl_pct = ((exit_price / entry_price) - 1) * 100
 
                 if is_trail:
@@ -229,7 +240,7 @@ class PaperTradeTracker:
 
             # ── 2. CHECK T1 PARTIAL EXIT ──
             if not has_partial and target_2 > target * 1.01 and high >= target:
-                exit_date = str(current_date)
+                exit_date = _exit_ts(current_date, 16, 0)  # target hit intraday; proxy to close
                 pnl_pct = ((target / entry_price) - 1) * 100
                 reason = (
                     f"T1 partial 50% at ${target:.2f} ({pnl_pct:+.1f}%) | "
@@ -240,7 +251,7 @@ class PaperTradeTracker:
             # ── 3. CHECK TARGET (T2 after partial, or T1 if no T2) ──
             if high >= target:
                 exit_price = target
-                exit_date = str(current_date)
+                exit_date = _exit_ts(current_date, 16, 0)  # target hit intraday; proxy to close
                 pnl_pct = ((exit_price / entry_price) - 1) * 100
                 label = "T2 target" if has_partial else "Target"
                 reason = f"{label} hit at ${exit_price:.2f} ({pnl_pct:+.1f}%)"
@@ -259,7 +270,7 @@ class PaperTradeTracker:
             # ── 5. CHECK TIMEOUT (trading days, not calendar) ──
             if trading_days_held >= max_hold_days:
                 exit_price = close
-                exit_date = str(current_date)
+                exit_date = _exit_ts(current_date, 16, 0)  # timeout exits at market close
                 pnl_pct = ((exit_price / entry_price) - 1) * 100
                 reason = f"Timeout after {trading_days_held} trading days at ${exit_price:.2f} ({pnl_pct:+.1f}%)"
                 return ('TIMEOUT', exit_price, exit_date, reason, trailing_stop)
@@ -296,11 +307,11 @@ class PaperTradeTracker:
             return trade
         
         ticker = trade['ticker']
-        entry_date = trade['entry_date'][:10]  # Strip time part (e.g. "2026-03-11 09:30" → "2026-03-11")
+        entry_date = trade['entry_date'][:10]  # "2026-03-11" — works for both old and ISO format
         trade_id = trade['id']
 
         # Fetch price history since entry
-        today = datetime.now().strftime('%Y-%m-%d')
+        today = datetime.now(tz=_NYSE_TZ).strftime('%Y-%m-%d')
         price_history = self.fetch_price_history(ticker, entry_date, today)
         
         if price_history is None or len(price_history) == 0:
@@ -604,7 +615,13 @@ class PaperTradeTracker:
                 
                 next_day = next_days.iloc[0]
                 open_price = float(next_day['Open'])
-                entry_date = str(next_day['Date']).split(' ')[0] + f' {NYSE_OPEN_TIME}'  # NYSE open (ET)
+                # Build proper UTC timestamp for NYSE open (09:30 ET → UTC)
+                _nd_str = str(next_day['Date']).split(' ')[0]  # "YYYY-MM-DD"
+                _nd_obj = datetime.strptime(_nd_str, '%Y-%m-%d')
+                _nyse_open = datetime(_nd_obj.year, _nd_obj.month, _nd_obj.day,
+                                      9, 30, 0, tzinfo=_NYSE_TZ)
+                from datetime import timezone as _utctz
+                entry_date = _nyse_open.astimezone(_utctz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
                 
                 # Gap filter
                 gap_pct = ((open_price / signal_price) - 1) * 100
@@ -719,8 +736,9 @@ class PaperTradeTracker:
             if exit_price is None:
                 exit_price = trade['entry_price']
         
-        exit_date = datetime.now().strftime('%Y-%m-%d')
-        
+        from datetime import timezone as _utctz
+        exit_date = datetime.now(tz=_utctz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
         return self.storage.close_trade(
             trade_id, exit_price, exit_date, 'MANUAL', notes, user_id
         )

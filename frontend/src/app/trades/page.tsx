@@ -9,6 +9,26 @@ type FilterStatus = "ALL" | "OPEN" | "CLOSED" | "PENDING";
 
 const CLOSED_STATUSES = new Set(["STOPPED", "TRAILED", "TARGET", "MANUAL", "WIN", "LOSS", "CLOSED", "REJECTED", "TIMEOUT"]);
 
+/**
+ * Format a date string for display in user's local timezone.
+ * Handles two formats:
+ *   New: "2026-05-19T13:30:00Z" (UTC ISO) → converts to local time → "2026-05-19 16:30"
+ *   Old: "2026-05-19 09:30"     (ET, legacy) → shown with "ET" label → "2026-05-19 09:30 ET"
+ */
+function fmtEntryDate(dt?: string | null): string {
+    if (!dt) return "—";
+    const s = String(dt);
+    if (s.includes("T") || s.endsWith("Z")) {
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) {
+            const pad = (n: number) => String(n).padStart(2, "0");
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        }
+    }
+    // Legacy "YYYY-MM-DD HH:MM" stored as ET — label it clearly
+    return s.length > 10 ? s.slice(0, 16) + " ET" : s.slice(0, 10);
+}
+
 /* ─── Badge Components ────────────────────────────── */
 function TypeBadge({ type }: { type?: string }) {
     const map: Record<string, { bg: string; color: string }> = {
@@ -550,8 +570,8 @@ export default function TradesPage() {
                                                     )}
                                                 </td>
                                                 <td><TypeBadge type={t.swing_type} /></td>
-                                                <td style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{t.entry_date || "—"}</td>
-                                                <td style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{t.exit_date || "—"}</td>
+                                                <td style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{fmtEntryDate(t.entry_date)}</td>
+                                                <td style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{fmtEntryDate(t.exit_date)}</td>
                                                 <td style={{ fontWeight: 600 }}>${t.entry_price?.toFixed(2)}</td>
                                                 <td>
                                                     {isOpen && currentPrice != null && currentPrice > 0 ? (
