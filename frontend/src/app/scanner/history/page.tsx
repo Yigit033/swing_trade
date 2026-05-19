@@ -8,10 +8,11 @@ import { Calendar, RefreshCw, Search, Shield, Target, TrendingUp } from "lucide-
 
 function fmtTs(ts?: string | null): string {
     if (!ts) return "—";
-    // Prefer YYYY-MM-DD HH:MM from ISO-ish strings
-    const s = String(ts);
-    if (s.includes("T")) return s.replace("T", " ").slice(0, 16);
-    return s.slice(0, 16);
+    // Parse as UTC and convert to browser local timezone
+    const d = new Date(String(ts));
+    if (isNaN(d.getTime())) return String(ts).slice(0, 16);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function regimeColor(regime?: string | null): string {

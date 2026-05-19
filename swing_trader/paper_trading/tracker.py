@@ -532,9 +532,10 @@ class PaperTradeTracker:
         results = []
         open_trades = self.storage.get_open_trades(user_id)  # Includes PENDING
         pending = [t for t in open_trades if t.get('status') == 'PENDING']
-        
-        today_str = datetime.now().strftime('%Y-%m-%d')
-        today_d = date.today()
+
+        _now_nyse = datetime.now(tz=_NYSE_TZ)
+        today_str = _now_nyse.strftime('%Y-%m-%d')
+        today_d = _now_nyse.date()
         for trade in pending:
             ticker = trade['ticker']
             signal_price = trade.get('signal_price') or trade['entry_price']
