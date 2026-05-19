@@ -496,15 +496,27 @@ class SmallCapSignals:
         
         min_vol_ok = volume_surge >= vol_need
         min_atr_ok = atr_pct >= atr_need
-        
+
         # ALWAYS store values for display (even if not triggered)
         details['volume_surge'] = volume_surge
         details['atr_percent'] = atr_pct
         details['has_breakout'] = breakout_passed
-        
-        if min_vol_ok and min_atr_ok:
+
+        # Senior trader trigger logic:
+        #   ATR is universally required (need volatility for swing targets).
+        #   Then EITHER pathway is sufficient:
+        #     A) Volume ignition  — vol_surge >= 2x on 50d median
+        #     B) Technical breakout — Close > 5-bar high with vol 1.2x + close strength
+        #          (check_breakout has its own embedded volume/range/noise gates)
+        #   Finviz pre-screens for elevated RVOL, so requiring 2x on top of an
+        #   already-active baseline filters out most clean breakouts. Adding the
+        #   breakout pathway captures pure technical entries without volume spikes.
+        if min_atr_ok and (min_vol_ok or breakout_passed):
             details['triggered'] = True
-        
+            details['trigger_pathway'] = (
+                'volume_ignition' if min_vol_ok else 'technical_breakout'
+            )
+
         return details['triggered'], details
     
     # ============================================================
