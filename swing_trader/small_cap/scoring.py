@@ -428,7 +428,12 @@ class SmallCapScoring:
             # v6.0: Active sector rotation bonus/penalty
             sector_rotation_bonus = boosters.get('sector_rotation_bonus', 0)
             bonus += sector_rotation_bonus  # +5 top sector, -10 weak sector
-        
+
+            # Volume direction: institutional accumulation signal
+            # High volume on an UP day = buyers in control = strongest setup
+            if boosters.get('volume_up_day', False) and volume_surge >= 2.0:
+                bonus += st.bonus_volume_on_up_day
+
         # ============================================================
         # PENALTY SYSTEM (max -60, expanded in v5.0)
         # ============================================================

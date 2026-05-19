@@ -107,6 +107,10 @@ class ScanStockGatesSettings(BaseModel):
     extreme_rsi_gt: float = Field(default=85.0, ge=50, le=100)
     late_entry_five_day_total_gt: float = Field(default=30.0, ge=0, le=100)
     late_entry_rsi_gt: float = Field(default=65.0, ge=40, le=95)
+    reject_stage3: bool = Field(default=True, description="Hard reject Weinstein Stage 3 (distribution) — Type S exempt")
+    reject_stage4: bool = Field(default=True, description="Hard reject Weinstein Stage 4 (decline) — all types")
+    distribution_day_min_vol: float = Field(default=2.0, ge=1.0, le=5.0, description="Volume surge threshold to flag a high-volume down day as distribution")
+    distribution_day_max_change_pct: float = Field(default=-5.0, le=0.0, ge=-30.0, description="Daily change threshold: stock down more than this % = distribution day")
 
 
 class SwingParabolicSettings(BaseModel):
@@ -414,6 +418,7 @@ class ScoringTuningSettings(BaseModel):
     pen_ma20_falling: int = Field(default=8, ge=0, le=20)
     pen_rejection_candle: int = Field(default=12, ge=0, le=25)
     pen_weak_trend_phase: int = Field(default=8, ge=0, le=20)
+    bonus_volume_on_up_day: int = Field(default=5, ge=0, le=20, description="Bonus when volume surge arrives on an UP day (accumulation signal)")
 
 
 class BacktestLoopSettings(BaseModel):

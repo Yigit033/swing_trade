@@ -581,7 +581,12 @@ class SmallCapEngine:
             # MACD check
             macd_data = self.signals.calculate_macd(df)
             boosters['macd_bullish'] = macd_data['bullish_cross'] or (macd_data['above_zero'] and macd_data['expanding'])
-            
+
+            # Volume direction: UP day = institutional accumulation, DOWN day = distribution
+            boosters['volume_up_day'] = (
+                len(df) >= 2 and float(df['Close'].iloc[-1]) > float(df['Close'].iloc[-2])
+            )
+
             # Get swing metrics for display
             entry_price = float(df['Close'].iloc[-1])
             five_day_return = swing_details.get('five_day_momentum', {}).get('return', 0)
@@ -673,6 +678,32 @@ class SmallCapEngine:
                     _bump_scan_reject(reject_counts, "trend_phase_weak")
                     return None
 
+            # ================================================================
+            # DISTRIBUTION DAY HARD GATE
+            # High-volume red day = institutions exiting, not entering.
+            # If stock is down >5% today with 2x+ volume AND this is not
+            # a pullback entry (which has its own logic) → reject.
+            # Type S exempt: squeeze mechanics can show high-vol red days
+            # before the actual squeeze fires.
+            # ================================================================
+            _dist_change_pct = 0.0
+            if len(df) >= 2:
+                _dist_change_pct = (
+                    float(df['Close'].iloc[-1]) / float(df['Close'].iloc[-2]) - 1
+                ) * 100
+            if (
+                _dist_change_pct < sg.distribution_day_max_change_pct
+                and volume_surge >= sg.distribution_day_min_vol
+                and not pullback_data.get('detected', False)
+                and swing_type != 'S'
+            ):
+                logger.debug(
+                    f"{ticker}: Distribution day ({_dist_change_pct:+.1f}%, "
+                    f"vol={volume_surge:.1f}x) — hard reject"
+                )
+                _bump_scan_reject(reject_counts, "distribution_day")
+                return None
+
             # Inject swing_type into boosters so scoring uses correct RSI penalty bands
             boosters['swing_type'] = swing_type
 
@@ -691,6 +722,31 @@ class SmallCapEngine:
             boosters['weinstein_ma30'] = stage_data['ma30']
             boosters['weinstein_ma30_rising'] = stage_data['ma30_rising']
             boosters['weinstein_bonus'] = stage_data['bonus']
+
+            # ================================================================
+            # WEINSTEIN STAGE HARD GATE
+            # Only buy Stage 2 (markup) or Stage 1 turning up (anticipatory).
+            # Stage 3 (distribution topping) and Stage 4 (decline) are hard
+            # rejected — high-volume spikes in these stages are dead-cat
+            # bounces or seller-driven, not the start of a new trend.
+            # Type S exempt from Stage 3 only (squeeze can ignite in distribution).
+            # Stage 0 = insufficient data → pass through (don't penalize data gaps).
+            # ================================================================
+            _wstage = stage_data.get('stage', 0)
+            if _wstage > 0:
+                if sg.reject_stage4 and _wstage == 4:
+                    logger.debug(
+                        f"{ticker}: Weinstein Stage 4 (Decline) — hard reject"
+                    )
+                    _bump_scan_reject(reject_counts, "stage_rejected")
+                    return None
+                if sg.reject_stage3 and _wstage == 3 and swing_type != 'S':
+                    logger.debug(
+                        f"{ticker}: Weinstein Stage 3 (Distribution) — hard reject "
+                        f"(type={swing_type})"
+                    )
+                    _bump_scan_reject(reject_counts, "stage_rejected")
+                    return None
 
             quality_score = self.scoring.calculate_quality_score(
                 df, volume_surge, atr_percent, float_shares, boosters
