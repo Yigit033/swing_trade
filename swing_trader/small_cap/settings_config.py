@@ -91,7 +91,17 @@ class SmallCapSettings(BaseModel):
         default=2.0,
         ge=1.0,
         le=5.0,
-        description="Minimum volume vs 20d avg to pass check_all_triggers.",
+        description="Minimum volume vs baseline to pass check_all_triggers.",
+    )
+    volume_surge_baseline_days: int = Field(
+        default=50,
+        ge=10,
+        le=200,
+        description=(
+            "Lookback window for volume baseline median. "
+            "50d (not 20d) captures pre-rally levels so Finviz momentum stocks "
+            "aren't penalised by their own recent elevated activity."
+        ),
     )
     min_volume_surge_soft: float = Field(
         default=1.2,

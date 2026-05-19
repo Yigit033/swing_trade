@@ -58,18 +58,25 @@ class SmallCapSignals:
         self.ATR_PERIOD = self._settings.universe_filters.atr_period
         logger.info("SmallCapSignals initialized (Senior Trader v2.0)")
     
-    def calculate_volume_surge(self, df: pd.DataFrame, period: int = 20) -> float:
+    def calculate_volume_surge(self, df: pd.DataFrame, period: int = 50) -> float:
         """
-        Calculate current volume relative to the 20-day MEDIAN baseline.
+        Calculate current volume relative to the N-day MEDIAN baseline.
 
-        Uses median instead of mean to prevent recent spike days from inflating
-        the baseline and making current elevated volume look "normal."
-        Example: a stock with a 5M spike 10 days ago has an inflated mean (~900K)
-        even if it normally trades 500K, so today's 750K looks like only 0.83x
-        instead of the correct 1.5x. Median is robust to these outliers.
+        Default period = 50 days (not 20) so that Finviz momentum stocks —
+        which already have an elevated 20-day baseline from a recent rally —
+        are compared against their longer-term "normal" activity level.
+
+        Example: BKKT was trading 1.5M/day before a rally, then 5M/day for 3 weeks.
+        - 20-day median baseline → ~4.5M  →  today's 7M = 1.56x  (no trigger at 2.0x)
+        - 50-day median baseline → ~2.5M  →  today's 7M = 2.80x  (triggers cleanly)
+
+        Median (not mean) prevents single spike days from inflating the baseline.
         """
         if df is None or len(df) < period + 1:
-            return 0.0
+            # Graceful fallback: use whatever bars we have (min 20+1)
+            if df is None or len(df) < 22:
+                return 0.0
+            period = len(df) - 1
 
         try:
             current_vol = df['Volume'].iloc[-1]
@@ -80,8 +87,8 @@ class SmallCapSignals:
         except Exception as e:
             logger.error(f"Error calculating volume surge: {e}")
             return 0.0
-    
-    def calculate_relative_volume(self, df: pd.DataFrame, period: int = 20) -> float:
+
+    def calculate_relative_volume(self, df: pd.DataFrame, period: int = 50) -> float:
         """Calculate RVOL (same as volume surge but for clarity)."""
         return self.calculate_volume_surge(df, period)
     
@@ -462,7 +469,7 @@ class SmallCapSignals:
         }
         
         # Calculate metrics (no hard failures)
-        volume_surge = self.calculate_volume_surge(df)
+        volume_surge = self.calculate_volume_surge(df, period=self._settings.volume_surge_baseline_days)
         atr_pct = self.calculate_atr_percent(df)
         breakout_passed, breakout_reason = self.check_breakout(df)
         
