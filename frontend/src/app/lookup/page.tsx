@@ -13,9 +13,11 @@ const FILTER_LABELS: Record<string, string> = {
     price: "Fiyat",
 };
 const TRIGGER_LABELS: Record<string, string> = {
+    vce_breakout: "VCE — Sıkışma Kırılımı (ANA TETİK)",
     volume_surge: "Hacim Patlaması (Volume Surge)",
     atr_percent: "Volatilite Genişlemesi (ATR%)",
     breakout: "Breakout (Direnç Kırılımı)",
+    continuation: "Trend Devamı (Continuation)",
 };
 const SWING_LABELS: Record<string, string> = {
     five_day_momentum: "5-Günlük Momentum",
@@ -210,32 +212,24 @@ function ResultCard({ r, onAdd, adding }: { r: AnalysisResult; onAdd: (r: Analys
                                 <>
                                     <div style={{ marginTop: 10, padding: "8px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 8, fontSize: "0.82rem", color: "var(--red)" }}>
                                         {(() => {
-                                            const vol = r.trigger_details?.volume_surge ?? 0;
-                                            const atr = (r.trigger_details?.atr_percent ?? 0) * 100;
-                                            const volFail = vol < 1.3;
-                                            const atrFail = atr < 2;
-                                            if (volFail && atrFail)
-                                                return `⛔ Sinyal tetiklenmedi — Hacim çok düşük (${vol.toFixed(1)}x, min 1.3x) ve volatilite yetersiz (ATR ${atr.toFixed(1)}%, min 2%).`;
-                                            if (volFail)
-                                                return `⛔ Sinyal tetiklenmedi — Hacim ortalamanın altında (${vol.toFixed(1)}x). En az 1.3x olmalı.`;
-                                            if (atrFail)
-                                                return `⛔ Sinyal tetiklenmedi — Volatilite çok düşük (ATR ${atr.toFixed(1)}%). En az %2 olmalı.`;
-                                            return `⛔ Sinyal tetiklenmedi — Minimum eşikler karşılanmadı (Vol: ${vol.toFixed(1)}x, ATR: ${atr.toFixed(1)}%).`;
+                                            const vceReason = r.trigger_details?.triggers?.vce_breakout?.reason ?? "";
+                                            return `⛔ Sinyal yok — VCE kurulumu oluşmadı. ${vceReason}`;
                                         })()}
                                     </div>
                                     <div style={{ marginTop: 6, fontSize: "0.78rem", color: "var(--text-muted)" }}>
                                         {(() => {
-                                            const vol = r.trigger_details?.volume_surge ?? 0;
-                                            const atr = (r.trigger_details?.atr_percent ?? 0) * 100;
-                                            const volFail = vol < 1.3;
-                                            const atrFail = atr < 2;
-                                            if (volFail && atrFail)
-                                                return "💡 Bu hisse ne yeterli hacim ne de volatilite gösteriyor. Swing trade için hem güçlü alım ilgisi hem de hareket potansiyeli gerekli.";
-                                            if (volFail)
-                                                return "💡 Bu hisse şu an yeterli alım ilgisi görmüyor. Hacim patlaması olmadan girmek riskli — momentum olmadan fiyat hareket etmez.";
-                                            if (atrFail)
-                                                return "💡 Bu hisse çok dar bir aralıkta işlem görüyor. Düşük volatilite = düşük kâr potansiyeli. ATR yükselmesini bekle.";
-                                            return "💡 Tetikleyici eşikler tam karşılanmıyor. Hisse izleme listesinde tutulabilir.";
+                                            const vceReason = r.trigger_details?.triggers?.vce_breakout?.reason ?? "";
+                                            if (vceReason.includes("No squeeze"))
+                                                return "💡 Volatilite henüz sıkışmamış (yay gerilmemiş). Sistem, ATR son bazının %80'inin altına inip ardından kırılım gelmesini bekler — bu hisse şu an o fazda değil.";
+                                            if (vceReason.includes("No breakout"))
+                                                return "💡 Fiyat henüz 20 günlük zirveyi kırmadı. Sıkışma varsa izleme listesinde tut — kırılım günü hacimle gelirse sinyal oluşur.";
+                                            if (vceReason.includes("Volume too low"))
+                                                return "💡 Kırılım var ama hacim teyidi yok (1.5x gerekli). Hacimsiz kırılımlar istatistiksel olarak güvenilmez — sistem bilinçli bekliyor.";
+                                            if (vceReason.includes("Below MA50"))
+                                                return "💡 Hisse MA50 altında — uptrend şartı sağlanmıyor. Düşüş trendindeki kırılımlar tuzak olma eğiliminde.";
+                                            if (vceReason.includes("Weak close") || vceReason.includes("Red/flat"))
+                                                return "💡 Kırılım günü kapanış zayıf — alıcılar günü kontrol edemedi. Güçlü kapanış (günün üst %40'ı) şart.";
+                                            return "💡 VCE: sıkışan volatilite + 20 gün zirve kırılımı + hacim + güçlü kapanış. Bu hisse şu an bu kurulumda değil — sinyalsizlik de bir karardır.";
                                         })()}
                                     </div>
                                 </>

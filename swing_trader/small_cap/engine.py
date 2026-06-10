@@ -453,20 +453,20 @@ class SmallCapEngine:
                 _bump_scan_reject(reject_counts, "filter_failed")
                 return None
             
-            # Step 1b: Pullback-to-MA20 setup detection (done before trigger gate
-            # so it can bypass the volume-surge requirement that breakouts need).
+            # Step 1b: Pullback-to-MA20 setup detection.
+            # v13: pullback is a SCORING CONTEXT only — it no longer bypasses the
+            # trigger gate. Edge measurement showed pullback entries have no
+            # statistically significant forward edge (R5 edge +0.29%, t=0.65);
+            # only the VCE squeeze-breakout pathway generates signals now.
             pullback_data = self.signals.detect_pullback_setup(df)
 
-            # Step 2: Check signal triggers
+            # Step 2: Check signal triggers (v13: VCE squeeze-breakout is primary)
             triggered, trigger_details = self.signals.check_all_triggers(df)
 
             if not triggered:
-                if not pullback_data['detected']:
-                    logger.debug(f"{ticker}: No trigger - {trigger_details.get('triggers', {})}")
-                    _bump_scan_reject(reject_counts, "no_trigger")
-                    return None
-                # Pullback entry: bypass volume-surge trigger gate (low volume = healthy pullback)
-                logger.debug(f"{ticker}: Pullback entry ({pullback_data['quality']}) bypasses trigger gate")
+                logger.debug(f"{ticker}: No trigger - {trigger_details.get('triggers', {})}")
+                _bump_scan_reject(reject_counts, "no_trigger")
+                return None
 
             # Step 3: Get boosters (includes swing confirmation)
             boosters = self.signals.check_boosters(df)
@@ -482,18 +482,18 @@ class SmallCapEngine:
             swing_details = boosters.get('swing_details', {})
 
             if not swing_ready:
-                if not pullback_data['detected']:
-                    # Log why it failed
-                    five_day = swing_details.get('five_day_momentum', {})
-                    ma20 = swing_details.get('above_ma20', {})
-                    logger.debug(
-                        f"{ticker}: Failed swing confirmation - "
-                        f"5d_mom={five_day.get('passed')}, ma20={ma20.get('passed')}"
-                    )
-                    _bump_scan_reject(reject_counts, "swing_not_ready")
-                    return None
-                # Pullback entry: bypass swing gate (MA20 proximity is exactly the point)
-                logger.debug(f"{ticker}: Pullback entry bypasses swing gate")
+                # v13: no pullback bypass — all signals pass the same gates.
+                # (VCE breakouts close above the prior 20-day high, which
+                # mathematically implies Close > MA20 and positive 5d momentum,
+                # so this gate only rejects malformed/edge-case data.)
+                five_day = swing_details.get('five_day_momentum', {})
+                ma20 = swing_details.get('above_ma20', {})
+                logger.debug(
+                    f"{ticker}: Failed swing confirmation - "
+                    f"5d_mom={five_day.get('passed')}, ma20={ma20.get('passed')}"
+                )
+                _bump_scan_reject(reject_counts, "swing_not_ready")
+                return None
             
             # Step 4: Calculate quality score (includes penalties)
             volume_surge = trigger_details.get('volume_surge', 2.0)
@@ -620,9 +620,17 @@ class SmallCapEngine:
                 macd_bullish=boosters.get('macd_bullish', False)
             )
             
-            # V4 hard RSI gate: reject overbought signals before they become trades
+            # V4 hard RSI gate — v13: VCE pathway is EXEMPT.
+            # Edge measurement by RSI bucket on VCE signals (R10 vs 24k-bar benchmark):
+            #   RSI <70:   edge +6.51% (n=24)
+            #   RSI 70-80: edge +5.14% (n=50)
+            #   RSI 80+:   edge +4.53% (n=49)
+            # All buckets positive — at a squeeze breakout, high RSI means strength,
+            # not overextension. The old gate was killing 69% of validated VCE
+            # signals. RSI still feeds scoring penalties for ranking.
             max_rsi = self.settings.max_entry_rsi
-            if rsi > max_rsi and swing_type != 'S':
+            _is_vce = trigger_details.get('trigger_pathway') == 'vce_breakout'
+            if rsi > max_rsi and swing_type != 'S' and not _is_vce:
                 logger.debug(f"{ticker}: RSI {rsi:.0f} > {max_rsi} — rejected (overbought, not squeeze)")
                 _bump_scan_reject(reject_counts, "rsi_gate")
                 return None
@@ -635,10 +643,12 @@ class SmallCapEngine:
                 five_day_total > sg.late_entry_five_day_total_gt
                 and rsi > sg.late_entry_rsi_gt
                 and swing_type != "S"
+                and not _is_vce  # v13: VCE measured edge includes these cases
             ):
                 logger.debug(
                     f"{ticker}: Late entry rejected — 5d={five_day_total:+.0f}%, RSI={rsi:.0f}"
                 )
+                _bump_scan_reject(reject_counts, "late_entry")
                 return None
 
             # ================================================================

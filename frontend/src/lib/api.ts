@@ -84,6 +84,8 @@ export interface Trade {
     current_price?: number;
     unrealized_pnl?: number;
     unrealized_pnl_pct?: number;
+    // v13.3: post-exit drift — current vs exit price for closed trades
+    since_exit_pct?: number;
     // v3.1: Dual target & partial exit
     target_2?: number;
     partial_exit_price?: number;

@@ -47,6 +47,21 @@ async def _scheduled_pending_confirm_loop() -> None:
             n = len(processed or [])
             if n:
                 logger.info("Scheduled pending confirm: processed %d trade(s)", n)
+            # Exit lifecycle must not depend on the UI being open: check
+            # stop/T1/T2/trailing/timeout on OPEN trades in the background too.
+            # (Previously this ran only on POST /api/trades/update-prices, so
+            # exits were evaluated only when the user visited the page.)
+            updated = tracker.update_all_open_trades(None)
+            closed = [
+                t for t in (updated or [])
+                if t.get("status") not in ("OPEN", "PENDING")
+            ]
+            if closed:
+                logger.info(
+                    "Scheduled exit check: %d trade(s) closed (%s)",
+                    len(closed),
+                    ", ".join(t.get("ticker", "?") for t in closed),
+                )
         except asyncio.CancelledError:
             raise
         except Exception:

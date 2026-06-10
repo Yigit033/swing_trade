@@ -33,13 +33,13 @@ def test_default_matches_known_engine_constants():
     assert len(d.scoring_tuning.atr_percent_tiers) == 7
     assert len(d.scoring_tuning.float_millions_bands) == 5
     assert d.max_entry_rsi == 70
-    assert d.volume_surge_trigger == 1.5
+    assert d.volume_surge_trigger == 2.0
     assert d.min_atr_percent == 0.03
     assert d.stop_atr_multiplier == 1.5
     assert d.max_stop_by_type["C"] == 0.06
     assert d.type_atr_multipliers["S"] == 2.5
     assert d.min_rr_at_entry == 1.2
-    assert d.regime_thresholds.bear_confirmed_min_quality == 72
+    assert d.regime_thresholds.bear_confirmed_min_quality == 80
 
 
 def test_load_partial_merge_over_defaults():
@@ -77,7 +77,7 @@ def test_apply_settings_patch_persists_and_merges():
         assert out.max_entry_rsi == 66
         assert out.regime_thresholds.bear_tentative_min_quality == 71
         # unrelated regime field preserved from previous merge
-        assert out.regime_thresholds.bear_confirmed_min_quality == 72
+        assert out.regime_thresholds.bear_confirmed_min_quality == 80
         reloaded = load_settings(p)
         assert reloaded.max_entry_rsi == 66
 

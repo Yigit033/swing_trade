@@ -135,7 +135,10 @@ class SmallCapFilters:
             return False, f"Market cap too small (${market_cap/1e6:.0f}M < $250M)"
         
         if market_cap > self.MAX_MARKET_CAP:
-            return False, f"Market cap too large (${market_cap/1e9:.1f}B > $2.5B)"
+            return False, (
+                f"Market cap too large (${market_cap/1e9:.1f}B > "
+                f"${self.MAX_MARKET_CAP/1e9:.0f}B)"
+            )
         
         return True, f"Market cap OK (${market_cap/1e6:.0f}M)"
     
@@ -296,21 +299,37 @@ class SmallCapFilters:
         if not passed:
             return False, results
         
-        # 3. ATR%
+        # 3. ATR% — ADVISORY ONLY since v13 (recorded, never rejects).
+        # The old hard gate (ATR >= 3%) belonged to the momentum-chasing thesis
+        # and directly contradicts the validated VCE primary trigger: a
+        # volatility-squeezed stock has LOW ATR by definition, and the edge
+        # measurement showed squeeze->expansion is the only entry with
+        # statistically significant forward edge. Tradeability is enforced by
+        # price/market-cap/dollar-volume gates above; stop/target sizing uses
+        # live ATR in the risk module.
         atr_pct = self.calculate_atr_percent(df)
         passed, reason = self.check_atr_percent(atr_pct)
-        results['filters']['atr_percent'] = {'passed': passed, 'reason': reason, 'value': atr_pct}
-        if not passed:
-            return False, results
+        results['filters']['atr_percent'] = {
+            'passed': True, 'reason': f"{reason} (advisory)", 'value': atr_pct
+        }
         
-        # 4. Float
+        # 4. Float — ADVISORY ONLY since v13 (recorded + scoring tier bonus,
+        # never rejects). The >80M hard reject belonged to the micro-cap
+        # "explosion" thesis. The VCE edge was validated on a universe that is
+        # predominantly LARGE-float (HIMS, SOFI, RKLB, SOUN, TOST, RDDT...),
+        # and backtest_mode bypassed this gate (45M default) — so the proven
+        # pipeline never enforced it. Keeping it live would reject exactly the
+        # population the edge was measured on. Float tightness still feeds the
+        # quality score via get_float_tier_bonus.
         float_shares = stock_info.get('floatShares', 0) or stock_info.get('float_shares', 0)
         if backtest_mode and (float_shares is None or float_shares <= 0):
             float_shares = 45_000_000
         passed, reason = self.check_float(float_shares)
-        results['filters']['float'] = {'passed': passed, 'reason': reason, 'value': float_shares}
-        if not passed:
-            return False, results
+        results['filters']['float'] = {
+            'passed': True,
+            'reason': reason if passed else f"{reason} (advisory)",
+            'value': float_shares,
+        }
         
         # 5. Earnings (live API only — not point-in-time in backtest)
         if backtest_mode:

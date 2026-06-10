@@ -246,7 +246,9 @@ class UniverseFilterSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     min_market_cap: int = 250_000_000
-    max_market_cap: int = 2_500_000_000
+    # v13.2: raised 2.5B → 10B. The VCE edge was measured cap-agnostic and its
+    # strongest contributors (HIMS, CELH, RDDT, TOST, MNDY) are mid-caps.
+    max_market_cap: int = 10_000_000_000
     min_avg_volume: int = 750_000
     min_price: float = 3.0
     max_price: float = 200.0

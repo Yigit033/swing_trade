@@ -44,52 +44,72 @@ class CloseTradeIn(BaseModel):
     notes: str = ""
 
 
+# Short-TTL price cache so listing 40-50 trades (mostly closed) doesn't hammer
+# yfinance on every page load. One batch request per cold ticker set / 5 min.
+_PRICE_CACHE: dict = {}  # ticker -> (price, fetched_at_epoch)
+_PRICE_CACHE_TTL_SEC = 300
+
+
 def _enrich_open_trades_inline(trades: list) -> list:
     """
-    For OPEN/PENDING trades missing real current_price, batch-fetch live prices via yfinance.
+    Attach live current_price to ALL trades (open, pending AND closed) via one
+    batched yfinance call + 5-min cache.
+
+    - OPEN: also computes unrealized P&L vs entry.
+    - CLOSED: current_price enables the "where is it trading now vs my exit?"
+      post-trade review (exit quality feedback for the trader).
     Uses period='5d' so weekends/holidays still return the last trading day's close.
     """
-    # Detect trades needing price: null, 0, or same as entry_price (fallback value)
-    needs_price = [
-        t for t in trades
-        if t.get("status") in ("OPEN", "PENDING") and (
-            not t.get("current_price")
-            or t.get("current_price") == t.get("entry_price")
-        )
-    ]
-    if not needs_price:
+    import time as _time
+
+    all_tickers = list({t["ticker"] for t in trades if t.get("ticker")})
+    if not all_tickers:
         return trades
-    tickers = list({t["ticker"] for t in needs_price if t.get("ticker")})
-    if not tickers:
-        return trades
-    try:
-        import yfinance as yf
-        # yfinance 1.x: data["Close"] is always a DataFrame (even single ticker).
-        data = yf.download(tickers, period="5d", progress=False, auto_adjust=True)
-        if data.empty:
-            return trades
-        prices = {}
-        close = data["Close"]  # DataFrame: columns = ticker names
-        for tk in tickers:
-            try:
-                col = close[tk] if tk in close.columns else close.iloc[:, 0]
-                val = col.dropna()
-                if not val.empty:
-                    prices[tk] = round(float(val.iloc[-1].item()), 4)
-            except Exception:
-                pass
-        for t in trades:
-            if t.get("status") in ("OPEN", "PENDING"):
-                cp = prices.get(t["ticker"])
-                if cp:
-                    entry = t.get("entry_price") or 0
-                    size = t.get("position_size") or 100
-                    t["current_price"] = cp
-                    if entry and t.get("status") == "OPEN":
-                        t["unrealized_pnl"] = round((cp - entry) * size, 2)
-                        t["unrealized_pnl_pct"] = round(((cp / entry) - 1) * 100, 2)
-    except Exception as e:
-        logger.warning(f"Inline price enrichment failed: {e}")
+
+    now = _time.time()
+    prices = {
+        tk: p for tk, (p, ts) in _PRICE_CACHE.items()
+        if tk in all_tickers and now - ts < _PRICE_CACHE_TTL_SEC
+    }
+    missing = [tk for tk in all_tickers if tk not in prices]
+
+    if missing:
+        try:
+            import yfinance as yf
+            # yfinance 1.x: data["Close"] is always a DataFrame (even single ticker).
+            data = yf.download(missing, period="5d", progress=False, auto_adjust=True)
+            if not data.empty:
+                close = data["Close"]  # DataFrame: columns = ticker names
+                for tk in missing:
+                    try:
+                        col = close[tk] if tk in close.columns else close.iloc[:, 0]
+                        val = col.dropna()
+                        if not val.empty:
+                            p = round(float(val.iloc[-1].item()), 4)
+                            prices[tk] = p
+                            _PRICE_CACHE[tk] = (p, now)
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.warning(f"Inline price enrichment failed: {e}")
+
+    for t in trades:
+        cp = prices.get(t.get("ticker"))
+        if not cp:
+            continue
+        status = t.get("status")
+        t["current_price"] = cp
+        if status == "OPEN":
+            entry = t.get("entry_price") or 0
+            size = t.get("position_size") or 100
+            if entry:
+                t["unrealized_pnl"] = round((cp - entry) * size, 2)
+                t["unrealized_pnl_pct"] = round(((cp / entry) - 1) * 100, 2)
+        elif status not in ("OPEN", "PENDING"):
+            # Post-exit drift: how far has it moved since we exited?
+            exit_px = t.get("exit_price") or 0
+            if exit_px:
+                t["since_exit_pct"] = round((cp / exit_px - 1) * 100, 2)
     return trades
 
 

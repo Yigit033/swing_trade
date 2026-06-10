@@ -601,7 +601,25 @@ export default function TradesPage() {
                                                             <span style={{ color: "var(--text-muted)" }}>—</span>
                                                         )
                                                     ) : isClosed ? (
-                                                        <span style={{ color: "var(--text-muted)" }}>—</span>
+                                                        currentPrice != null && currentPrice > 0 ? (
+                                                            <span>
+                                                                <span style={{ fontWeight: 600, color: "var(--text)" }}>
+                                                                    ${currentPrice.toFixed(2)}
+                                                                </span>
+                                                                {t.since_exit_pct != null && (
+                                                                    <div style={{
+                                                                        fontSize: "0.62rem",
+                                                                        fontWeight: 600,
+                                                                        marginTop: 1,
+                                                                        color: t.since_exit_pct >= 0 ? "#22c55e" : "#ef4444",
+                                                                    }}>
+                                                                        çıkıştan {t.since_exit_pct >= 0 ? "+" : ""}{t.since_exit_pct.toFixed(1)}%
+                                                                    </div>
+                                                                )}
+                                                            </span>
+                                                        ) : (
+                                                            <span style={{ color: "var(--text-muted)" }}>—</span>
+                                                        )
                                                     ) : (
                                                         <span style={{ color: "var(--text-muted)" }}>—</span>
                                                     )}

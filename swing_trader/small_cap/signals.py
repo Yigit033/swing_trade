@@ -506,6 +506,124 @@ class SmallCapSignals:
             logger.error(f"Error checking continuation: {e}")
             return False, str(e)
 
+    # ============================================================
+    # VOLATILITY CONTRACTION → EXPANSION BREAKOUT (VCE) — v13 PRIMARY
+    # ============================================================
+    # Empirically validated edge (scripts/measure_signal_edge.py +
+    # scripts/test_edge_hypotheses.py + scripts/validate_volsqueeze.py,
+    # 57 small/mid-caps, 2024-06 → 2026-05, 24k bar benchmark):
+    #   R10 edge +5.16% vs random entry, Welch t=2.6
+    #   Out-of-sample (2025-06+): R10 edge +6.17%, t=2.29 — edge holds on unseen data
+    # All other tested pathways (early accumulation, fresh 5-bar breakout,
+    # plain continuation, VCP, oversold bounce, new-high momentum) measured
+    # at zero or NEGATIVE edge on the same benchmark.
+    #
+    # The constants below are the exact validated rule — do not tune them
+    # without re-running the measurement harness.
+    VCE_ATR_PERIOD = 14            # ATR% via TR.rolling(14).mean() / Close
+    VCE_SQUEEZE_RATIO = 0.8        # yesterday ATR% < 80% of baseline = squeeze
+    VCE_BASELINE_OFFSET = (20, 5)  # baseline = mean ATR% of bars [-20, -5) before today
+    VCE_BREAKOUT_LOOKBACK = 20     # close must exceed prior 20-day high
+    VCE_VOLUME_MULT = 1.5          # breakout volume >= 1.5x 20-day average
+    VCE_CLOSE_POS_MIN = 0.6        # close in upper 40% of day range
+
+    def check_vce_breakout(self, df: pd.DataFrame) -> Tuple[bool, str, Dict]:
+        """
+        Volatility Contraction→Expansion breakout — the system's PRIMARY entry.
+
+        The spring: volatility (ATR%) dries up to <80% of its recent baseline,
+        then price breaks the prior 20-day high in an uptrend (>MA50) on
+        1.5x volume with a strong close. We catch the expansion as it starts,
+        not after the move has run.
+
+        Returns (passed, reason, metrics).
+        """
+        metrics = {
+            'atr_now_pct': 0.0,
+            'atr_baseline_pct': 0.0,
+            'squeeze_ratio': 0.0,
+            'breakout_level': 0.0,
+            'vol_ratio': 0.0,
+            'close_position': 0.0,
+        }
+        if df is None or len(df) < 55:
+            return False, "Insufficient data (<55 bars)", metrics
+
+        try:
+            close = df['Close'].astype(float)
+            high = df['High'].astype(float)
+            low = df['Low'].astype(float)
+            volume = df['Volume'].astype(float)
+
+            # ATR% series (14-period SMA of true range, as % of close)
+            tr = pd.concat(
+                [high - low, (high - close.shift()).abs(), (low - close.shift()).abs()],
+                axis=1,
+            ).max(axis=1)
+            atr_pct = tr.rolling(self.VCE_ATR_PERIOD).mean() / close * 100
+
+            # 1. SQUEEZE: yesterday's ATR% vs baseline (bars -20..-6, before the move)
+            atr_now = float(atr_pct.iloc[-2])
+            off_far, off_near = self.VCE_BASELINE_OFFSET
+            atr_base = float(atr_pct.iloc[-1 - off_far:-1 - off_near].mean())
+            metrics['atr_now_pct'] = round(atr_now, 2)
+            metrics['atr_baseline_pct'] = round(atr_base, 2)
+            if np.isnan(atr_now) or np.isnan(atr_base) or atr_base <= 0:
+                return False, "ATR baseline unavailable", metrics
+            squeeze_ratio = atr_now / atr_base
+            metrics['squeeze_ratio'] = round(squeeze_ratio, 2)
+            if squeeze_ratio >= self.VCE_SQUEEZE_RATIO:
+                return False, (
+                    f"No squeeze (ATR {atr_now:.1f}% = {squeeze_ratio:.0%} of baseline "
+                    f"{atr_base:.1f}%, need <{self.VCE_SQUEEZE_RATIO:.0%})"
+                ), metrics
+
+            # 2. BREAKOUT: close above prior 20-day high (excluding today)
+            c = float(close.iloc[-1])
+            breakout_level = float(high.iloc[-1 - self.VCE_BREAKOUT_LOOKBACK:-1].max())
+            metrics['breakout_level'] = round(breakout_level, 2)
+            if c <= breakout_level:
+                return False, (
+                    f"No breakout (close {c:.2f} <= 20d high {breakout_level:.2f})"
+                ), metrics
+
+            # 3. GREEN DAY
+            if c <= float(close.iloc[-2]):
+                return False, "Red/flat day on breakout bar", metrics
+
+            # 4. TREND: above MA50
+            ma50 = float(close.rolling(50).mean().iloc[-1])
+            if np.isnan(ma50) or c <= ma50:
+                return False, f"Below MA50 ({c:.2f} <= {ma50:.2f})", metrics
+
+            # 5. VOLUME: 1.5x 20-day average
+            vol20 = float(volume.rolling(20).mean().iloc[-1])
+            vol_ratio = float(volume.iloc[-1]) / vol20 if vol20 > 0 else 0.0
+            metrics['vol_ratio'] = round(vol_ratio, 2)
+            if vol_ratio < self.VCE_VOLUME_MULT:
+                return False, (
+                    f"Volume too low ({vol_ratio:.1f}x < {self.VCE_VOLUME_MULT}x)"
+                ), metrics
+
+            # 6. STRONG CLOSE: upper 40% of day's range
+            h, l = float(high.iloc[-1]), float(low.iloc[-1])
+            day_range = h - l
+            close_pos = (c - l) / day_range if day_range > 0 else 0.5
+            metrics['close_position'] = round(close_pos, 2)
+            if close_pos < self.VCE_CLOSE_POS_MIN:
+                return False, (
+                    f"Weak close ({close_pos:.0%} of range, need {self.VCE_CLOSE_POS_MIN:.0%}+)"
+                ), metrics
+
+            return True, (
+                f"VCE: squeeze {squeeze_ratio:.0%} of baseline → breakout above "
+                f"${breakout_level:.2f} | vol {vol_ratio:.1f}x | close {close_pos:.0%}"
+            ), metrics
+
+        except Exception as e:
+            logger.error(f"Error checking VCE breakout: {e}")
+            return False, str(e), metrics
+
     def check_all_triggers(self, df: pd.DataFrame) -> Tuple[bool, Dict]:
         """
         Check signal conditions for scoring.
@@ -520,8 +638,25 @@ class SmallCapSignals:
             'triggered': False,
             'triggers': {}
         }
-        
-        # Calculate metrics (no hard failures)
+
+        # ============================================================
+        # v13 — VCE IS THE PRIMARY (AND ONLY) SIGNAL-GENERATING TRIGGER
+        # ============================================================
+        # Edge measurement (2024-06→2026-05, 24k bar benchmark) showed the
+        # previous pathways produce ZERO or NEGATIVE edge vs random entry:
+        #   volume_ignition / early accumulation: R5 edge -1.17% (t=-1.83)
+        #   technical_breakout (5-bar high):      no measurable edge
+        #   trend_continuation:                   R5 edge +0.29% (t=0.65, noise)
+        # Only VCE (volatility squeeze → expansion breakout) survived
+        # out-of-sample testing: R10 edge +5.2%, t=2.6. So VCE decides;
+        # legacy metrics are still computed for display/scoring context.
+        #
+        # NOTE: the old `min_atr_ok` hard gate is intentionally NOT applied
+        # to the VCE pathway — a squeezed stock has LOW recent ATR by
+        # definition; requiring ATR>=3% would contradict the validated rule.
+        vce_passed, vce_reason, vce_metrics = self.check_vce_breakout(df)
+
+        # Context metrics (display + downstream scoring; NOT trigger decisions)
         volume_surge = self.calculate_volume_surge(df, period=self._settings.volume_surge_baseline_days)
         atr_pct = self.calculate_atr_percent(df)
         breakout_passed, breakout_reason = self.check_breakout(df)
@@ -529,57 +664,47 @@ class SmallCapSignals:
 
         vol_need = self._settings.volume_surge_trigger
         atr_need = self._settings.min_atr_percent
-        # Store all metrics
+
+        details['triggers']['vce_breakout'] = {
+            'passed': vce_passed,
+            'reason': vce_reason,
+            'metrics': vce_metrics,
+            'primary': True,
+        }
         details['triggers']['volume_surge'] = {
             'passed': volume_surge >= vol_need,
             'reason': f"Volume surge {volume_surge:.1f}x (need {vol_need}x)",
-            'value': volume_surge
+            'value': volume_surge,
+            'optional': True
         }
-
         details['triggers']['atr_percent'] = {
             'passed': atr_pct >= atr_need,
             'reason': f"ATR% {atr_pct*100:.1f}% (need {atr_need*100:.1f}%)",
-            'value': atr_pct
+            'value': atr_pct,
+            'optional': True
         }
-
         details['triggers']['breakout'] = {
             'passed': breakout_passed,
             'reason': breakout_reason,
             'optional': True
         }
-
         details['triggers']['continuation'] = {
             'passed': continuation_passed,
             'reason': continuation_reason,
             'optional': True
         }
 
-        min_vol_ok = volume_surge >= vol_need
-        min_atr_ok = atr_pct >= atr_need
-
         # ALWAYS store values for display (even if not triggered)
         details['volume_surge'] = volume_surge
         details['atr_percent'] = atr_pct
         details['has_breakout'] = breakout_passed
         details['has_continuation'] = continuation_passed
+        details['vce_metrics'] = vce_metrics
 
-        # Senior trader 3-pathway trigger logic:
-        #   ATR is universally required (need volatility for swing targets).
-        #   Then ANY ONE of these pathways is sufficient:
-        #     A) Volume ignition   — vol_surge >= 2x on 50d median
-        #     B) Technical breakout — Close > 5-bar high with vol 1.2x + close strength
-        #     C) Trend continuation — already above MA20, green close, close strong
-        #   Pathway C closes the gap left by A+B: in bull regimes, Finviz stocks
-        #   are mostly in continuation (already past their 5-bar high), so A/B
-        #   miss them. Quality bar + swing_confirmation filter weak continuations.
-        if min_atr_ok and (min_vol_ok or breakout_passed or continuation_passed):
+        if vce_passed:
             details['triggered'] = True
-            if min_vol_ok:
-                details['trigger_pathway'] = 'volume_ignition'
-            elif breakout_passed:
-                details['trigger_pathway'] = 'technical_breakout'
-            else:
-                details['trigger_pathway'] = 'trend_continuation'
+            details['trigger_pathway'] = 'vce_breakout'
+            details['trigger_reason'] = vce_reason
 
         return details['triggered'], details
     

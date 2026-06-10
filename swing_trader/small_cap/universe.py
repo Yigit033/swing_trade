@@ -357,6 +357,48 @@ class SmallCapUniverse:
                 frames.append(df4)
 
             # ============================================================
+            # QUERY 5: VCE BREAKOUT DAY (v13 — PRIMARY THESIS ALIGNMENT)
+            # The engine's primary trigger is the volatility-squeeze breakout
+            # (VCE). A squeezed stock has LOW recent volatility, so queries
+            # 1-3 (weekly volatility >5%) and 2/4 (RSI caps) systematically
+            # miss it — exactly the stock we most want to see on the day it
+            # breaks out. This query matches the VCE breakout-day signature:
+            # green day + elevated volume, with NO volatility floor, NO RSI
+            # cap and NO float cap (the validated rule has none of those).
+            # ============================================================
+            q5_filters = {
+                'Market Cap.': 'Small ($300mln to $2bln)',
+                'Price': 'Over $7',
+                'Country': 'USA',
+                'Average Volume': 'Over 500K',
+                'Relative Volume': 'Over 1.5',
+                'Change': 'Up 2%',
+            }
+            df5 = self._run_finviz_query(q5_filters, "VCE BREAKOUT DAY")
+            if len(df5) > 0:
+                frames.append(df5)
+
+            # ============================================================
+            # QUERY 5b: VCE BREAKOUT DAY — MID CAP ($2B-$10B) (v13.2)
+            # The VCE edge was measured cap-agnostic: its strongest
+            # contributors (HIMS, CELH, RDDT, TOST, MNDY) are mid-caps.
+            # Finviz has no single $300M-$10B preset, so the mid band runs
+            # as its own query. Higher liquidity bar (1M avg volume) keeps
+            # execution quality tight for the larger names.
+            # ============================================================
+            q5b_filters = {
+                'Market Cap.': 'Mid ($2bln to $10bln)',
+                'Price': 'Over $7',
+                'Country': 'USA',
+                'Average Volume': 'Over 1M',
+                'Relative Volume': 'Over 1.5',
+                'Change': 'Up 2%',
+            }
+            df5b = self._run_finviz_query(q5b_filters, "VCE BREAKOUT DAY (MID)")
+            if len(df5b) > 0:
+                frames.append(df5b)
+
+            # ============================================================
             # MERGE & DEDUPLICATE
             # ============================================================
             if not frames:

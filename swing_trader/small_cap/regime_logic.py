@@ -32,11 +32,18 @@ def regime_from_spy_close(close: pd.Series, vix_last: Optional[float] = None) ->
     Same rules as SmallCapSignals.detect_market_regime v4.0, using pre-aligned SPY closes.
     `close` must be chronological, index or RangeIndex; last row = as-of bar.
     """
-    if close is None or len(close) < 50:
+    if close is None:
         return regime_unknown("insufficient_spy_history")
 
     try:
-        close = close.astype(float)
+        # NaN guard: during US premarket, data providers can append today's
+        # row with NaN close. Without dropna, every derived value (price,
+        # MA50, MA200) becomes NaN — the regime label may still come out
+        # (comparisons on the remaining valid days) but the payload breaks
+        # JSON serialization (/api/regime/current 500) and sector RS math.
+        close = pd.to_numeric(close, errors="coerce").dropna()
+        if len(close) < 50:
+            return regime_unknown("insufficient_spy_history")
         current = float(close.iloc[-1])
         ma50_val = float(close.rolling(50).mean().iloc[-1])
         has_ma200 = len(close) >= 200
@@ -116,8 +123,8 @@ def rs_bonus_vs_spy(stock_close: pd.Series, spy_close: pd.Series) -> Dict:
     if stock_close is None or spy_close is None:
         return out
     try:
-        sc = stock_close.astype(float)
-        sp = spy_close.astype(float)
+        sc = pd.to_numeric(stock_close, errors="coerce").dropna()
+        sp = pd.to_numeric(spy_close, errors="coerce").dropna()
         if len(sc) < 6 or len(sp) < 6:
             return out
         s5 = (float(sc.iloc[-1]) / float(sc.iloc[-6]) - 1.0) * 100.0

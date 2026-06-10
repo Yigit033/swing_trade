@@ -65,10 +65,14 @@ class SectorRS:
             
             if hist is None or len(hist) < 5:
                 return None
-            
-            close_now = hist['Close'].iloc[-1]
-            close_5d_ago = hist['Close'].iloc[-5] if len(hist) >= 5 else hist['Close'].iloc[0]
-            
+
+            # NaN guard: premarket rows can carry NaN close — drop them
+            closes = hist['Close'].dropna()
+            if len(closes) < 5:
+                return None
+            close_now = closes.iloc[-1]
+            close_5d_ago = closes.iloc[-5]
+
             return ((close_now - close_5d_ago) / close_5d_ago) * 100
             
         except Exception as e:
@@ -79,6 +83,7 @@ class SectorRS:
     def _get_multi_period_return(cls, ticker: str) -> Dict[str, Optional[float]]:
         """Get 5d, 10d, 20d returns — yfinance primary, Tiingo fallback."""
         def _compute(closes) -> Dict[str, Optional[float]]:
+            closes = closes.dropna()  # NaN guard (premarket rows)
             def ret(n):
                 return ((float(closes.iloc[-1]) / float(closes.iloc[-n]) - 1) * 100
                         if len(closes) >= n else None)

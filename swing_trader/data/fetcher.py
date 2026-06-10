@@ -40,6 +40,33 @@ class DataFetcher:
         fallbacks = [s for s, k in [("tiingo", self.tiingo_key), ("finnhub", self.finnhub_key)] if k]
         logger.info(f"DataFetcher initialized: primary=yfinance fallbacks={fallbacks or ['none']}")
     
+    @staticmethod
+    def _drop_incomplete_last_bar(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+        """
+        Drop today's bar if the US session hasn't closed yet (before 16:00 ET).
+
+        During market hours / premarket, providers return today's row with
+        PARTIAL volume and a moving close. Every volume-relative check
+        (VCE 1.5x breakout volume, 2x surge, 1.2x breakout confirm) then
+        compares a few hours of volume against full-day baselines and fails
+        ~always (the "0.1x volume surge on every stock" artifact). Daily-bar
+        rules are only decidable on COMPLETED bars — intraday scans must
+        evaluate the last completed session.
+        """
+        if df is None or len(df) == 0 or 'Date' not in df.columns:
+            return df
+        try:
+            from zoneinfo import ZoneInfo
+            now_et = datetime.now(ZoneInfo('America/New_York'))
+            last_date = pd.to_datetime(df['Date'].iloc[-1]).date()
+            if last_date == now_et.date() and now_et.hour < 16:
+                logger.debug("Dropping incomplete intraday bar (%s, %02d:%02d ET)",
+                             last_date, now_et.hour, now_et.minute)
+                return df.iloc[:-1].reset_index(drop=True)
+        except Exception:
+            pass
+        return df
+
     def fetch_stock_data(
         self,
         ticker: str,
@@ -102,6 +129,7 @@ class DataFetcher:
                 available_cols = [c for c in required_cols if c in data.columns]
                 data = data[available_cols]
 
+                data = self._drop_incomplete_last_bar(data)
                 logger.info(f"Successfully fetched {len(data)} rows for {ticker} (last=${last_price:.2f})")
                 return data
 
@@ -121,12 +149,14 @@ class DataFetcher:
         if self.tiingo_key:
             data = self._fetch_tiingo_single(ticker, s_date, e_date)
             if data is not None:
+                data = self._drop_incomplete_last_bar(data)
                 logger.info(f"[Tiingo] {ticker}: {len(data)} rows")
                 return data
 
         if self.finnhub_key:
             data = self._fetch_finnhub_single(ticker, s_date, e_date)
             if data is not None:
+                data = self._drop_incomplete_last_bar(data)
                 logger.info(f"[Finnhub] {ticker}: {len(data)} rows")
                 return data
 
@@ -240,6 +270,17 @@ class DataFetcher:
                             required = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
                             df = df[[c for c in required if c in df.columns]]
 
+                            # Premarket guard: drop rows with NaN Close — during US
+                            # premarket yfinance can append today's partially-filled
+                            # row, which poisons MA/ATR/trigger math downstream.
+                            if 'Close' in df.columns:
+                                df = df[df['Close'].notna()]
+
+                            # Intraday guard: before 16:00 ET today's bar is
+                            # incomplete (partial volume) — evaluate last
+                            # completed session instead.
+                            df = self._drop_incomplete_last_bar(df)
+
                             if len(df) >= 20:
                                 results[ticker] = df
                         except Exception:
@@ -271,6 +312,9 @@ class DataFetcher:
             if not results and self.finnhub_key:
                 logger.warning("Tiingo batch empty — trying Finnhub")
                 results = self._batch_finnhub(tickers, s_date, e_date)
+
+            # Fallback sources can also include today's partial bar
+            results = {t: self._drop_incomplete_last_bar(df) for t, df in results.items()}
 
         logger.info(f"Batch fetch complete: {len(results)}/{len(tickers)} tickers")
         return results

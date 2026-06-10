@@ -293,6 +293,17 @@ def _execute_smallcap_scan(
         )
     except Exception:
         logger.debug("Signal history save skipped (non-critical)")
+
+    # Forward-return feedback loop (v13): queue today's signals for R3/R5/R10
+    # tracking and fill any matured ones from previous days (non-critical).
+    try:
+        from swing_trader.data.forward_returns import get_forward_tracker
+
+        tracker = get_forward_tracker()
+        tracker.record_signals(job_id, filtered)
+        tracker.update_pending()
+    except Exception:
+        logger.debug("Forward-return tracking skipped (non-critical)")
     prog(97, "finalize", "Done")
     return sanitize_for_json({"signals": filtered, "stats": stats, "market_regime": actual_regime})
 
@@ -379,3 +390,21 @@ def get_smallcap_scan_history(
     if not row:
         raise HTTPException(status_code=404, detail="Unknown run_id")
     return sanitize_for_json(row)
+
+
+@router.get("/smallcap/edge-tracking")
+def get_edge_tracking(refresh: bool = Query(False)):
+    """
+    Live signal forward-return tracking (v13 feedback loop).
+
+    Returns R3/R5/R10 + MFE/MAE aggregates for every live signal produced by
+    the scanner, alongside the harness expectation — answers "are our live
+    signals actually performing like the measured edge?" with data.
+    Set refresh=true to fill matured returns before reading.
+    """
+    from swing_trader.data.forward_returns import get_forward_tracker
+
+    tracker = get_forward_tracker()
+    if refresh:
+        tracker.update_pending()
+    return sanitize_for_json(tracker.get_stats())

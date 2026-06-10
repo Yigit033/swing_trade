@@ -204,7 +204,7 @@
   },
   "universe_filters": {
     "min_market_cap": 250000000,
-    "max_market_cap": 2500000000,
+    "max_market_cap": 10000000000,
     "min_avg_volume": 750000,
     "min_price": 8.0,
     "max_price": 200.0,
