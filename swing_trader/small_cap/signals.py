@@ -1249,6 +1249,21 @@ class SmallCapSignals:
                     return r
 
                 close = hist["Close"]
+                # Incomplete-bar guard: during US pre/intraday hours yfinance
+                # appends today's row with a LIVE partial price (premarket SPY
+                # quote), skewing regime values vs the completed-session view.
+                # Drop it before 16:00 ET — same rule as DataFetcher.
+                try:
+                    from zoneinfo import ZoneInfo
+                    from datetime import datetime as _dt
+
+                    _now_et = _dt.now(ZoneInfo("America/New_York"))
+                    if len(close) > 0:
+                        _last_date = pd.Timestamp(close.index[-1]).date()
+                        if _last_date == _now_et.date() and _now_et.hour < 16:
+                            close = close.iloc[:-1]
+                except Exception:
+                    pass
                 vix_val: float = 0.0
                 try:
                     vix = yf.Ticker("^VIX")

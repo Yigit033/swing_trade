@@ -130,7 +130,12 @@ class DataFetcher:
                 data = data[available_cols]
 
                 data = self._drop_incomplete_last_bar(data)
-                logger.info(f"Successfully fetched {len(data)} rows for {ticker} (last=${last_price:.2f})")
+                if data is None or len(data) == 0:
+                    return None
+                # Recompute AFTER the incomplete-bar drop — otherwise the log
+                # shows the dropped premarket row's NaN/partial price.
+                last_clean = float(data['Close'].iloc[-1])
+                logger.info(f"Successfully fetched {len(data)} rows for {ticker} (last=${last_clean:.2f})")
                 return data
 
             except Exception as e:
