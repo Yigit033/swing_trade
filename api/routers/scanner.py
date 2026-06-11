@@ -296,11 +296,14 @@ def _execute_smallcap_scan(
 
     # Forward-return feedback loop (v13): queue today's signals for R3/R5/R10
     # tracking and fill any matured ones from previous days (non-critical).
+    # IMPORTANT: track RAW engine signals, not the display-filtered list —
+    # borderline-quality signals (e.g. Q61 under a 70 display threshold) are
+    # exactly the cases we need outcome data on to validate quality buckets.
     try:
         from swing_trader.data.forward_returns import get_forward_tracker
 
         tracker = get_forward_tracker()
-        tracker.record_signals(job_id, filtered)
+        tracker.record_signals(job_id, signals)
         tracker.update_pending()
     except Exception:
         logger.debug("Forward-return tracking skipped (non-critical)")
