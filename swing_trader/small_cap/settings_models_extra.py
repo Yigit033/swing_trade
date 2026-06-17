@@ -266,7 +266,7 @@ class UniverseScanSettings(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    max_scan_tickers: int = Field(default=200, ge=20, le=500)
+    max_scan_tickers: int = Field(default=260, ge=20, le=500)
     use_finviz: bool = True
     cache_duration_minutes: int = Field(
         default=60,

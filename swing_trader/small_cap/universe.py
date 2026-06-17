@@ -399,6 +399,42 @@ class SmallCapUniverse:
                 frames.append(df5b)
 
             # ============================================================
+            # QUERY 6: 20-DAY NEW HIGH IN UPTREND (v13.3 — VCE precise feed)
+            # The EXACT necessary condition for a VCE breakout is "closes at a
+            # new 20-day high while above SMA50". The momentum/volatility
+            # queries (1-3,5) select for stocks already MOVING — they
+            # systematically miss a quiet squeeze that breaks out on LOW
+            # volume / small change (which Variant B now accepts). This query
+            # surfaces EVERY 20-day-high-in-uptrend stock regardless of today's
+            # %change or RVOL, so the engine gets a shot at every real
+            # squeeze breakout. The engine then confirms the squeeze itself.
+            # No volatility/RSI/float cap — the validated rule has none.
+            # ============================================================
+            q6_filters = {
+                'Market Cap.': 'Small ($300mln to $2bln)',
+                'Price': 'Over $7',
+                'Country': 'USA',
+                'Average Volume': 'Over 500K',
+                '50-Day Simple Moving Average': 'Price above SMA50',
+                '20-Day High/Low': 'New High',
+            }
+            df6 = self._run_finviz_query(q6_filters, "20D NEW HIGH (small)")
+            if len(df6) > 0:
+                frames.append(df6)
+
+            q6b_filters = {
+                'Market Cap.': 'Mid ($2bln to $10bln)',
+                'Price': 'Over $7',
+                'Country': 'USA',
+                'Average Volume': 'Over 1M',
+                '50-Day Simple Moving Average': 'Price above SMA50',
+                '20-Day High/Low': 'New High',
+            }
+            df6b = self._run_finviz_query(q6b_filters, "20D NEW HIGH (mid)")
+            if len(df6b) > 0:
+                frames.append(df6b)
+
+            # ============================================================
             # MERGE & DEDUPLICATE
             # ============================================================
             if not frames:

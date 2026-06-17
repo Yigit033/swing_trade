@@ -5,15 +5,15 @@
   "min_volume_surge_soft": 1.5,
   "min_atr_percent": 0.03,
   "max_risk_per_trade": 0.015,
-  "stop_atr_multiplier": 1.5,
+  "stop_atr_multiplier": 2.0,
   "min_stop_percent": 0.03,
-  "max_stop_percent_fallback": 0.08,
-  "max_holding_days": 14,
+  "max_stop_percent_fallback": 0.1,
+  "max_holding_days": 20,
   "max_stop_by_type": {
-    "C": 0.06,
-    "A": 0.08,
-    "B": 0.09,
-    "S": 0.1
+    "C": 0.08,
+    "A": 0.1,
+    "B": 0.11,
+    "S": 0.12
   },
   "type_position_caps": {
     "C": 0.25,
@@ -28,22 +28,22 @@
     "C": 1.5
   },
   "t2_atr_ratio": 1.7,
-  "type_target_caps": {
+    "type_target_caps": {
     "S": {
       "t1_max_pct": 0.12,
-      "t2_max_pct": 0.40
+      "t2_max_pct": 0.65
     },
     "B": {
       "t1_max_pct": 0.1,
-      "t2_max_pct": 0.28
+      "t2_max_pct": 0.55
     },
     "C": {
       "t1_max_pct": 0.08,
-      "t2_max_pct": 0.22
+      "t2_max_pct": 0.45
     },
     "A": {
       "t1_max_pct": 0.1,
-      "t2_max_pct": 0.28
+      "t2_max_pct": 0.55
     }
   },
   "min_rr_at_entry": 1.8,
@@ -213,7 +213,7 @@
     "atr_period": 10
   },
   "universe_scan": {
-    "max_scan_tickers": 200,
+    "max_scan_tickers": 260,
     "use_finviz": true,
     "cache_duration_minutes": 60,
     "min_finviz_tickers_skip_static_merge": 30,

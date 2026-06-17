@@ -511,30 +511,41 @@ class SmallCapSignals:
     # ============================================================
     # Empirically validated edge (scripts/measure_signal_edge.py +
     # scripts/test_edge_hypotheses.py + scripts/validate_volsqueeze.py,
-    # 57 small/mid-caps, 2024-06 → 2026-05, 24k bar benchmark):
-    #   R10 edge +5.16% vs random entry, Welch t=2.6
-    #   Out-of-sample (2025-06+): R10 edge +6.17%, t=2.29 — edge holds on unseen data
-    # All other tested pathways (early accumulation, fresh 5-bar breakout,
-    # plain continuation, VCP, oversold bounce, new-high momentum) measured
-    # at zero or NEGATIVE edge on the same benchmark.
+    # 57 small/mid-caps, 2024-06 → 2026-05, 24k bar benchmark).
     #
-    # The constants below are the exact validated rule — do not tune them
-    # without re-running the measurement harness.
+    # OPERATING POINT (v13.3): the HARD gate is squeeze + breakout + green +
+    # trend(MA50) = "Variant B". Measured edge:
+    #   Full sample:  n=408, R10 edge +2.42%, Welch t=2.75
+    #   Out-of-sample (2025-06+): n=188, R10 edge +2.62%, t=2.17 — holds.
+    # This MAXIMIZES total expected edge (frequency × per-signal edge = 987,
+    # the highest of all variants) and is MORE significant than the old
+    # strict gate. The previous v13 gate also required volume≥1.5x AND
+    # close-strength≥0.6 ("Variant D", n=123): higher per-signal edge
+    # (+5.16%) but 3.3× fewer signals and LOWER total edge (635) — it
+    # starved the system (user saw ~0 signals for a week). Volume and
+    # close-strength are now QUALITY-SCORE inputs (see is_premium_vce),
+    # not hard gates — they rank the best setups to the top without
+    # rejecting the rest.
+    #
+    # Do not tune these constants without re-running the measurement harness.
     VCE_ATR_PERIOD = 14            # ATR% via TR.rolling(14).mean() / Close
     VCE_SQUEEZE_RATIO = 0.8        # yesterday ATR% < 80% of baseline = squeeze
     VCE_BASELINE_OFFSET = (20, 5)  # baseline = mean ATR% of bars [-20, -5) before today
     VCE_BREAKOUT_LOOKBACK = 20     # close must exceed prior 20-day high
-    VCE_VOLUME_MULT = 1.5          # breakout volume >= 1.5x 20-day average
-    VCE_CLOSE_POS_MIN = 0.6        # close in upper 40% of day range
+    VCE_VOLUME_MULT = 1.5          # premium tier: breakout volume >= 1.5x 20d avg (scoring)
+    VCE_CLOSE_POS_MIN = 0.6        # premium tier: close in upper 40% of range (scoring)
 
     def check_vce_breakout(self, df: pd.DataFrame) -> Tuple[bool, str, Dict]:
         """
         Volatility Contraction→Expansion breakout — the system's PRIMARY entry.
 
         The spring: volatility (ATR%) dries up to <80% of its recent baseline,
-        then price breaks the prior 20-day high in an uptrend (>MA50) on
-        1.5x volume with a strong close. We catch the expansion as it starts,
-        not after the move has run.
+        then price breaks the prior 20-day high in an uptrend (>MA50). We catch
+        the expansion as it starts, not after the move has run.
+
+        HARD gate = squeeze + breakout + green + MA50 (Variant B). Volume and
+        close-strength are measured into `metrics` for scoring (premium tier)
+        but do NOT block the signal.
 
         Returns (passed, reason, metrics).
         """
@@ -545,6 +556,7 @@ class SmallCapSignals:
             'breakout_level': 0.0,
             'vol_ratio': 0.0,
             'close_position': 0.0,
+            'is_premium': False,
         }
         if df is None or len(df) < 55:
             return False, "Insufficient data (<55 bars)", metrics
@@ -596,27 +608,21 @@ class SmallCapSignals:
             if np.isnan(ma50) or c <= ma50:
                 return False, f"Below MA50 ({c:.2f} <= {ma50:.2f})", metrics
 
-            # 5. VOLUME: 1.5x 20-day average
+            # ---- Premium-tier metrics (scoring only, NOT hard gates) ----
             vol20 = float(volume.rolling(20).mean().iloc[-1])
             vol_ratio = float(volume.iloc[-1]) / vol20 if vol20 > 0 else 0.0
             metrics['vol_ratio'] = round(vol_ratio, 2)
-            if vol_ratio < self.VCE_VOLUME_MULT:
-                return False, (
-                    f"Volume too low ({vol_ratio:.1f}x < {self.VCE_VOLUME_MULT}x)"
-                ), metrics
-
-            # 6. STRONG CLOSE: upper 40% of day's range
             h, l = float(high.iloc[-1]), float(low.iloc[-1])
             day_range = h - l
             close_pos = (c - l) / day_range if day_range > 0 else 0.5
             metrics['close_position'] = round(close_pos, 2)
-            if close_pos < self.VCE_CLOSE_POS_MIN:
-                return False, (
-                    f"Weak close ({close_pos:.0%} of range, need {self.VCE_CLOSE_POS_MIN:.0%}+)"
-                ), metrics
+            metrics['is_premium'] = bool(
+                vol_ratio >= self.VCE_VOLUME_MULT and close_pos >= self.VCE_CLOSE_POS_MIN
+            )
 
+            tier = "PREMIUM" if metrics['is_premium'] else "standard"
             return True, (
-                f"VCE: squeeze {squeeze_ratio:.0%} of baseline → breakout above "
+                f"VCE ({tier}): squeeze {squeeze_ratio:.0%} of baseline → breakout above "
                 f"${breakout_level:.2f} | vol {vol_ratio:.1f}x | close {close_pos:.0%}"
             ), metrics
 

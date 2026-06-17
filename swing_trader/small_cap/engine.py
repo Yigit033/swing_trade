@@ -762,6 +762,27 @@ class SmallCapEngine:
                 df, volume_surge, atr_percent, float_shares, boosters
             )
 
+            # v13.3: Premium-VCE bonus — a squeeze breakout that ALSO has volume
+            # confirmation (>=1.5x) and a strong close (upper 40%) measured at a
+            # markedly higher per-signal edge (+4.84% vs +2.42% R10). It is no
+            # longer a HARD gate (that starved frequency), but it earns +8 quality
+            # so the best setups rank to the top of the list.
+            _vce_metrics = (trigger_details or {}).get('vce_metrics', {})
+            if _vce_metrics.get('is_premium'):
+                quality_score += 8
+                boosters['vce_premium'] = True
+
+            # v13.5: Tight-coil bonus. A deeper squeeze (ATR compressed to <65%
+            # of baseline) is the ONE selection feature that survived
+            # out-of-sample testing (R10 +1.92% vs +1.31% base, n=128 test).
+            # RS/ATR/combination filters were rejected — they looked great
+            # in-sample (+17.7%) but went NEGATIVE out-of-sample (overfit).
+            # Used as a ranking nudge, not a hard gate, so frequency is intact.
+            _sq = _vce_metrics.get('squeeze_ratio', 1.0)
+            if 0 < _sq < 0.65:
+                quality_score += 5
+                boosters['vce_tight_coil'] = True
+
             # Regime-aware quality floor — backtest-derived minimums adjusted for regime.
             # Senior trader logic: in BULL, trend itself is the catalyst (uptrend doing the
             # work), so quality bar can be lower. In BEAR, demand more confirmation since

@@ -205,6 +205,15 @@ class PaperTradeTracker:
             return ('OPEN', 0, '', '', trailing_stop)
 
         trading_days_held = 0
+        # v13.4 "let winners run": chandelier trail tracks the highest high seen
+        # since entry and trails TRAIL_ATR_MULT ATR below it (vs the old
+        # +1-ATR-step-from-initial-stop, which choked winners ~1.5 ATR behind
+        # peak). Activated only after the move has TRAIL_ACTIVATE_ATR of profit
+        # so normal early noise doesn't stop us out. Validated on the live
+        # Finviz universe (scripts/exit_strategy_lab.py): EV -0.26% → +0.94%.
+        TRAIL_ATR_MULT = 3.0
+        TRAIL_ACTIVATE_ATR = 1.5
+        peak_high = entry_price
 
         for _, row in price_history.iloc[1:].iterrows():
             current_date = row['Date']
@@ -257,15 +266,16 @@ class PaperTradeTracker:
                 reason = f"{label} hit at ${exit_price:.2f} ({pnl_pct:+.1f}%)"
                 return ('TARGET', exit_price, exit_date, reason, trailing_stop)
 
-            # ── 4. TRAILING STOP UPDATE (using Close — AFTER stop/target checks) ──
-            if atr > 0 and close > entry_price:
-                unrealized_gain = close - entry_price
-                atr_gain = unrealized_gain / atr
-                if atr_gain >= 1.0:
-                    atr_steps = int(atr_gain)
-                    new_trail = initial_stop + (atr_steps * atr)
-                    if new_trail > trailing_stop:
-                        trailing_stop = round(new_trail, 2)
+            # ── 4. CHANDELIER TRAILING STOP UPDATE (peak-based, AFTER stop/target checks) ──
+            if high > peak_high:
+                peak_high = high
+            if atr > 0 and (peak_high - entry_price) / atr >= TRAIL_ACTIVATE_ATR:
+                # Chandelier = peak - 3 ATR. Monotonic (only ratchets up); the
+                # initial 2-ATR stop handles downside until the trail overtakes
+                # it (~+1 ATR gain). Breakeven is locked separately at T1 partial.
+                new_trail = peak_high - TRAIL_ATR_MULT * atr
+                if new_trail > trailing_stop:
+                    trailing_stop = round(new_trail, 2)
 
             # ── 5. CHECK TIMEOUT (trading days, not calendar) ──
             if trading_days_held >= max_hold_days:

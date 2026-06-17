@@ -118,12 +118,16 @@ class SmallCapSettings(BaseModel):
 
     # --- Risk ---
     max_risk_per_trade: float = Field(default=0.015, ge=0.001, le=0.1)
-    stop_atr_multiplier: float = Field(default=1.5, ge=0.5, le=5.0)
+    # v13.4: "let winners run" exit — stop 2.0 ATR (was 1.5), 20-day hold
+    # (was 14). Validated on live Finviz universe (1606 VCE signals, OOS):
+    # this exit profile lifts EV/trade from -0.26% (capped) to +0.94% with
+    # 56% win rate. See scripts/exit_strategy_lab.py.
+    stop_atr_multiplier: float = Field(default=2.0, ge=0.5, le=5.0)
     min_stop_percent: float = Field(default=0.03, ge=0.01, le=0.25)
-    max_stop_percent_fallback: float = Field(default=0.08, ge=0.03, le=0.3)
-    max_holding_days: int = Field(default=14, ge=1, le=60)
+    max_stop_percent_fallback: float = Field(default=0.10, ge=0.03, le=0.3)
+    max_holding_days: int = Field(default=20, ge=1, le=60)
     max_stop_by_type: Dict[str, float] = Field(
-        default_factory=lambda: {"C": 0.06, "A": 0.08, "B": 0.09, "S": 0.10}
+        default_factory=lambda: {"C": 0.08, "A": 0.10, "B": 0.11, "S": 0.12}
     )
     type_position_caps: Dict[str, float] = Field(
         default_factory=lambda: {"C": 0.25, "A": 0.25, "B": 0.20, "S": 0.15}
@@ -134,12 +138,15 @@ class SmallCapSettings(BaseModel):
         default_factory=lambda: {"S": 2.5, "B": 2.0, "A": 1.8, "C": 1.5}
     )
     t2_atr_ratio: float = Field(default=2.0, ge=1.0, le=4.0)
+    # v13.4: T2 caps raised so the trailing stop — not a fixed cap — decides
+    # the exit on winners. The old +28% cap on Type A/B was the single biggest
+    # EV drag (it guillotined the runners that pay for the losers).
     type_target_caps: Dict[str, TypeTargetCaps] = Field(
         default_factory=lambda: {
-            "S": TypeTargetCaps(t1_max_pct=0.12, t2_max_pct=0.40),
-            "B": TypeTargetCaps(t1_max_pct=0.10, t2_max_pct=0.28),
-            "C": TypeTargetCaps(t1_max_pct=0.08, t2_max_pct=0.22),
-            "A": TypeTargetCaps(t1_max_pct=0.10, t2_max_pct=0.28),
+            "S": TypeTargetCaps(t1_max_pct=0.12, t2_max_pct=0.65),
+            "B": TypeTargetCaps(t1_max_pct=0.10, t2_max_pct=0.55),
+            "C": TypeTargetCaps(t1_max_pct=0.08, t2_max_pct=0.45),
+            "A": TypeTargetCaps(t1_max_pct=0.10, t2_max_pct=0.55),
         }
     )
 

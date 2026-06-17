@@ -24,7 +24,7 @@ def test_default_matches_known_engine_constants():
     assert d.swing.type_c.min_score == 10
     assert d.risk_targets.min_reward_risk_multiple_t1 == 1.5
     assert d.universe_filters.min_market_cap == 250_000_000
-    assert d.universe_scan.max_scan_tickers == 200
+    assert d.universe_scan.max_scan_tickers == 260
     assert d.universe_scan.use_finviz is True
     assert d.universe_scan.min_finviz_tickers_skip_static_merge == 30
     assert d.universe_scan.rank_weight_rvol == 0.30
@@ -35,8 +35,8 @@ def test_default_matches_known_engine_constants():
     assert d.max_entry_rsi == 70
     assert d.volume_surge_trigger == 2.0
     assert d.min_atr_percent == 0.03
-    assert d.stop_atr_multiplier == 1.5
-    assert d.max_stop_by_type["C"] == 0.06
+    assert d.stop_atr_multiplier == 2.0
+    assert d.max_stop_by_type["C"] == 0.08
     assert d.type_atr_multipliers["S"] == 2.5
     assert d.min_rr_at_entry == 1.2
     assert d.regime_thresholds.bear_confirmed_min_quality == 80
