@@ -14,7 +14,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # ── Bağlantı modu ─────────────────────────────────────────────────────────────────────────────────
-# .env dosyasını yükle — Streamlit ve API'nin AYNI DB'ye bağlanması için kritik
+# .env dosyasını yükle — API ve script'lerin AYNI DB'ye bağlanması için kritik
 try:
     from dotenv import load_dotenv as _load_dotenv
     _load_dotenv()

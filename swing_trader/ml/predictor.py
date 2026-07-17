@@ -99,8 +99,9 @@ class SignalPredictor:
             # Binary tahmin (threshold=0.5)
             predicted_label = int(self.model.predict(X)[0])
 
-            # Feature importance'dan en etkilisini bul
-            top_features = self._get_top_features(X)
+            # Bu TAHMİNE özel açıklama (TreeSHAP, explainer.py).
+            # Başarısız olursa global feature importance'a düşer.
+            top_features = self._explain_prediction(X) or self._get_top_features(X)
 
             return {
                 "win_probability": round(win_prob, 4),
@@ -174,13 +175,33 @@ class SignalPredictor:
                 return label
         return "RİSKLİ 🔴"
 
+    def _explain_prediction(self, X, top_n: int = 5) -> list:
+        """
+        Bu tahmine ÖZEL feature katkıları (TreeSHAP, explainer.py).
+
+        `importance` işaretlidir: pozitif → WIN olasılığını artırıyor,
+        negatif → düşürüyor. `direction` UI'ın ok/renk göstermesi için.
+        """
+        try:
+            from .explainer import SignalExplainer
+
+            contribs = SignalExplainer(self.model).explain_single(X)[:top_n]
+            return [
+                {
+                    "feature": c["feature"],
+                    "importance": c["shap_value"],
+                    "feature_value": c["feature_value"],
+                    "direction": "up" if c["shap_value"] >= 0 else "down",
+                }
+                for c in contribs
+            ]
+        except Exception:
+            return []
+
     def _get_top_features(self, X, top_n: int = 3) -> list:
         """
-        Modelin bu tahmin için en çok hangi feature'lara
-        baktığını döner (feature importance sıralaması).
-        
-        NOT: Bu global importance'dır (tek tahmin bazlı değil).
-        Tahmin bazlı açıklama için explainer.py'de SHAP kullan.
+        Fallback: modelin GLOBAL feature importance sıralaması
+        (tek tahmin bazlı değil — explainer başarısız olursa kullanılır).
         """
         try:
             from .features import FEATURE_COLUMNS

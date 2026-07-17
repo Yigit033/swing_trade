@@ -1,8 +1,5 @@
-"""Data module for fetching, storing, and updating stock data."""
+"""Data module for fetching stock data and scan-history storage."""
 
 from .fetcher import DataFetcher
-from .storage import DatabaseManager
-from .updater import DataUpdater
 
-__all__ = ['DataFetcher', 'DatabaseManager', 'DataUpdater']
-
+__all__ = ['DataFetcher']

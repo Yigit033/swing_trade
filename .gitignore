@@ -76,8 +76,11 @@ db_audit.py
 db_integrity_check.py
 filter_analysis.py
 
-# Batch launchers (Windows-specific, not needed for Streamlit Cloud)
+# Batch launchers (Windows-specific, local convenience only)
 *.bat
 
 # Data files (watchlist etc)
 data/watchlist.txt
+
+# Regenerable caches
+data/genai_cache/

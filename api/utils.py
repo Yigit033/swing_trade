@@ -19,7 +19,7 @@ def fetch_ticker_history(ticker: str, period: str = "3mo", interval: str = "1d",
     Rate-limit-resilient stock data fetch using yf.Ticker().history().
 
     Uses in-memory TTL cache (5min) to avoid repeated Yahoo Finance requests
-    for the same ticker. This mirrors Streamlit's @st.cache_data behavior.
+    for the same ticker.
 
     Returns a flat DataFrame with columns: Date, Open, High, Low, Close, Volume
     or empty DataFrame on failure.

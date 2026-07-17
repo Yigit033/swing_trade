@@ -1,6 +1,6 @@
 # 🚀 SmallCap Swing Trade — Günlük Kullanım Akışı
 
-Modern stack: **Next.js dashboard** + **FastAPI backend** (Streamlit yerine web uygulaması). İstersen **Supabase ile giriş**; yapılandırılmadıysa uygulama girişsiz de çalışır (`docs/AUTH_SETUP.md`).
+Modern stack: **Next.js dashboard** + **FastAPI backend**. İstersen **Supabase ile giriş**; yapılandırılmadıysa uygulama girişsiz de çalışır (`docs/AUTH_SETUP.md`).
 
 ---
 
@@ -24,12 +24,8 @@ npm run dev   # http://localhost:5000
 
 ## 📋 Günlük akış (5 adım)
 
-### 1. 📥 Veri güncelle
-- Arayüzde “tek tık indir” yok; günlük/haftalık veri için CLI kullan:
-  ```bash
-  python main.py --download-data --days=250
-  ```
-- Özet: `QUICK_START.md` — ilk kurulum daha uzun, sonrası artımlı güncelleme.
+### 1. 📥 Veri
+- Ayrı bir veri indirme adımı **yok** — tarama sırasında güncel OHLCV doğrudan çekilir (yfinance → Tiingo → Finnhub fallback, tamamlanmamış gün barı otomatik atılır).
 
 ### 2. 🔍 Tarama yap
 - Soldan **Scanner** → **Run Scan** (veya eşdeğer tarama butonu).
@@ -88,8 +84,3 @@ CLI backtest: `python test_backtest.py` (projede varsa).
 
 Supabase açıksa: `/login` → oturum; **Paper Trades** RLS ile kullanıcıya özel olabilir. Auth yoksa eski davranış: tek kullanıcı / ortak veri (kurulumuna bağlı).
 
----
-
-## Eski Streamlit notu
-
-Eski **Streamlit** dashboard (`streamlit run swing_trader/dashboard/app.py`) hâlâ repoda olabilir; günlük kullanım için **tercih edilen yüz** bu Next.js uygulamasıdır.

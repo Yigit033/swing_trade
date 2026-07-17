@@ -89,24 +89,29 @@ OPENAI_API_KEY=your_key
 ```
 > API key olmadan sistem çalışmaya devam eder — GenAI özellikleri deterministik fallback kullanır.
 
-### 4. Dashboard'u Başlat
+### 4. Uygulamayı Başlat
 ```bash
-streamlit run swing_trader/dashboard/app.py
+# Backend (FastAPI)
+uvicorn api.main:app --reload --port 8000
+
+# Frontend (Next.js) — ayrı terminalde
+cd frontend && npm run dev
 ```
-Tarayıcıda `http://localhost:8501` açılır.
+Tarayıcıda `http://localhost:5000` açılır. (Windows'ta `SwingTrade_Dashboard.bat` ikisini birden başlatır.)
 
 ---
 
-## 🖥️ Dashboard Sayfaları
+## 🖥️ Dashboard Sayfaları (Next.js)
 
 | Sayfa | İçerik |
 |-------|--------|
-| **🔍 Scan Stocks** | Large Cap tarama, göstergeler, grafik |
-| **🚀 SmallCap Momentum** | SmallCap tarama, tip sınıflandırması, Track butonu |
-| **📝 Manual Lookup** | Tek hisse analiz — XGBoost badge + AI Sinyal Brifingi + Cuma Çevik tarzı narrative |
-| **📊 Paper Trades** | Aktif/Bekleyen/Kapalı trade takibi, modern Pending Kart UI |
-| **📉 Performance** | Win rate, profit factor, haftalık rapor, Strateji Danışmanı chat |
-| **🤖 AI Model** | XGBoost eğitim ve test sonuçları |
+| **🚀 Scanner** | SmallCap momentum tarama (arka plan job + canlı ilerleme) |
+| **🗂 Scanner History** | Geçmiş taramalar + forward-return takibi |
+| **📝 Manual Lookup** | Tek hisse, aşama aşama tanı (filtre → tetik → skor) |
+| **📊 Paper Trades** | Aktif/Bekleyen/Kapalı trade takibi, pending onay akışı |
+| **📉 Performance** | Win rate, profit factor, haftalık rapor |
+| **⚙️ Settings** | Motor parametreleri (JSON tabanlı, UI'dan düzenlenir) |
+| **🤖 AI / Chat** | XGBoost eğitim-tahmin + strateji sohbeti |
 
 ---
 
@@ -114,9 +119,9 @@ Tarayıcıda `http://localhost:8501` açılır.
 
 ```
 swing_trade/
+├── api/                   # FastAPI backend (9 router)
+├── frontend/              # Next.js dashboard
 ├── swing_trader/
-│   ├── dashboard/         # Streamlit arayüzü
-│   │   └── app.py
 │   ├── genai/             # Generative AI modülleri
 │   │   ├── llm_client.py      # OpenAI/Gemini provider-agnostic client
 │   │   ├── prompts.py         # Tüm prompt builder'lar
@@ -137,9 +142,7 @@ swing_trade/
 │   │   ├── tracker.py         # Trade takibi, gap filtresi, trailing stop
 │   │   ├── storage.py         # SQLite CRUD operasyonları
 │   │   └── reporter.py        # Performans özeti
-│   ├── strategy/          # Ana strateji motoru (Large Cap)
-│   ├── indicators/        # Teknik göstergeler
-│   └── backtesting/       # Backtest motoru
+│   └── data/              # Fetcher + tarama geçmişi storage'ları
 ├── data/
 │   └── paper_trades.db    # SQLite veritabanı
 ├── config.yaml            # Ayarlar
@@ -152,8 +155,8 @@ swing_trade/
 ## 📋 Günlük İş Akışı
 
 ```bash
-# 1. Dashboard'u başlat
-streamlit run swing_trader/dashboard/app.py
+# 1. Dashboard'u başlat (backend + frontend)
+SwingTrade_Dashboard.bat   # veya: uvicorn api.main:app --port 8000  +  cd frontend && npm run dev
 
 # 2. SmallCap veya Manual Lookup'tan sinyal tara
 # → Beğendiğin sinyalli "📌 Track" ile PENDING'e ekle
@@ -216,4 +219,4 @@ Eğitim sonrası Manual Lookup'ta `🤖 AI Tahmin: %XX — Confidence` badge'i g
 | v2.1 | SmallCap Senior Trader: sektor RS, insider bonus, kısa sıkışma, trailing stop |
 | v2.0 | Paper Trading sistemi, gap filtresi, ertesi gün onay |
 | v1.5 | XGBoost ML sinyal tahmini, SHAP feature importance |
-| v1.0 | Temel tarama, teknik analiz, backtesting, Streamlit dashboard |
+| v1.0 | Temel tarama, teknik analiz, backtesting, ilk web dashboard |

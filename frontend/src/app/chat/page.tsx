@@ -412,12 +412,21 @@ function PredictTab() {
                             </div>
                             {result.top_features && (
                                 <div style={{ marginTop: 10 }}>
-                                    <div style={{ fontSize: "0.78rem", fontWeight: 600, marginBottom: 4 }}>En etkili özellikler:</div>
-                                    {result.top_features.slice(0, 3).map((f: { feature: string; importance: number }) => (
-                                        <div key={f.feature} style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                                            {f.feature}: {"█".repeat(Math.round(f.importance * 50))} ({f.importance.toFixed(3)})
-                                        </div>
-                                    ))}
+                                    <div style={{ fontSize: "0.78rem", fontWeight: 600, marginBottom: 4 }}>
+                                        Bu tahmini ne etkiledi? <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(↑ kazanma yönlü, ↓ kaybetme yönlü)</span>
+                                    </div>
+                                    {result.top_features.slice(0, 5).map((f: { feature: string; importance: number; direction?: string }) => {
+                                        const up = f.importance >= 0;
+                                        const bars = Math.min(20, Math.max(1, Math.round(Math.abs(f.importance) * 50)));
+                                        return (
+                                            <div key={f.feature} style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", gap: 6, alignItems: "center" }}>
+                                                <span style={{ color: up ? "var(--green)" : "var(--red)", width: 12 }}>{up ? "↑" : "↓"}</span>
+                                                <span style={{ minWidth: 130 }}>{f.feature}</span>
+                                                <span style={{ color: up ? "var(--green)" : "var(--red)", letterSpacing: -1 }}>{"█".repeat(bars)}</span>
+                                                <span>({f.importance >= 0 ? "+" : ""}{f.importance.toFixed(3)})</span>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             )}
                         </>

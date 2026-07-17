@@ -1,6 +1,6 @@
 # 🚀 Swing Trade — Production Deployment Roadmap
 
-**Temiz kurulum** — Sıfırdan deploy rehberi. Önceki Streamlit deploy silindi, şimdi FastAPI + Next.js.
+**Temiz kurulum** — Sıfırdan deploy rehberi: FastAPI (Fly.io) + Next.js (Vercel).
 
 ---
 

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { lookupTickers, addTrade } from "@/lib/api";
 import { Zap, Plus, CheckCircle, XCircle, Circle, ChevronDown, ChevronUp } from "lucide-react";
 
-// ── Label maps (match Streamlit exactly) ──────────────────────────────────
+// ── Label maps (engine stage/filter adlarının Türkçe karşılıkları) ────────
 const FILTER_LABELS: Record<string, string> = {
     market_cap: "Piyasa Değeri",
     avg_volume: "Ortalama Hacim",
@@ -154,7 +154,7 @@ function ResultCard({ r, onAdd, adding }: { r: AnalysisResult; onAdd: (r: Analys
 
             {open && !isError && (
                 <div style={{ padding: "18px 20px" }}>
-                    {/* ── Stage tracker (matches Streamlit) ──────────────────────── */}
+                    {/* ── Stage tracker ──────────────────────────────────────────── */}
                     {!isSignal && (
                         <div style={{ marginBottom: 18 }}>
                             <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 700, letterSpacing: "0.05em", marginBottom: 8 }}>ANALİZ AŞAMALARI</div>
@@ -417,7 +417,7 @@ export default function LookupPage() {
         <div>
             <h1 className="page-title gradient-text">Manual Lookup</h1>
             <p className="page-subtitle">
-                Hisseleri adım adım analiz et — Streamlit ile aynı detayda filtre ve sinyal analizi
+                Hisseleri adım adım analiz et — tarayıcı motoruyla aynı detayda filtre ve sinyal analizi
             </p>
 
             {/* Input */}

@@ -108,7 +108,7 @@ function TypeLabel({ type, label }: { type?: string; label?: string }) {
     );
 }
 
-/* ───── Sinyal Analiz Kartı (Accordion — Streamlit tarzında) ───── */
+/* ───── Sinyal Analiz Kartı (Accordion) ───── */
 function SignalCard({ s, onTrack, tracking }: { s: Signal; onTrack: (s: Signal) => void; tracking: boolean }) {
     const [open, setOpen] = useState(false);
 

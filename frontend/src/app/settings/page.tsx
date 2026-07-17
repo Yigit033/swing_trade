@@ -876,7 +876,7 @@ export default function SettingsPage() {
                         </li>
                     </ul>
                     <p style={{ margin: "14px 0 0", fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                        <code style={{ fontSize: "0.85em" }}>config.yaml</code> ve Streamlit dashboard özel parametreleri bu sayfada değildir;
+                        <code style={{ fontSize: "0.85em" }}>config.yaml</code> parametreleri bu sayfada değildir;
                         small-cap motorunun JSON ile yönetilen kısmı burada toplanmıştır.
                     </p>
                 </div>

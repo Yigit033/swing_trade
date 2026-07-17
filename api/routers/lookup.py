@@ -2,8 +2,8 @@
 Manual ticker lookup router.
 POST /api/lookup  — analyze tickers with full stage-by-stage diagnostic.
 
-Logic mirrors Streamlit's analyze_smallcap_ticker() from dashboard/app.py
-so the output is identical to the Streamlit version.
+Stage-by-stage diagnostic: universe filters → trigger → scoring → risk,
+with the exact rejection stage reported for each ticker.
 """
 
 import logging
@@ -27,9 +27,9 @@ class LookupRequest(BaseModel):
 
 def _analyze_smallcap_ticker(ticker: str, df, info: dict, engine, portfolio_value: float) -> dict:
     """
-    Exact port of Streamlit's analyze_smallcap_ticker() from dashboard/app.py.
-    Returns a result dict with the same keys so the frontend can display
-    the same stage-by-stage rejection detail.
+    Analyze a single ticker through the full engine pipeline.
+    Returns a result dict whose keys the frontend uses to display
+    stage-by-stage rejection detail.
     """
     result: dict = {
         "ticker":       ticker,
@@ -172,8 +172,8 @@ def _safe_5d(df) -> float:
 @router.post("")
 def lookup_tickers(body: LookupRequest):
     """Analyze tickers with full stage-by-stage diagnostic breakdown.
-    
-    Uses the SAME DataFetcher.fetch_stock_data() as Streamlit to ensure
+
+    Uses the same DataFetcher.fetch_stock_data() as the scanner to ensure
     identical data fetching behavior (session management, validation, etc.).
     """
     engine = get_smallcap_engine()
@@ -183,7 +183,7 @@ def lookup_tickers(body: LookupRequest):
     for ticker in body.tickers:
         ticker = ticker.upper().strip()
         try:
-            # Use DataFetcher — SAME as Streamlit's fetcher.fetch_stock_data()
+            # Use DataFetcher — same fetch path as the scanner
             df = fetcher.fetch_stock_data(ticker, period='3mo')
 
             if df is None or len(df) < 20:
