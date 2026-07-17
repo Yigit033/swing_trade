@@ -280,6 +280,10 @@ export const runSmallcapScan = (params: {
 export const trackSignal = (signal: Signal & { hold_days_max?: number }) =>
     api.post("/api/scanner/track", {
         ticker: signal.ticker,
+        // Sinyal barının tarihi (tarama günü DEĞİL) — ölçülen giriş t+1 open
+        // bu tarihe göre hesaplanır; gönderilmezse backend bugünü basar ve
+        // seans içi/hafta sonu taramalarda giriş bir seans geç kayar (t+2).
+        date: signal.date,
         entry_price: signal.entry_price,
         stop_loss: signal.stop_loss,
         target_1: signal.target_1 || signal.target,

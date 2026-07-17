@@ -56,6 +56,11 @@ SESSION_WARNINGS = {
         "Piyasa kapalı (hafta sonu/tatil): Finviz verileri son tamamlanan seansa ait — "
         "sonuçlar plan amaçlıdır, canlı momentum içermez."
     ),
+    "regular": (
+        "Seans içi tarama: günlük bar kuralları yalnız TAMAMLANMIŞ barda karar verebildiği "
+        "için sinyaller DÜNÜN barına ait — ölçülen giriş (bugünün açılışı) çoktan geçti, bu "
+        "adaylar takibe alınamaz. Kanonik tarama penceresi: kapanış sonrası (23:05+ TR saati)."
+    ),
 }
 
 
@@ -99,6 +104,12 @@ def track_signal(
     trade_id = tracker.add_trade_from_signal(signal, user_id)
     if trade_id > 0:
         return sanitize_for_json({"status": "added", "trade_id": trade_id})
+    elif trade_id == -2:
+        return sanitize_for_json({"status": "cooldown", "trade_id": -2})
+    elif trade_id == -3:
+        # Ölçüm disiplini: sinyal barının ertesi açılışı (t+1 open) geçti —
+        # bu giriş artık doğrulanmış pattern değil, trade açılmadı.
+        return sanitize_for_json({"status": "entry_window_missed", "trade_id": -3})
     else:
         return sanitize_for_json({"status": "duplicate", "trade_id": -1})
 

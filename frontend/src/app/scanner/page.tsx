@@ -688,6 +688,10 @@ export default function ScannerPage() {
             const res = await trackSignal(s);
             if (res?.status === "added") {
                 setMsg(`✅ ${s.ticker} paper trade'e eklendi! (ID: ${res.trade_id})`);
+            } else if (res?.status === "entry_window_missed") {
+                setMsg(`⏱️ ${s.ticker}: sinyal barının ertesi açılışı geçti — ölçülen giriş penceresi kaçtı. Kapanış sonrası taramada hâlâ geçerliyse yeniden yakalanır.`);
+            } else if (res?.status === "cooldown") {
+                setMsg(`🧊 ${s.ticker}: yakın zamanda kapanan trade var (cooldown aktif)`);
             } else {
                 setMsg(`⏭️ ${s.ticker} zaten takipte (duplicate)`);
             }

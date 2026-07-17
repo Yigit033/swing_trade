@@ -32,8 +32,18 @@ _NYSE_TZ = ZoneInfo("America/New_York")
 NYSE_OPEN_TIME = "09:30"  # NYSE opens 09:30 ET (= 16:30 Turkey time in winter)
 
 # V4 Constants
-MAX_GAP_UP_PCT = 5.0     # Skip if gap-up > 5%
-MAX_GAP_DOWN_PCT = 5.0   # Skip if gap-down > 5% (small-caps have 3-5% ATR; 3% was too tight)
+# GAP LİMİTLERİ — 2026-07-17'de ölçüldü (scripts/measure_gap_filter.py,
+# Variant B örneklemi n=408, giriş t+1 open, 2024-06→2026-05):
+#   Eski ±5 kuralı ölçülen R10 edge'i +2.42% → +1.86%'ya düşürüyordu.
+#   Reddedilen gap-down'lar (n=8) R10 edge +25.97% ile EN İYİ gruptu
+#   ("shakeout" girişleri); gap-up reddi de pozitifti (+3.89, n=17, zayıf).
+#   Up-cap'in maliyeti ~0 (up5/dn-yok: +2.35 t=2.67 ≈ filtresiz +2.42 t=2.75)
+#   ve pump-open/exhaustion koruması olarak kalıyor.
+# Karar: up 5% KALDI, down 5% → 7% GEVŞETİLDİ
+#   (ölçülen hücre up5/dn7: n=387, R10 edge +2.24, t=2.56).
+# Bu sabitleri scripts/measure_gap_filter.py'yi yeniden koşmadan DEĞİŞTİRME.
+MAX_GAP_UP_PCT = 5.0
+MAX_GAP_DOWN_PCT = 7.0
 
 CONFIRM_ATR_MULTIPLIER = 1.5   # Stop distance at confirmation (aligned with signal generator)
 CONFIRM_TARGET_R = 2.0         # Target = entry + R × this (was 3.0 — too greedy)
@@ -462,7 +472,25 @@ class PaperTradeTracker:
             Trade ID
         """
         signal_price = signal['entry_price']  # Today's close
-        
+
+        # ── ENTRY-WINDOW GUARD (ölçüm disiplini) ─────────────────────────
+        # VCE edge'i, sinyal barının ERTESİ seans açılışından (t+1 open)
+        # ölçüldü. O açılış geçtiyse (ör. seans içi taramada dünkü bara ait
+        # sinyal, ya da bayat bir listeden geç tıklama) giriş artık ölçülen
+        # pattern değildir (t+2 = ölçülmemiş) — trade AÇILMAZ.
+        from ..utils.market_calendar import entry_window_open
+        signal_date_str = signal.get('date') or datetime.now(tz=_NYSE_TZ).strftime('%Y-%m-%d')
+        try:
+            _bar_d = datetime.strptime(signal_date_str[:10], '%Y-%m-%d').date()
+            if not entry_window_open(_bar_d):
+                logger.warning(
+                    f"{signal['ticker']}: entry window missed (signal bar {_bar_d}, "
+                    f"next open already passed) — trade NOT created"
+                )
+                return -3
+        except ValueError:
+            pass  # tarih parse edilemezse eski davranış (bugün varsay)
+
         # Calculate ATR for trailing stop
         atr = 0
         try:
@@ -481,9 +509,9 @@ class PaperTradeTracker:
         # Compute expected confirmation date = next NYSE SESSION after signal_date.
         # Holiday-aware (skips weekends AND market holidays like Juneteenth) so we
         # never tell the user a signal confirms on a closed session.
+        # (signal_date_str yukarıda entry-window guard'ında hesaplandı)
         from ..utils.market_calendar import next_trading_day
-        signal_date_str = signal.get('date', datetime.now(tz=_NYSE_TZ).strftime('%Y-%m-%d'))
-        signal_dt = datetime.strptime(signal_date_str, '%Y-%m-%d')
+        signal_dt = datetime.strptime(signal_date_str[:10], '%Y-%m-%d')
         confirm_dt = next_trading_day(signal_dt.date())
         confirm_date_str = confirm_dt.strftime('%d %B %Y')  # e.g. "22 June 2026"
 

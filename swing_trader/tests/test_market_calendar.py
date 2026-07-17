@@ -4,7 +4,9 @@ from datetime import date, datetime
 
 from swing_trader.utils.market_calendar import (
     _NYSE_TZ,
+    entry_window_open,
     is_trading_day,
+    next_session_open_et,
     next_trading_day,
     nyse_holidays,
     us_market_session,
@@ -64,6 +66,28 @@ def test_us_market_session_states():
     assert us_market_session(_et(2026, 7, 17, 16, 0)) == "after_hours"
     assert us_market_session(_et(2026, 7, 18, 12, 0)) == "closed"     # Saturday
     assert us_market_session(_et(2026, 6, 19, 12, 0)) == "closed"     # Juneteenth
+
+
+def test_entry_window_lifecycle():
+    # Signal bar = Thu 2026-07-16 → measured entry = Fri 07-17 09:30 ET open
+    bar = date(2026, 7, 16)
+    assert next_session_open_et(bar) == _et(2026, 7, 17, 9, 30)
+    # After-close scan the same evening: window open (canonical flow)
+    assert entry_window_open(bar, _et(2026, 7, 16, 16, 5))
+    # Pre-market next morning: still open (entry = today's open, upcoming)
+    assert entry_window_open(bar, _et(2026, 7, 17, 5, 10))
+    # At/after the open the measured entry is gone → t+2 would be unmeasured
+    assert not entry_window_open(bar, _et(2026, 7, 17, 9, 30))
+    assert not entry_window_open(bar, _et(2026, 7, 17, 14, 0))
+
+
+def test_entry_window_weekend_and_holiday():
+    # Friday bar → entry Monday open; all weekend the window stays open
+    assert entry_window_open(date(2026, 6, 12), _et(2026, 6, 14, 20, 0))
+    assert not entry_window_open(date(2026, 6, 12), _et(2026, 6, 15, 10, 0))
+    # Thu 2026-06-18 bar → Fri is Juneteenth (closed) → entry Mon 06-22 open
+    assert next_session_open_et(date(2026, 6, 18)) == _et(2026, 6, 22, 9, 30)
+    assert entry_window_open(date(2026, 6, 18), _et(2026, 6, 19, 12, 0))
 
 
 def test_us_market_session_converts_timezones():

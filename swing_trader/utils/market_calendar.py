@@ -101,6 +101,25 @@ def next_trading_day(d: date) -> date:
     return nxt
 
 
+def next_session_open_et(d: date) -> datetime:
+    """09:30 ET open of the first NYSE session strictly AFTER `d`."""
+    nxt = next_trading_day(d)
+    return datetime(nxt.year, nxt.month, nxt.day, 9, 30, tzinfo=_NYSE_TZ)
+
+
+def entry_window_open(bar_date: date, now: Optional[datetime] = None) -> bool:
+    """
+    True while the measured entry for a signal bar is still takeable.
+
+    The VCE edge was measured with entry at the OPEN of the first session
+    AFTER the signal bar (t+1 open). Once that open has passed, entering is
+    no longer the validated pattern (it becomes an unmeasured t+2 entry) —
+    the paper tracker refuses to create the trade.
+    """
+    now_et = (now or datetime.now(tz=_NYSE_TZ)).astimezone(_NYSE_TZ)
+    return now_et < next_session_open_et(bar_date)
+
+
 def us_market_session(now: Optional[datetime] = None) -> str:
     """
     Current NYSE session state: 'pre_market' | 'regular' | 'after_hours' | 'closed'.
