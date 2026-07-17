@@ -33,9 +33,30 @@ from api.scanner_jobs import (
     run_scan_worker,
     current_scan_job_id,
 )
+from swing_trader.utils.market_calendar import us_market_session
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Fetch başarısı bu oranın altındaysa evren/veri kaynağı bozuk kabul edilir.
+# 2026-07-17: Finviz HTML değişikliği tüm ticker'ların ilk harfini çiftledi
+# (ARVN→AARVN) ve tarama sessizce 3/146 hisseyle koşup "0 sinyal" döndü.
+# Bu eşik o sınıf arızayı sessiz geçmek yerine static-evren fallback'ine,
+# o da tutmazsa açık bir data_quality hatasına çevirir.
+MIN_FETCH_SUCCESS_RATIO = 0.5
+
+SESSION_WARNINGS = {
+    "pre_market": (
+        "Tarama pre-market'te çalıştı (ET < 09:30): Finviz'in anlık Change/RelVol "
+        "kolonları açılıştan önce sıfırlanır — RelVol tabanlı sorgular (birincil VCE "
+        "breakout-day sorguları dahil) boş döner ve momentum sıralaması pre-market "
+        "gürültüsüyle hesaplanır. En sağlıklı pencere: seans içi son saatler veya kapanış sonrası."
+    ),
+    "closed": (
+        "Piyasa kapalı (hafta sonu/tatil): Finviz verileri son tamamlanan seansa ait — "
+        "sonuçlar plan amaçlıdır, canlı momentum içermez."
+    ),
+}
 
 
 class TrackSignalRequest(BaseModel):
@@ -210,6 +231,11 @@ def _execute_smallcap_scan(
     engine = get_smallcap_engine()
     fetcher = get_fetcher()
 
+    market_session = us_market_session()
+    session_warning = SESSION_WARNINGS.get(market_session)
+    if session_warning:
+        logger.warning("Scan session=%s: %s", market_session, session_warning)
+
     prog(2, "universe", "Fetching small-cap universe…")
     tickers = engine.get_small_cap_universe()
     logger.info(f"SmallCap universe: {len(tickers)} tickers")
@@ -218,18 +244,58 @@ def _execute_smallcap_scan(
     prog(8, "fetch", f"Fetching price data for {len(tickers)} tickers…")
     data_dict: dict[str, pd.DataFrame] = fetcher.fetch_multiple_stocks_batch(tickers, period="3mo")
 
-    if not data_dict:
-        # All chunks failed — IP is rate-limited for 5-10+ minutes.
-        # Waiting 60s then retrying is pointless; fail fast with a clear error.
-        logger.error("Batch fetch returned 0 tickers — Yahoo Finance IP rate limit in effect.")
-        return {
-            "signals": [],
-            "stats": {
-                "reason": "rate_limited",
-                "message": "Yahoo Finance rate limited. Wait 5-10 minutes and try again.",
-            },
-            "market_regime": "UNKNOWN",
-        }
+    # ── Data-quality devre kesici ─────────────────────────────────────────
+    # Fetch başarısı eşiğin altındaysa evren toplu bozulmuş demektir (ticker
+    # corruption, kaynak arızası veya rate limit). Sessizce 3-5 hisseyle
+    # taramak yerine: (1) static evrenle bir kez yeniden dene, (2) o da
+    # tutmazsa taramayı açık bir hatayla bitir.
+    fetch_ratio = len(data_dict) / len(tickers) if tickers else 0.0
+    universe_fallback = None
+    if fetch_ratio < MIN_FETCH_SUCCESS_RATIO:
+        logger.error(
+            "Universe data-quality failure: %d/%d tickers fetched (%.0f%%) — retrying with static universe",
+            len(data_dict), len(tickers), fetch_ratio * 100,
+        )
+        prog(12, "fetch", "Evren verisi bozuk görünüyor — static evrenle yeniden deneniyor…")
+        static_tickers = engine.get_small_cap_universe(use_finviz=False)
+        static_data: dict[str, pd.DataFrame] = fetcher.fetch_multiple_stocks_batch(static_tickers, period="3mo")
+        static_ratio = len(static_data) / len(static_tickers) if static_tickers else 0.0
+
+        if static_ratio >= MIN_FETCH_SUCCESS_RATIO:
+            logger.warning(
+                "Static universe fallback active: %d/%d tickers fetched",
+                len(static_data), len(static_tickers),
+            )
+            tickers, data_dict, fetch_ratio = static_tickers, static_data, static_ratio
+            universe_fallback = "static"
+        else:
+            # Static de başarısızsa iki kaynak birden 0'a yakın → IP rate limit;
+            # değilse evren/ticker verisi bozuk → data_quality.
+            rate_limited = not data_dict and not static_data
+            logger.error(
+                "Static fallback also failed (%d/%d) — aborting scan (%s)",
+                len(static_data), len(static_tickers),
+                "rate_limited" if rate_limited else "data_quality",
+            )
+            stats = {
+                "reason": "rate_limited" if rate_limited else "data_quality",
+                "message": (
+                    "Yahoo Finance rate limited. 5-10 dakika bekleyip tekrar deneyin."
+                    if rate_limited
+                    else (
+                        f"Fiyat verisi yalnızca {len(data_dict)}/{len(tickers)} ticker için alınabildi "
+                        "(static evren denemesi de eşiğin altında kaldı). Evren veya veri kaynağı bozuk — "
+                        "tarama sessiz '0 sinyal' üretmek yerine güvenli şekilde durduruldu. Backend loglarına bakın."
+                    )
+                ),
+                "stocks_scanned": len(tickers),
+                "stocks_with_data": len(data_dict),
+                "fetch_success_ratio": round(fetch_ratio, 3),
+                "market_session": market_session,
+            }
+            if session_warning:
+                stats["session_warning"] = session_warning
+            return {"signals": [], "stats": stats, "market_regime": "UNKNOWN"}
 
     prog(83, "fetch", f"Price data ready: {len(data_dict)}/{len(tickers)} tickers")
 
@@ -260,6 +326,8 @@ def _execute_smallcap_scan(
     stats = {
         "stocks_scanned": len(tickers),
         "stocks_with_data": len(data_dict),
+        "fetch_success_ratio": round(fetch_ratio, 3),
+        "market_session": market_session,
         "raw_signals": len(signals),
         "filtered_signals": len(filtered),
         "reject_counts": dict(sorted(reject_counts.items(), key=lambda kv: (-kv[1], kv[0]))),
@@ -271,6 +339,10 @@ def _execute_smallcap_scan(
         "request_min_quality": body.min_quality,
         "request_top_n": body.top_n,
     }
+    if session_warning:
+        stats["session_warning"] = session_warning
+    if universe_fallback:
+        stats["universe_fallback"] = universe_fallback
     rd = getattr(engine, "_last_regime", None) or {}
     err = rd.get("detect_error")
     if err:

@@ -125,8 +125,9 @@ export default function PendingPage() {
             {/* Info note */}
             <div style={{ background: "rgba(245,158,11,0.05)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 10, padding: "12px 16px", marginBottom: 20, fontSize: "0.8rem", color: "var(--yellow)", display: "flex", gap: 8, alignItems: "flex-start" }}>
                 <Clock size={14} style={{ marginTop: 1, flexShrink: 0 }} />
-                <span>Pending trades are signals from the scanner waiting for entry confirmation.
-                    Click <strong>Auto-Check All</strong> to verify current prices, or <strong>Confirm</strong> to manually move a trade to OPEN status.</span>
+                <span>Sinyaller <strong>bir sonraki borsa seansının açılışında</strong> girilir (profesyonel EOD standardı —
+                    ölçülen edge bu girişe göre hesaplandı). Hafta sonu/tatil varsa giriş ilk açık seansa kayar.
+                    Her satırda beklenen giriş günü yazıyor.</span>
             </div>
 
             <div className="glass-card" style={{ overflow: "hidden" }}>
@@ -146,7 +147,7 @@ export default function PendingPage() {
                             <thead>
                                 <tr>
                                     <th>Ticker</th><th>Entry</th><th>Stop Loss</th><th>Target</th>
-                                    <th>Quality</th><th>Type</th><th>Added</th><th>Action</th>
+                                    <th>Quality</th><th>Type</th><th>Beklenen Giriş</th><th>Action</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -171,7 +172,22 @@ export default function PendingPage() {
                                                 Type {t.swing_type || "A"}
                                             </span>
                                         </td>
-                                        <td style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{t.entry_date}</td>
+                                        <td style={{ fontSize: "0.8rem" }}>
+                                            {t.expected_entry_label ? (
+                                                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                                                    <span style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--yellow)", fontWeight: 600 }}>
+                                                        <Clock size={12} /> {t.expected_entry_label} açılışı
+                                                    </span>
+                                                    {t.pending_note && (
+                                                        <span style={{ color: "var(--text-muted)", fontSize: "0.68rem", lineHeight: 1.3 }}>
+                                                            {t.pending_note}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <span style={{ color: "var(--text-muted)" }}>{t.entry_date}</span>
+                                            )}
+                                        </td>
                                         <td>
                                             <button className="btn-secondary" style={{ fontSize: "0.78rem", padding: "5px 12px" }}
                                                 onClick={() => handleConfirm(t.id, t.ticker)}

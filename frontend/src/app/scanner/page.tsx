@@ -31,6 +31,59 @@ function formatRejectSummary(stats: Record<string, unknown>): string | null {
     return entries.map(([k, v]) => `${SCAN_REJECT_LABELS[k] ?? k}: ${v}`).join(" · ");
 }
 
+/** Tarama sağlık uyarıları: veri kalitesi devre kesicisi, rate limit, seans uyarısı, static fallback. */
+function ScanHealthBanners({ stats }: { stats: Record<string, unknown> }) {
+    const reason = typeof stats.reason === "string" ? stats.reason : "";
+    const message = typeof stats.message === "string" ? stats.message : "";
+    const sessionWarning = typeof stats.session_warning === "string" ? stats.session_warning : "";
+    const universeFallback = typeof stats.universe_fallback === "string" ? stats.universe_fallback : "";
+
+    const banners: { key: string; color: string; bg: string; border: string; text: string }[] = [];
+    if (reason === "data_quality") {
+        banners.push({
+            key: "dq", color: "var(--red)", bg: "rgba(239,68,68,0.1)", border: "rgba(239,68,68,0.3)",
+            text: message || "Veri kalitesi sorunu: tarama güvenli şekilde durduruldu.",
+        });
+    } else if (reason === "rate_limited") {
+        banners.push({
+            key: "rl", color: "#f59e0b", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.3)",
+            text: message || "Veri kaynağı rate limit uyguladı. Birkaç dakika sonra tekrar deneyin.",
+        });
+    }
+    if (sessionWarning) {
+        banners.push({
+            key: "session", color: "#f59e0b", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.3)",
+            text: sessionWarning,
+        });
+    }
+    if (universeFallback === "static") {
+        banners.push({
+            key: "fallback", color: "#3b82f6", bg: "rgba(59,130,246,0.1)", border: "rgba(59,130,246,0.3)",
+            text: "Finviz evreni bozuk/erişilemez olduğu için bu tarama STATIC yedek evrenle (300+ isim) koştu — momentum sıralaması güncel Finviz verisi içermez.",
+        });
+    }
+    if (banners.length === 0) return null;
+
+    return (
+        <div style={{ marginBottom: 16 }}>
+            {banners.map((b) => (
+                <div
+                    key={b.key}
+                    style={{
+                        background: b.bg, border: `1px solid ${b.border}`, borderRadius: 10,
+                        padding: "12px 18px", color: b.color, marginBottom: 8,
+                        display: "flex", gap: 10, alignItems: "flex-start",
+                        fontSize: "0.85rem", lineHeight: 1.5,
+                    }}
+                >
+                    <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+                    <span>{b.text}</span>
+                </div>
+            ))}
+        </div>
+    );
+}
+
 function QualityBadge({ score }: { score: number }) {
     const cls = score >= 80 ? "badge-green" : score >= 65 ? "badge-blue" : "badge-yellow";
     const emoji = score >= 80 ? "🔥" : score >= 65 ? "✅" : "⚠️";
@@ -866,6 +919,8 @@ export default function ScannerPage() {
                         </div>
                     </div>
 
+                    <ScanHealthBanners stats={result.stats as Record<string, unknown>} />
+
                     {(() => {
                         const rejectLine = formatRejectSummary(result.stats as Record<string, unknown>);
                         if (!rejectLine) return null;
@@ -903,7 +958,11 @@ export default function ScannerPage() {
                     {result.signals.length === 0 ? (
                         <div className="glass-card" style={{ padding: 48, textAlign: "center", color: "var(--text-muted)" }}>
                             <TrendingUp size={48} style={{ marginBottom: 12, opacity: 0.3 }} />
-                            <div>Mevcut filtrelerle sinyal bulunamadı. Min Quality&apos;yi düşürmeyi deneyin.</div>
+                            <div>
+                                {["data_quality", "rate_limited"].includes(String((result.stats as Record<string, unknown>).reason))
+                                    ? "Tarama veri sorunu nedeniyle tamamlanamadı — yukarıdaki uyarıya bakın."
+                                    : "Mevcut filtrelerle sinyal bulunamadı. Min Quality'yi düşürmeyi deneyin."}
+                            </div>
                         </div>
                     ) : (
                         <div>

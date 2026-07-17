@@ -478,15 +478,14 @@ class PaperTradeTracker:
         except Exception as e:
             logger.warning(f"Could not calculate ATR for {signal['ticker']}: {e}")
         
-        # Compute expected confirmation date (next weekday after signal_date)
+        # Compute expected confirmation date = next NYSE SESSION after signal_date.
+        # Holiday-aware (skips weekends AND market holidays like Juneteenth) so we
+        # never tell the user a signal confirms on a closed session.
+        from ..utils.market_calendar import next_trading_day
         signal_date_str = signal.get('date', datetime.now(tz=_NYSE_TZ).strftime('%Y-%m-%d'))
         signal_dt = datetime.strptime(signal_date_str, '%Y-%m-%d')
-        days_ahead = 1
-        confirm_dt = signal_dt + timedelta(days=days_ahead)
-        while confirm_dt.weekday() >= 5:  # skip Saturday (5) and Sunday (6)
-            days_ahead += 1
-            confirm_dt = signal_dt + timedelta(days=days_ahead)
-        confirm_date_str = confirm_dt.strftime('%d %B %Y')  # e.g. "19 May 2026"
+        confirm_dt = next_trading_day(signal_dt.date())
+        confirm_date_str = confirm_dt.strftime('%d %B %Y')  # e.g. "22 June 2026"
 
         trade = {
             'ticker': signal['ticker'],

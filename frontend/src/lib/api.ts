@@ -86,6 +86,11 @@ export interface Trade {
     unrealized_pnl_pct?: number;
     // v13.3: post-exit drift — current vs exit price for closed trades
     since_exit_pct?: number;
+    // v13.6: holiday-aware pending entry expectation (from GET /api/pending)
+    expected_entry_date?: string;
+    expected_entry_label?: string;
+    pending_reason?: string;
+    pending_note?: string;
     // v3.1: Dual target & partial exit
     target_2?: number;
     partial_exit_price?: number;

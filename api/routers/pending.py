@@ -6,19 +6,51 @@ POST /api/pending/{id}/confirm - manually move one trade from PENDING → OPEN
 """
 
 from fastapi import APIRouter, Depends, HTTPException
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional
 from api.deps import get_paper_storage, get_paper_tracker
 from api.auth import get_current_user_id
+from swing_trader.utils.market_calendar import next_trading_day, is_trading_day
 
 router = APIRouter()
+
+
+def _enrich_pending(t: dict) -> dict:
+    """
+    Attach holiday-aware entry expectation so the UI can explain WHY a trade is
+    still pending and WHEN it will enter (instead of looking 'stuck').
+    Entry happens at the next NYSE session's open after the signal date.
+    """
+    try:
+        sig = (t.get("entry_date") or "")[:10]
+        sig_d = datetime.strptime(sig, "%Y-%m-%d").date()
+        entry_session = next_trading_day(sig_d)
+        today = date.today()
+        if today < entry_session:
+            gap = (entry_session - today).days
+            reason = "awaiting_next_session"
+            note = f"Sonraki seans açılışında girilecek: {entry_session.strftime('%d %b %Y')}"
+            if gap > 1 or not is_trading_day(today):
+                note += " (ara günler hafta sonu/tatil — borsa kapalı)"
+        else:
+            # entry session has arrived/passed — confirm runs on next price refresh
+            reason = "ready_confirm_pending_price"
+            note = f"Giriş seansı geldi ({entry_session.strftime('%d %b %Y')}); açılış fiyatı çekilince OPEN olacak"
+        t = dict(t)
+        t["expected_entry_date"] = entry_session.isoformat()
+        t["expected_entry_label"] = entry_session.strftime("%d %b %Y")
+        t["pending_reason"] = reason
+        t["pending_note"] = note
+    except Exception:
+        pass
+    return t
 
 
 @router.get("")
 def list_pending(user_id: Optional[str] = Depends(get_current_user_id)):
     storage = get_paper_storage()
     all_trades = storage.get_all_trades(user_id) or []
-    pending = [t for t in all_trades if t.get("status") == "PENDING"]
+    pending = [_enrich_pending(t) for t in all_trades if t.get("status") == "PENDING"]
     return {"pending": pending, "count": len(pending)}
 
 

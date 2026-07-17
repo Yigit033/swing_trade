@@ -124,6 +124,9 @@ def list_trades(
         all_trades = [t for t in all_trades if t.get("status") == status]
     # Enrich OPEN trades that have no current_price yet
     all_trades = _enrich_open_trades_inline(all_trades)
+    # Holiday-aware expected-entry info on PENDING rows (consistent with /api/pending)
+    from api.routers.pending import _enrich_pending
+    all_trades = [_enrich_pending(t) if t.get("status") == "PENDING" else t for t in all_trades]
     return {"trades": all_trades}
 
 

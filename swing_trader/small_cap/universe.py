@@ -23,6 +23,71 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_TICKER_SAFE_OVERVIEW_CLS = None
+
+
+def _ticker_safe_overview_cls():
+    """
+    finvizfinance ``Overview``'ına ticker-güvenli parse yaması (lazy import).
+
+    Finviz (2026-07) screener tablosunun ticker hücresine logo + ilk-harf
+    fallback span'i ekledi::
+
+        <td data-boxover-ticker="ARVN">
+          <a class="company-ticker"><img .../><span>A</span></a>
+          <a class="tab-link">ARVN</a>
+        </td>
+
+    Kütüphanenin kullandığı ``td.text`` iki text node'u birleştirip "AARVN"
+    üretiyor — 1.2.0 ve 1.3.0 dahil upstream'de düzeltilmedi. Bu subclass
+    Ticker kolonunu tab-link anchor'ından okur; sırasıyla fallback:
+    ``data-boxover-ticker`` attribute'u → ``td.text``.
+    """
+    global _TICKER_SAFE_OVERVIEW_CLS
+    if _TICKER_SAFE_OVERVIEW_CLS is not None:
+        return _TICKER_SAFE_OVERVIEW_CLS
+
+    from finvizfinance.screener.overview import Overview
+    from finvizfinance.util import number_covert
+
+    class _TickerSafeOverview(Overview):
+        @staticmethod
+        def _extract_ticker(col) -> str:
+            link = col.find("a", class_="tab-link")
+            if link is not None:
+                text = link.get_text(strip=True)
+                if text:
+                    return text
+            attr = col.get("data-boxover-ticker")
+            if isinstance(attr, str) and attr.strip():
+                return attr.strip()
+            return col.text.strip()
+
+        def _get_table(self, rows, df, num_col_index, table_header, limit=-1):
+            rows = rows[1:]
+            if limit != -1:
+                rows = rows[0:limit]
+
+            frame = []
+            for row in rows:
+                cols = row.find_all("td")[1:]
+                info_dict = {}
+                for i, col in enumerate(cols):
+                    header = table_header[i]
+                    if header == "Ticker":
+                        info_dict[header] = self._extract_ticker(col)
+                    elif i not in num_col_index:
+                        info_dict[header] = col.text
+                    else:
+                        info_dict[header] = number_covert(col.text)
+                frame.append(info_dict)
+            if len(df) == 0:
+                return pd.DataFrame(frame)
+            return pd.concat([df, pd.DataFrame(frame)], ignore_index=True)
+
+    _TICKER_SAFE_OVERVIEW_CLS = _TickerSafeOverview
+    return _TickerSafeOverview
+
 
 class SmallCapUniverse:
     """
@@ -119,9 +184,7 @@ class SmallCapUniverse:
     def _run_finviz_query(self, filters_dict: Dict, label: str) -> pd.DataFrame:
         """Run a single Finviz screener query and return DataFrame."""
         try:
-            from finvizfinance.screener.overview import Overview
-
-            foverview = Overview()
+            foverview = _ticker_safe_overview_cls()()
             foverview.set_filter(filters_dict=filters_dict)
             df = foverview.screener_view()
 
@@ -442,6 +505,7 @@ class SmallCapUniverse:
                 return []
 
             df = pd.concat(frames, ignore_index=True)
+            df['Ticker'] = df['Ticker'].astype(str).str.strip().str.upper()
             df = df.drop_duplicates(subset='Ticker', keep='first')
 
             logger.info(f"Merged universe: {len(df)} unique tickers")
