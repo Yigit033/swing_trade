@@ -77,4 +77,6 @@ Tam huni (ayni yanitta):
 ## Ilgili notlar
 
 - [BACKTEST_AB_BASELINE.md](./BACKTEST_AB_BASELINE.md) — eski vs yeni kod icin ayni donemde JSON A/B karsilastirmasi.
-- [SMALLCAP_TYPE_C_REVIEW.md](./SMALLCAP_TYPE_C_REVIEW.md) — Tip C skoru, esik ve deney onerileri.
+- Not: SMALLCAP_TYPE_C_REVIEW.md kaldirildi (2026-07-18) — Tip C artik sinyal yolu degil,
+  yalniz siniflandirma/stop-cap etiketi; deney fikirlerini edge olcumu cevapladi
+  (eski yollarin edge'i ~0, tek trigger VCE — bkz. STRATEGY_GUIDE.md).

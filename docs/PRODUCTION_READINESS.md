@@ -24,7 +24,7 @@ Bu dokümanda sistemin production hazırlığı ve local/deployment farkları **
 |------|----------|
 | **CORS_ORIGINS** | Production'da **mutlaka** Vercel URL'i set edilmeli. Yoksa sadece localhost kabul edilir. |
 | **Tüm auth env'leri** | Fly.io'da `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET` set edilmeli. |
-| **Cold start** | `min_machines_running = 0` ile ilk istek ~8–15 sn gecikmeli olabilir. |
+| **Cold start** | `auto_stop_machines='suspend'` (2026-07-18) ile uyanış ~1–2 sn; yalnız deploy sonrası ilk boot ~9–15 sn (health check grace arkasında, kullanıcı görmez). |
 
 ---
 

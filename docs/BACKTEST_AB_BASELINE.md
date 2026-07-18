@@ -28,4 +28,4 @@ python scripts/compare_backtest_json.py run_a.json run_b.json
 - Finviz evreni yerine **sabit ticker listesi** kullanmak tekrarlanabilirliği artırır.
 - Hata dönen JSON (`error` alanı) script tarafından reddedilir.
 
-İlgili: [BACKTEST_LIVE_PARITY.md](./BACKTEST_LIVE_PARITY.md), [SMALLCAP_TYPE_C_REVIEW.md](./SMALLCAP_TYPE_C_REVIEW.md).
+İlgili: [BACKTEST_LIVE_PARITY.md](./BACKTEST_LIVE_PARITY.md).

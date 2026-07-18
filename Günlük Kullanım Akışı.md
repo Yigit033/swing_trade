@@ -32,6 +32,10 @@ npm run dev   # http://localhost:5000
 - Tarama **arka planda job** olarak çalışır; üstte **ScannerScanBanner** ilerlemeyi gösterir.
 - **Job id** `localStorage`’da tutulur: tarama sürerken **yeni sekmede** aynı siteyi açsan da polling devam eder (aynı tarayıcı / origin).
 - Akış: Finviz → filtreler → sinyaller (backend’deki scanner pipeline).
+- **⏰ Tarama penceresi (kritik):** Günlük bar kuralları yalnız **tamamlanmış** barda karar verir:
+  - ✅ **Kanonik pencere: ABD kapanışı sonrası (23:05+ TR saati)** — sinyal bugünün barına aittir; giriş, ölçülen disiplinle **yarınki açılışta** (t+1 open) onaylanır.
+  - ⚠️ **Seans içi** tarama: sinyaller DÜNÜN barına aittir; ölçülen giriş (bugünkü açılış) geçtiği için Track edilemez (UI: `entry window missed`).
+  - ⚠️ **Pre-market** tarama: giriş penceresi geçerlidir ama Finviz RelVol/Change sorguları boş döner → evren zayıf kalır (UI uyarı gösterir).
 
 ### 3. 📊 Sinyalleri incele
 Her sinyalde tipik olarak:

@@ -10,14 +10,20 @@
 **Evet.** Backend (Fly.io), frontend (Vercel) ve veritabanı (Supabase) birlikte lokaldekiyle aynı işlevselliği sunar.
 
 ### Cold start (ilk istek gecikmesi)
-Fly.io'da `min_machines_running = 0` kullanıldığı için makine boşta kalınca durur. İlk istek geldiğinde yeniden başlar:
+`fly.toml`'da `auto_stop_machines = 'suspend'` kullanılır (2026-07-18): makine boşta
+RAM anlık görüntüsüyle dondurulur, ilk istekte **~1–2 saniyede** geri döner — pratikte
+cold start hissedilmez, ek maliyet yok.
 
 | Durum | Beklenen süre |
 |-------|----------------|
-| Makine uyandığında ilk API isteği | ~8–15 saniye |
+| Suspend'den uyanış (normal günlük kullanım) | ~1–2 saniye |
+| Deploy sonrası İLK soğuk boot (Python import zinciri) | ~9–15 sn (health check `grace_period=30s` karşılar, kullanıcı görmez) |
 | Sonraki istekler | Normal (~100–300 ms) |
 
-**Çözüm (cold start’ı kaldırmak):** `fly.toml` içinde `min_machines_running = 1` yap. Bir makine sürekli açık kalır, ek maliyet ~$5–7/ay.
+**⚠️ `'stop'` moduna geri dönme:** stop'ta her uyanış tam Python boot maliyeti
+(pandas+numpy+yfinance import zinciri) öder; fly proxy ~8 sn'de pes edip kullanıcıya
+"Fly proxy waited too much" hatası gösterir (PM05). Bu yaşandı ve suspend ile çözüldü.
+Alternatif: `min_machines_running = 1` (makine hep açık, ~$5–7/ay) — suspend varken gereksiz.
 
 ### Maliyet ve "Dolmaması" İçin
 Fly.io artık geleneksel ücretsiz plan sunmuyor; **pay-as-you-go** kullanılıyor. Ancak:
@@ -39,25 +45,20 @@ Fly.io artık geleneksel ücretsiz plan sunmuyor; **pay-as-you-go** kullanılıy
 ### Özet
 | Bileşen | Cold start | Not |
 |---------|------------|-----|
-| Backend (Fly.io) | Var (~8–15 sn) | `min_machines_running = 1` ile kaldırılabilir |
+| Backend (Fly.io) | ~1–2 sn (suspend'den uyanış) | Yalnız deploy sonrası ilk boot yavaş, o da health check arkasında |
 | Frontend (Vercel) | Yok | Statik/SSR, hızlı |
 | Supabase | Yok | Her zaman açık |
-
-**Cold start'ı kaldırmak için:** `fly.toml` içinde `min_machines_running = 1` yap, sonra `fly deploy`.
 
 ---
 
 ## 📌 Venv Ne Zaman Gerekli?
 
-| Adım | Venv gerekli mi? | Neden |
-|------|------------------|-------|
-| `fly deploy` | ❌ Hayır | Fly.io kendi Docker image'ını build eder, senin venv'in kullanılmaz |
-| `fly auth login` | ❌ Hayır | Fly CLI komutu, Python değil |
-| `fly secrets set` | ❌ Hayır | Fly CLI komutu |
-| `python migrate_to_postgres.py` | ✅ Evet | Lokal Python script, `psycopg2` vb. için venv gerekir |
-| `vercel --prod` (frontend) | ❌ Hayır | Node/npm komutu, Python değil |
+**Deploy için hiçbir zaman.** Fly.io kendi Docker image'ını build eder; Vercel Node kullanır.
+Venv yalnız **lokal geliştirme** içindir (backend'i lokal çalıştırmak, `pytest`, `scripts/` altındaki
+ölçüm harness'ları).
 
-**Özet:** Sadece `migrate_to_postgres.py` çalıştırırken venv aktif olmalı. `fly deploy` için venv'e girmene gerek yok.
+> Not: Eski SQLite→Supabase göçü (`migrate_to_postgres.py`) tamamlandı ve script silindi.
+> Temiz kurulumda tabloları uygulama ilk bağlantıda kendisi oluşturur.
 
 ---
 
@@ -87,10 +88,10 @@ Fly.io artık geleneksel ücretsiz plan sunmuyor; **pay-as-you-go** kullanılıy
 
 ### ADIM 2: Fly.io — Backend Deploy
 
-**Tüm komutlar proje kökünde (`C:\swing_trade`). Venv'e girmene gerek yok.**
+**Tüm komutlar proje kökünde (`C:\active_projects\swing_trade`). Venv'e girmene gerek yok.**
 
 ```powershell
-cd C:\swing_trade
+cd C:\active_projects\swing_trade
 
 # 1. Fly.io'ya giriş (tarayıcı açılır)
 fly auth login
@@ -127,12 +128,34 @@ curl https://swing-trade.fly.dev/api/health
 
 ---
 
+### ⚙️ ADIM 2.5: Otomatik Deploy — CI (günlük yol, önerilen)
+
+İlk kurulumdan sonra elle `fly deploy` gerekmez: **`main`'e her push,**
+`.github/workflows/fly-deploy.yml` üzerinden **otomatik deploy olur**
+(`flyctl deploy --remote-only`).
+
+Tek ön koşul: GitHub repo secret'ı **`FLY_API_TOKEN`**:
+
+```powershell
+# 1. Deploy token üret (çıkan "FlyV1 ..." satırının TAMAMINI kopyala)
+fly tokens create deploy -a swing-trade
+```
+
+2. GitHub → repo → **Settings → Secrets and variables → Actions → New repository secret**
+   → Name: `FLY_API_TOKEN`, Value: kopyaladığın token.
+
+**Belirti tanıma:** Actions'ta deploy `no access token available. Please login with
+'flyctl auth login'` ile düşüyorsa bu secret eksik/bozuk demektir — aynı adımlarla yenile
+(2026-07-18'de yaşandı, çözüm buydu).
+
+---
+
 ### ADIM 3: Vercel — Frontend Deploy
 
 **Frontend klasöründe. Node/npm kullanılır, venv yok.**
 
 ```powershell
-cd C:\swing_trade\frontend
+cd C:\active_projects\swing_trade\frontend
 
 # 1. Bağımlılıklar
 npm install
@@ -156,7 +179,7 @@ npx vercel --prod
 Frontend Vercel'de yayına alındıktan sonra (örn: `https://swing-trade-xxx.vercel.app`):
 
 ```powershell
-cd C:\swing_trade
+cd C:\active_projects\swing_trade
 
 fly secrets set CORS_ORIGINS="https://swing-trade-xxx.vercel.app"
 ```
@@ -168,42 +191,18 @@ fly secrets set CORS_ORIGINS="https://app.vercel.app,https://swing-trade.com"
 
 ---
 
-### ADIM 5 (Opsiyonel): Mevcut SQLite Verisini Taşı
-
-**Sadece** daha önce lokal SQLite'ta trade'ler varsa ve bunları Supabase'e taşımak istiyorsan:
-
-```powershell
-cd C:\swing_trade
-
-# Venv aktif et (bu komut için gerekli)
-venv\Scripts\activate
-
-# DATABASE_URL ayarla (PowerShell)
-$env:DATABASE_URL = "postgresql://postgres:SIFRE@db.PROJE_ID.supabase.co:5432/postgres"
-
-# Migrate çalıştır
-python migrate_to_postgres.py
-
-# Venv'den çık
-deactivate
-```
-
-**Temiz kurulumda** bu adımı atla — uygulama ilk çalıştığında tabloları kendisi oluşturur.
-
----
-
 ## 📋 Hızlı Referans
 
 | Komut | Nerede | Venv |
 |-------|--------|------|
-| `fly auth login` | `C:\swing_trade` | ❌ |
-| `fly launch --no-deploy` | `C:\swing_trade` | ❌ |
-| `fly secrets set DATABASE_URL="..."` | `C:\swing_trade` | ❌ |
-| `fly deploy` | `C:\swing_trade` | ❌ |
-| `fly logs` | `C:\swing_trade` | ❌ |
-| `python migrate_to_postgres.py` | `C:\swing_trade` | ✅ |
-| `npm install` | `C:\swing_trade\frontend` | ❌ |
-| `npx vercel --prod` | `C:\swing_trade\frontend` | ❌ |
+| `git push` (→ otomatik deploy, CI) | proje kökü | ❌ |
+| `fly auth login` | proje kökü | ❌ |
+| `fly tokens create deploy -a swing-trade` | proje kökü | ❌ |
+| `fly secrets set DATABASE_URL="..."` | proje kökü | ❌ |
+| `fly deploy` (manuel, gerekirse) | proje kökü | ❌ |
+| `fly logs` | proje kökü | ❌ |
+| `npm install` / `npx vercel --prod` | `frontend/` | ❌ |
+| `pytest`, `scripts/` harness'ları (lokal) | proje kökü | ✅ |
 
 ---
 
