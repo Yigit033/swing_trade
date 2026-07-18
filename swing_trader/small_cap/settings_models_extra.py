@@ -300,15 +300,13 @@ class UniverseScanSettings(BaseModel):
 
     @model_validator(mode="after")
     def _validate_universe_scan(self) -> "UniverseScanSettings":
-        if self.use_finviz:
-            if not (
-                self.enable_finviz_query_momentum
-                or self.enable_finviz_query_setup
-                or self.enable_finviz_query_wider
-            ):
-                raise ValueError(
-                    "At least one Finviz query must be enabled when use_finviz is True."
-                )
+        # NOT (2026-07-18): "en az bir flag açık olmalı" kuralı kaldırıldı.
+        # v13.3'ten beri VCE breakout-day (Q5/Q5b) ve 20D NEW HIGH (Q6/Q6b)
+        # sorguları KOŞULSUZ çalışır — üç flag da kapalıyken evren yine dolar.
+        # Recall ölçümü (scripts/measure_universe_recall.py): Q1-Q3 doğrulanmış
+        # 408 VCE sinyalinin yalnızca %0.5-2'sini yakalıyordu → kapatıldı.
+        # Eski kural, tüm flag'ler kapatılınca settings YÜKLEMESİNİ bozup
+        # sessizce default'lara düşürüyordu (kalibrasyon kaybı riski).
         wsum = (
             self.rank_weight_rvol
             + self.rank_weight_change

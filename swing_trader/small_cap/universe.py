@@ -89,6 +89,27 @@ def _ticker_safe_overview_cls():
     return _TickerSafeOverview
 
 
+def build_rank_info(df: pd.DataFrame, cap: int) -> Dict:
+    """
+    Composite sıralamasından tavan (cap) telemetrisi üret — huni 3. aşama ölçümü.
+
+    Sorgular bir VCE adayını getirse bile composite sıralaması onu
+    ``max_scan_tickers`` tavanının altına gömüp kestirebilir. Kesilen
+    ticker'lar burada kayda geçer ve tarama geçmişine yazılır; birkaç haftalık
+    canlı veriyle "tavan kurbanı VCE var mı?" sorusu ek tarama maliyeti
+    olmadan cevaplanır (2026-07-18, universe recall çalışmasının devamı).
+
+    df: composite_score'a göre ÇOKTAN sıralanmış DataFrame ('Ticker' kolonu).
+    """
+    tickers = list(df['Ticker'])
+    return {
+        'ranked_total': len(tickers),
+        'cap': cap,
+        'ranks': {t: i + 1 for i, t in enumerate(tickers)},
+        'cut_tickers': tickers[cap:],
+    }
+
+
 class SmallCapUniverse:
     """
     Dynamic small-cap universe provider using finvizfinance.
@@ -130,7 +151,12 @@ class SmallCapUniverse:
         self._cache_time = None
         self._cache_cap: Optional[int] = None
         self._finviz_df_cache: Optional[pd.DataFrame] = None
+        self._last_rank_info: Optional[Dict] = None
         logger.info("SmallCapUniverse initialized (settings-backed scan + ranking)")
+
+    def get_last_rank_info(self) -> Optional[Dict]:
+        """Son Finviz fetch'inin sıralama/tavan telemetrisi (static path'te None)."""
+        return self._last_rank_info
 
     def _parse_percent(self, value) -> float:
         """Parse percentage string like '5.23%' to float 5.23"""
@@ -345,6 +371,7 @@ class SmallCapUniverse:
         """
         try:
             cap = self._us.max_scan_tickers if max_tickers is None else max_tickers
+            self._last_rank_info = None  # başarısız fetch'te bayat telemetri kalmasın
             logger.info("Fetching small-cap universe from Finviz (v3.0 optimized)...")
 
             frames: List[pd.DataFrame] = []
@@ -400,24 +427,12 @@ class SmallCapUniverse:
                     frames.append(df3)
 
             # ============================================================
-            # QUERY 4: EARLY SETUP / PULLBACK (v4.1 — NEW)
-            # Finds stocks that are setting up BEFORE the big move.
-            # Key insight: RSI 35-55 = cooling off after prior strength.
-            # These stocks show up in downstream engine as Type C (early entry).
-            # NOT filtered by today's volatility — we want quiet accumulation.
+            # QUERY 4 (EARLY SETUP, RSI<=40) KALDIRILDI — 2026-07-18 recall
+            # ölçümü (scripts/measure_universe_recall.py): 408 doğrulanmış VCE
+            # sinyalinin 0'ını yakaladı. RSI<=40 şartı, kırılım gününün doğasıyla
+            # (green day + 20g yeni zirve) yapısal olarak çelişiyor. Q1-Q3 de
+            # aynı ölçümle settings üzerinden kapatıldı (%0.5-2 katkı).
             # ============================================================
-            q4_filters = {
-                'Market Cap.': 'Small ($300mln to $2bln)',
-                'Float': 'Under 100M',
-                'Price': 'Over $7',
-                'Country': 'USA',
-                'Average Volume': 'Over 500K',
-                'RSI (14)': 'Oversold (40)',
-                'Relative Volume': 'Over 1',
-            }
-            df4 = self._run_finviz_query(q4_filters, "EARLY SETUP")
-            if len(df4) > 0:
-                frames.append(df4)
 
             # ============================================================
             # QUERY 5: VCE BREAKOUT DAY (v13 — PRIMARY THESIS ALIGNMENT)
@@ -535,6 +550,15 @@ class SmallCapUniverse:
 
             # Get top tickers
             tickers = df['Ticker'].head(cap).tolist()
+
+            # Tavan telemetrisi (cap kesintisi + tam sıralama) — scanner stats'a akar
+            self._last_rank_info = build_rank_info(df, cap)
+            if self._last_rank_info['cut_tickers']:
+                logger.info(
+                    "Universe cap cut: %d ticker tavanın (%d) altında kaldı: %s",
+                    len(self._last_rank_info['cut_tickers']), cap,
+                    self._last_rank_info['cut_tickers'][:15],
+                )
 
             # Log diagnostics
             top_cols = ['Ticker', 'Price', 'Change', 'Volume', 'composite_score']
@@ -718,8 +742,11 @@ class SmallCapUniverse:
             )
             static = self.get_static_universe()
             merged = list(dict.fromkeys(finviz_tickers + static))
+            # Static merge sıralamayı bozar — rank telemetrisi bu evren için geçersiz
+            self._last_rank_info = None
             return merged[:cap]
 
+        self._last_rank_info = None  # static path: composite sıralama yok
         return self.get_static_universe()[:cap]
 
     def validate_ticker(self, ticker: str) -> bool:

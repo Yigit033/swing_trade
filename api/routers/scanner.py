@@ -317,6 +317,25 @@ def _execute_smallcap_scan(
         portfolio_value=body.portfolio_value,
     )
 
+    # ── Huni 3. aşama telemetrisi ────────────────────────────────────────
+    # Sinyal ticker'ının composite sıralamasındaki yeri + tavanın kestiği
+    # ticker'lar tarama geçmişine yazılır → birkaç haftalık canlı veriyle
+    # "cap, VCE adaylarını kesiyor mu?" sorusu ölçülerek cevaplanır.
+    rank_info = None
+    try:
+        rank_info = engine.universe_provider.get_last_rank_info()
+    except Exception:
+        pass
+    if rank_info:
+        for s in signals:
+            s["universe_rank"] = rank_info["ranks"].get(s.get("ticker"))
+        if signals:
+            logger.info(
+                "Universe rank telemetry: total=%s cap=%s cut=%s | signal ranks: %s",
+                rank_info["ranked_total"], rank_info["cap"], len(rank_info["cut_tickers"]),
+                {s["ticker"]: s.get("universe_rank") for s in signals},
+            )
+
     prog(90, "filter", "Filtering signals…")
 
     actual_regime, regime_multiplier, regime_confidence, effective_min_quality, effective_top_n = (
@@ -354,6 +373,14 @@ def _execute_smallcap_scan(
         stats["session_warning"] = session_warning
     if universe_fallback:
         stats["universe_fallback"] = universe_fallback
+    if rank_info:
+        stats["universe_ranked_total"] = rank_info["ranked_total"]
+        stats["universe_cap"] = rank_info["cap"]
+        stats["universe_cut_count"] = len(rank_info["cut_tickers"])
+        stats["universe_cut_tickers"] = rank_info["cut_tickers"]
+        stats["signal_universe_ranks"] = {
+            s["ticker"]: s.get("universe_rank") for s in signals
+        }
     rd = getattr(engine, "_last_regime", None) or {}
     err = rd.get("detect_error")
     if err:
