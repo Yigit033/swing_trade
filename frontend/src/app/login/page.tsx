@@ -159,10 +159,6 @@ export default function LoginPage() {
             )}
           </button>
         </form>
-
-        <p className="mt-6 text-center text-xs text-[var(--text-muted)]">
-          Create an account in Supabase Dashboard → Authentication → Users
-        </p>
       </div>
     </div>
   );
