@@ -435,46 +435,20 @@ class SmallCapUniverse:
             # ============================================================
 
             # ============================================================
-            # QUERY 5: VCE BREAKOUT DAY (v13 — PRIMARY THESIS ALIGNMENT)
-            # The engine's primary trigger is the volatility-squeeze breakout
-            # (VCE). A squeezed stock has LOW recent volatility, so queries
-            # 1-3 (weekly volatility >5%) and 2/4 (RSI caps) systematically
-            # miss it — exactly the stock we most want to see on the day it
-            # breaks out. This query matches the VCE breakout-day signature:
-            # green day + elevated volume, with NO volatility floor, NO RSI
-            # cap and NO float cap (the validated rule has none of those).
+            # QUERY 5/5b (VCE BREAKOUT DAY, small+mid) KALDIRILDI — 2026-07-22
+            # marjinal-katkı ölçümü (scripts/measure_universe_recall.py, [3b]):
+            # 408 doğrulanmış VCE sinyalinden Q5/Q5b'nin yakaladığı 71'in
+            # HEPSİ zaten Q6/Q6b tarafından da yakalanmıştı — net katkı 0.
+            # Yapısal sebep (bağımsız kontrolle doğrulandı): Q5/Q5b'nin şartı
+            # "bugün %2+ arttı + hacim yüksek"; Q6/Q6b'nin şartı "20g zirve +
+            # trend yukarı" — bir hisse 20 günün zirvesine çıkarken pratikte
+            # her zaman o gün yükselip hacmi de artıyor, yani Q5/Q5b kümesi
+            # Q6/Q6b kümesinin bir ALT KÜMESİ. Ayrıca Q5/Q5b'nin RelVol/Change
+            # kriterleri pre-market'te sıfırlanmış Finviz kolonlarına bağımlı
+            # (saatten etkilenen tek sorgu grubuydu) — kaldırılınca bu
+            # kırılganlık da gider. Q6/Q6b (saatten bağımsız, dünün kapanışına
+            # göre) VCE'nin kesin ön koşulunu zaten tam kapsıyor.
             # ============================================================
-            q5_filters = {
-                'Market Cap.': 'Small ($300mln to $2bln)',
-                'Price': 'Over $7',
-                'Country': 'USA',
-                'Average Volume': 'Over 500K',
-                'Relative Volume': 'Over 1.5',
-                'Change': 'Up 2%',
-            }
-            df5 = self._run_finviz_query(q5_filters, "VCE BREAKOUT DAY")
-            if len(df5) > 0:
-                frames.append(df5)
-
-            # ============================================================
-            # QUERY 5b: VCE BREAKOUT DAY — MID CAP ($2B-$10B) (v13.2)
-            # The VCE edge was measured cap-agnostic: its strongest
-            # contributors (HIMS, CELH, RDDT, TOST, MNDY) are mid-caps.
-            # Finviz has no single $300M-$10B preset, so the mid band runs
-            # as its own query. Higher liquidity bar (1M avg volume) keeps
-            # execution quality tight for the larger names.
-            # ============================================================
-            q5b_filters = {
-                'Market Cap.': 'Mid ($2bln to $10bln)',
-                'Price': 'Over $7',
-                'Country': 'USA',
-                'Average Volume': 'Over 1M',
-                'Relative Volume': 'Over 1.5',
-                'Change': 'Up 2%',
-            }
-            df5b = self._run_finviz_query(q5b_filters, "VCE BREAKOUT DAY (MID)")
-            if len(df5b) > 0:
-                frames.append(df5b)
 
             # ============================================================
             # QUERY 6: 20-DAY NEW HIGH IN UPTREND (v13.3 — VCE precise feed)

@@ -242,6 +242,35 @@ class RiskTargetRegimeSettings(BaseModel):
     t2_vs_t1_near_cap_floor: float = 1.005
 
 
+class AutoScanSettings(BaseModel):
+    """
+    Zamanlanmış (kullanıcı etkileşimi gerektirmeyen) günlük tarama.
+
+    Kapanış sonrası tek seferlik otomatik tarama — motorun VCE tetikleyicisi
+    zaten dünün TAMAMLANMIŞ barına göre karar veriyor (fetcher.py
+    _drop_incomplete_last_bar) ve evren artık saatten bağımsız (Q5/Q5b
+    kaldırıldı, 2026-07-22) — yani bu, manuel taramanın otomatikleştirilmiş
+    hali, ayrı bir mantık değil.
+
+    min_quality BİLEREK Scanner sayfasındaki "Auto-Track" slider'ından
+    (kullanıcı unutup değiştirebilir, UI state) AYRI ve sabit tutulur —
+    gece kimse izlemezken hangi eşiğin kullanıldığı, ekranda o an ne
+    görünüyor olduğuna bağlı olmamalı.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    # NYSE kapanışından sonraki hedef saat (ET). 16:30 ET = kapanıştan 60dk
+    # sonra — Finviz'in günlük Change/Volume/20D-High kolonları o ana kadar
+    # sindirilmiş olur (ölçümlerin yapıldığı pencereyle aynı varsayım).
+    target_hour_et: int = Field(default=16, ge=0, le=23)
+    target_minute_et: int = Field(default=30, ge=0, le=59)
+    min_quality: int = Field(default=70, ge=0, le=100)
+    top_n: int = Field(default=15, ge=1, le=100)
+    portfolio_value: float = Field(default=10_000.0, gt=0)
+
+
 class UniverseFilterSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

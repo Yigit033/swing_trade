@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .settings_models_extra import (
+    AutoScanSettings,
     BacktestEntrySettings,
     BacktestExitTrailingSettings,
     BacktestLoopSettings,
@@ -176,6 +177,7 @@ class SmallCapSettings(BaseModel):
     risk_targets: RiskTargetRegimeSettings = Field(default_factory=RiskTargetRegimeSettings)
     universe_filters: UniverseFilterSettings = Field(default_factory=UniverseFilterSettings)
     universe_scan: UniverseScanSettings = Field(default_factory=UniverseScanSettings)
+    auto_scan: AutoScanSettings = Field(default_factory=AutoScanSettings)
     signal_confirmation: SignalsConfirmationSettings = Field(default_factory=SignalsConfirmationSettings)
     scoring_tuning: ScoringTuningSettings = Field(default_factory=ScoringTuningSettings)
     backtest_loop: BacktestLoopSettings = Field(default_factory=BacktestLoopSettings)

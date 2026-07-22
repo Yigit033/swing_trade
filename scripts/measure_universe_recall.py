@@ -187,6 +187,49 @@ def main():
         else:
             print(f"    {lbl:<28} n={len(rv)} (istatistik için az)")
 
+    # [3b] Q5/Q5b MARJİNAL KATKI — Q6/Q6b'siz sadece Q5/Q5b'nin edge'i +
+    # asıl soru: Q6/Q6b zaten yakalamışken Q5/Q5b'nin EKSTRA getirdiği var mı?
+    print(f"\n  [3b] Q5/Q5b MARJİNAL KATKI (Q6/Q6b zaten yakalamışken Q5/Q5b ekstra ne katıyor?)")
+    q6_group = ('Q6_20dh_small', 'Q6b_20dh_mid')
+    q5_group = ('Q5_vce_small', 'Q5b_vce_mid')
+
+    def hit_any(s, keys):
+        return any(s['hits'][k] for k in keys)
+
+    non_q5_group = ('Q1_momentum', 'Q2_setup', 'Q3_wider', 'Q4_early') + q6_group
+
+    only_q6 = [s for s in sigs if hit_any(s, q6_group)]
+    only_q5 = [s for s in sigs if hit_any(s, q5_group)]
+    q5_exclusive = [s for s in sigs if hit_any(s, q5_group) and not hit_any(s, q6_group)]
+    # "Q5/Q5b'yi TAMAMEN kapatsaydık" senaryosu: diğer TÜM sorguların (Q1-4, Q6/Q6b)
+    # union'ı — s['union'] kullanmak YANLIŞ olurdu çünkü o zaten Q5'i içeriyor.
+    union_without_q5 = [s for s in sigs if hit_any(s, non_q5_group)]
+
+    for lbl, grp in [
+        ('Q6/Q6b tek başına (recall)', only_q6),
+        ('Q5/Q5b tek başına (recall)', only_q5),
+        ('Q5/Q5b YALNIZ yakaladı (diğer 6 sorgu kaçırdı)', q5_exclusive),
+    ]:
+        print(f"    {lbl:<46} n={len(grp):>4}/{n}  ({len(grp)/n*100:5.1f}%)")
+
+    print(f"\n    Recall Q5/Q5b KAPALI (diğer 6 sorgu)  : {len(union_without_q5)}/{n} "
+          f"({len(union_without_q5)/n*100:.1f}%)")
+    print(f"    Recall TÜM sorgular (Q5 DAHİL, mevcut) : {len(caught)}/{n} ({len(caught)/n*100:.1f}%)")
+    print(f"    → Q5/Q5b'yi kapatırsak KAYBEDİLEN      : {len(caught)-len(union_without_q5)} sinyal")
+
+    if q5_exclusive:
+        rv = np.array([s['R10'] for s in q5_exclusive if s.get('R10') is not None])
+        if len(rv) >= 3:
+            print(f"\n    Q5/Q5b-yalnız yakalananların R10 edge'i: n={len(rv)} ort {rv.mean():+.2f}%  "
+                  f"edge {rv.mean()-bv.mean():+.2f}%  t={welch(rv, bv)}")
+        else:
+            print(f"\n    Q5/Q5b-yalnız yakalananlar: n={len(rv)} (istatistik için çok az — "
+                  f"tek tek incele:")
+            for s in q5_exclusive:
+                print(f"      {s['ticker']:<6} {str(s['date'])[:10]}  R10={s.get('R10')}")
+    else:
+        print(f"\n    Q5/Q5b'nin Q6/Q6b'ye kattığı TEK bir sinyal bile yok — tamamen artık (redundant).")
+
     # [4] Eşik duyarlılığı: avg volume barı
     print(f"\n  [4] AVG VOLUME EŞİĞİ DUYARLILIĞI (Q6 small bandı için; recall ne kazanır?)")
     for th in [250e3, 400e3, 500e3, 750e3, 1e6]:

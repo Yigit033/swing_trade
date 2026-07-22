@@ -1708,6 +1708,66 @@ export default function SettingsPage() {
             </Section>
 
             <Section
+                id="settings-section-auto-scan"
+                title="Otomatik günlük tarama"
+                help="Kapanış sonrası, kullanıcı etkileşimi olmadan çalışan zamanlanmış tarama. Manuel taramayla AYNI motoru kullanır — tetikleyicisi saat olan bir manuel tarama. Bulunan her sinyal, buradaki min-quality eşiğini geçerse otomatik PENDING paper trade olarak açılır (Scanner sayfasındaki Auto-Track ayarından BAĞIMSIZDIR — gece kimse izlemezken ekranda ne göründüğüne bağlı olmasın diye bilerek ayrı tutulur)."
+            >
+                <p style={{ margin: "0 0 12px", fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5, gridColumn: "1 / -1" }}>
+                    Hedef saat ET (NYSE) cinsindendir. Varsayılan 16:30 ET = kapanıştan 60 dk sonra — Finviz&apos;in günlük
+                    kolonları (20 günlük zirve, kapanış üstü SMA50) o ana kadar tamamen güncellenmiş olur. Hafta sonu/tatil
+                    günleri otomatik atlanır. Aynı anda manuel tarama sürüyorsa o günkü otomatik tetikleme sessizce atlanır
+                    (ikisi asla paralel koşmaz).
+                </p>
+                <FieldBool
+                    label="Otomatik tarama açık"
+                    hint="Kapalıyken hiçbir şey otomatik çalışmaz — yalnız manuel Scan butonu."
+                    value={nb(["auto_scan", "enabled"], false)}
+                    onChange={(v) => sb(["auto_scan", "enabled"], v)}
+                />
+                <FieldNum
+                    label="Hedef saat (ET, 0-23)"
+                    hint="NYSE kapanışı 16:00 ET'dir; 16:30 önerilir."
+                    value={nn(["auto_scan", "target_hour_et"], 16)}
+                    onChange={(v) => sn(["auto_scan", "target_hour_et"], Math.round(v))}
+                    step={1}
+                    min={0}
+                    max={23}
+                />
+                <FieldNum
+                    label="Hedef dakika (ET, 0-59)"
+                    value={nn(["auto_scan", "target_minute_et"], 30)}
+                    onChange={(v) => sn(["auto_scan", "target_minute_et"], Math.round(v))}
+                    step={1}
+                    min={0}
+                    max={59}
+                />
+                <FieldNum
+                    label="Min quality (otomatik auto-track eşiği)"
+                    hint="Bu eşiği geçen her sinyal otomatik PENDING olur — Scanner sayfasındaki Auto-Track slider'ından bağımsız, sabit bir değer."
+                    value={nn(["auto_scan", "min_quality"], 70)}
+                    onChange={(v) => sn(["auto_scan", "min_quality"], Math.round(v))}
+                    step={1}
+                    min={0}
+                    max={100}
+                />
+                <FieldNum
+                    label="Top N (kaç sinyale kadar değerlendirilsin)"
+                    value={nn(["auto_scan", "top_n"], 15)}
+                    onChange={(v) => sn(["auto_scan", "top_n"], Math.round(v))}
+                    step={1}
+                    min={1}
+                    max={100}
+                />
+                <FieldNum
+                    label="Portföy değeri ($, pozisyon boyutlandırma için)"
+                    value={nn(["auto_scan", "portfolio_value"], 10000)}
+                    onChange={(v) => sn(["auto_scan", "portfolio_value"], v)}
+                    step={100}
+                    min={1}
+                />
+            </Section>
+
+            <Section
                 id="settings-section-swing-hazirlik"
                 title="Swing hazırlık / aşırı uzama (sinyal)"
                 help="MA20’ye göre ‘hazır’ mesafe ve günlük / tek gün / 5 günlük aşırı hareket üst sınırları. Yapı bozulmadan önce aşırı uzamış çıkışları elemek için. Çok erken eleniyorsa eşikleri hafifçe gevşetin."

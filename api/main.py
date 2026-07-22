@@ -71,16 +71,23 @@ async def _scheduled_pending_confirm_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = None
+    tasks = []
     if _PENDING_SCHEDULER_ENABLED:
-        task = asyncio.create_task(_scheduled_pending_confirm_loop())
+        tasks.append(asyncio.create_task(_scheduled_pending_confirm_loop()))
         logger.info(
             "Pending scheduler enabled (interval=%ss, disable with ENABLE_PENDING_SCHEDULER=0)",
             _PENDING_INTERVAL_SEC,
         )
+
+    from api.auto_scan import auto_scan_loop
+
+    tasks.append(asyncio.create_task(auto_scan_loop()))
+    logger.info("Auto-scan loop started (enable/configure via settings: auto_scan.enabled)")
+
     yield
-    if task:
+    for task in tasks:
         task.cancel()
+    for task in tasks:
         with suppress(asyncio.CancelledError):
             await task
 
