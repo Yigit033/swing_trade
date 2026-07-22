@@ -161,11 +161,32 @@ export function ScannerJobProvider({ children }: { children: ReactNode }) {
                     return;
                 }
                 consecutiveErrors++;
-                if (consecutiveErrors >= 5 && jobIdRef.current === jobId) {
+                // Tolerans 5→12 tick (≈60s). Fly tek makinede tarama sürerken
+                // health check timeout'a takılıp trafiği geçici kesebiliyor
+                // (soğuk uyanış + CPU-yoğun tarama penceresi). 25s'de pes etmek,
+                // arkada BAŞARIYLA biten taramayı "başarısız" gösteriyordu.
+                // Bu süre boyunca job'ı KORU, sadece kullanıcıya "yeniden
+                // bağlanılıyor" bilgisi ver — poll durmadan devam eder.
+                if (consecutiveErrors >= 12 && jobIdRef.current === jobId) {
                     clearStoredJobId();
                     setJobId(null);
                     setPoll(null);
-                    setScanError("Durum alınamadı — ağ veya oturum kontrol edin.");
+                    setScanError(
+                        "Sunucuya ulaşılamıyor — makine uyanıyor veya tarama sürüyor olabilir. " +
+                        "Sonuçlar için sayfayı birkaç dakika sonra yenileyin."
+                    );
+                } else if (consecutiveErrors >= 3) {
+                    // Geçici hata — job'ı bırakma, sadece bant mesajını güncelle
+                    setPoll((prev) =>
+                        prev
+                            ? { ...prev, message: "Sunucuya yeniden bağlanılıyor…" }
+                            : {
+                                  status: "running",
+                                  progress: 0,
+                                  phase: "reconnect",
+                                  message: "Sunucuya yeniden bağlanılıyor…",
+                              }
+                    );
                 }
             }
         };
@@ -180,6 +201,9 @@ export function ScannerJobProvider({ children }: { children: ReactNode }) {
 
     const startBackgroundScan = useCallback(
         async (params: { min_quality: number; top_n: number; portfolio_value: number }) => {
+            // Çift-tık / çift-tetik guard: zaten aktif job varsa yeni POST atma
+            // (loglarda görülen ardışık 409'lar buradan geliyordu).
+            if (jobIdRef.current) return;
             setScanError(null);
             setPoll(null);
             try {

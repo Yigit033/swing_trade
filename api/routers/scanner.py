@@ -253,7 +253,11 @@ def _execute_smallcap_scan(
     prog(6, "universe", f"Universe: {len(tickers)} tickers")
 
     prog(8, "fetch", f"Fetching price data for {len(tickers)} tickers…")
-    data_dict: dict[str, pd.DataFrame] = fetcher.fetch_multiple_stocks_batch(tickers, period="3mo")
+    # 6mo (~126 bar): VCE trigger'ın >=55 bar şartına 3mo (~62 bar) tehlikeli
+    # yakındı — tek eksik bar (halt, yeni listing) sessiz insufficient_data
+    # reddiydi. Ölçüm harness'ı da >=60 bar kullanıyor; 6mo ikisini de bol
+    # marjla karşılar. Maliyet: aynı istek sayısı, biraz büyük payload.
+    data_dict: dict[str, pd.DataFrame] = fetcher.fetch_multiple_stocks_batch(tickers, period="6mo")
 
     # ── Data-quality devre kesici ─────────────────────────────────────────
     # Fetch başarısı eşiğin altındaysa evren toplu bozulmuş demektir (ticker
