@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { lookupTickers, addTrade } from "@/lib/api";
+import { lookupTickers, trackSignal } from "@/lib/api";
 import { Zap, Plus, CheckCircle, XCircle, Circle, ChevronDown, ChevronUp } from "lucide-react";
 
 // ── Label maps (engine stage/filter adlarının Türkçe karşılıkları) ────────
@@ -388,20 +388,39 @@ export default function LookupPage() {
     };
 
     const handleAdd = async (r: AnalysisResult) => {
+        if (r.entry_price == null || r.stop_loss == null || r.target_1 == null) {
+            setMsg(`❌ ${r.ticker}: eksik risk verisi (entry/stop/target) — eklenemedi`);
+            return;
+        }
         setAdding(r.ticker);
         try {
-            await addTrade({
+            // Scanner sayfasıyla AYNI korumalı yol: duplicate/cooldown/entry-window
+            // kontrolleri burada da geçerli olsun diye ham POST /api/trades yerine
+            // /api/scanner/track (add_trade_from_signal) kullanılıyor — 2026-07-22'de
+            // Active Positions'ta zaten açık bir ticker'ın burada ikinci kez
+            // eklenebildiği (kontrolsüz endpoint) tespit edildi.
+            const res = await trackSignal({
                 ticker: r.ticker,
-                entry_date: new Date().toISOString().slice(0, 10),
                 entry_price: r.entry_price,
                 stop_loss: r.stop_loss,
-                target: r.target_1,
-                quality_score: r.quality_score,
+                target_1: r.target_1,
+                target_2: r.target_2,
+                quality_score: r.quality_score ?? 0,
                 swing_type: r.swing_type || "A",
-                signal_price: r.entry_price,
-                status: "PENDING",
+                atr: 0,
+                target: r.target_1,
             });
-            setMsg(`✅ ${r.ticker} PENDING olarak eklendi!`);
+            if (res?.status === "added") {
+                setMsg(`✅ ${r.ticker} PENDING olarak eklendi!`);
+            } else if (res?.status === "duplicate") {
+                setMsg(`⏭️ ${r.ticker} zaten takipte (aktif PENDING/OPEN pozisyon var)`);
+            } else if (res?.status === "cooldown") {
+                setMsg(`🧊 ${r.ticker}: yakın zamanda kapanan trade var (cooldown aktif)`);
+            } else if (res?.status === "entry_window_missed") {
+                setMsg(`⏱️ ${r.ticker}: ölçülen giriş penceresi (ertesi açılış) geçti`);
+            } else {
+                setMsg(`❌ ${r.ticker} eklenemedi`);
+            }
         } catch {
             setMsg(`❌ ${r.ticker} eklenemedi`);
         } finally {
