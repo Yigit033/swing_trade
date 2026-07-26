@@ -10,11 +10,13 @@ POST /api/trades/update-prices - fetch latest prices for all open trades
 """
 
 import logging
+import math
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from api.deps import get_paper_storage, get_paper_tracker
 from api.auth import get_current_user_id
+from api.utils import sanitize_for_json
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -86,8 +88,12 @@ def _enrich_open_trades_inline(trades: list) -> list:
                         val = col.dropna()
                         if not val.empty:
                             p = round(float(val.iloc[-1].item()), 4)
-                            prices[tk] = p
-                            _PRICE_CACHE[tk] = (p, now)
+                            # NaN/Inf fiyatı cache'e KOYMA — aksi halde aşağıda
+                            # (cp - entry) hesabı NaN üretip JSON serileştirmeyi
+                            # (POST /update-prices) 500'e düşürüyordu.
+                            if math.isfinite(p) and p > 0:
+                                prices[tk] = p
+                                _PRICE_CACHE[tk] = (p, now)
                     except Exception:
                         pass
         except Exception as e:
@@ -154,7 +160,11 @@ def update_prices(user_id: Optional[str] = Depends(get_current_user_id)):
     updated = tracker.update_all_open_trades(user_id)
     # Record that a price refresh was triggered (even if there were no open trades)
     storage.touch_last_price_update()
-    return {"message": f"Updated {len(updated) if updated else 0} trades", "trades": updated or []}
+    # sanitize: NaN/Infinity değerleri (ör. NaN fiyattan hesaplanan P&L) JSON'a
+    # çevrilemez → 500 hatası olurdu. Diğer trade endpoint'leri gibi buradan da geçir.
+    return sanitize_for_json(
+        {"message": f"Updated {len(updated) if updated else 0} trades", "trades": updated or []}
+    )
 
 
 @router.get("/{trade_id}")

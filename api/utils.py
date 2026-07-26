@@ -1,6 +1,7 @@
 """Shared utilities for API routers."""
 
 import logging
+import math
 import time
 import pandas as pd
 import numpy as np
@@ -117,7 +118,9 @@ def sanitize_for_json(obj):
         return int(obj)
     if isinstance(obj, (np.floating,)):
         f = float(obj)
-        return None if (f != f) else f       # nan → None
+        # NaN (f != f) VE Infinity — ikisi de JSON-uyumsuz (JSON standardı
+        # yalnız sonlu sayı kabul eder), None'a çevir.
+        return f if math.isfinite(f) else None
     if isinstance(obj, np.ndarray):
         return sanitize_for_json(obj.tolist())
     if hasattr(obj, 'item'):                  # any remaining numpy scalar
@@ -125,10 +128,9 @@ def sanitize_for_json(obj):
     # pandas NaT / NaN
     if obj is pd.NaT:
         return None
-    try:
-        import math
-        if isinstance(obj, float) and math.isnan(obj):
-            return None
-    except Exception:
-        pass
+    # Native Python float: NaN VE ±Infinity → None. (2026-07-26: /update-prices
+    # NaN'lı bir hisseden hesaplanan unrealized_pnl'i Infinity yapabiliyordu;
+    # eski kod yalnız NaN'ı yakalıyordu, Infinity 500 hatasına yol açtı.)
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return None
     return obj
