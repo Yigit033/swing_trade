@@ -67,6 +67,8 @@ def _analyze_smallcap_ticker(ticker: str, df, info: dict, engine, portfolio_valu
     triggered, trigger_details = engine.signals.check_all_triggers(df)
     result["trigger_passed"]   = triggered
     result["trigger_details"]  = trigger_details   # sanitized below
+    # v14: hangi pathway (VCE / RVOL thrust) tetikledi — UI rozetinde gösterilir
+    result["trigger_pathway"]  = trigger_details.get("trigger_pathway", "")
 
     if not triggered:
         vol_surge = trigger_details.get("volume_surge", 0)

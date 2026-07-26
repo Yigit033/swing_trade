@@ -535,6 +535,72 @@ class SmallCapSignals:
     VCE_VOLUME_MULT = 1.5          # premium tier: breakout volume >= 1.5x 20d avg (scoring)
     VCE_CLOSE_POS_MIN = 0.6        # premium tier: close in upper 40% of range (scoring)
 
+    # ── RVOL THRUST (v14 — SECOND SIGNAL PATHWAY) ─────────────────────────
+    # 2026-07-26: discovered via scripts/discover_signal_families.py + validated
+    # in scripts/exit_lab_vce_rvol.py. VCE catches only ~5% of future big-move
+    # opportunities (it requires a prior VOLATILITY SQUEEZE); the biggest class
+    # it misses is stocks that suddenly light up on abnormal volume WITHOUT a
+    # prior squeeze. RVOL thrust captures exactly that: relative volume >= 2.5x
+    # its 50-day average + green close + above MA20. Measured (57 ticker,
+    # 2024-06→2026-05): R10 edge +3.34%, Welch t=2.87, OOS +1.96% — STRONGER
+    # than VCE, and 90% of its hits are signals VCE never saw. Its natural
+    # volatility needs the wide exit (stop ~3 ATR, cap removed) applied in v14.
+    # Constants match the harness EXACTLY — do not tune without re-running it.
+    RVOL_THRUST_MULT = 2.5         # today's volume >= 2.5x its 50-day average
+    RVOL_BASELINE_DAYS = 50        # relative-volume baseline window
+    RVOL_MA_PERIOD = 20            # close must be above 20-day MA (uptrend gate)
+
+    def check_rvol_thrust(self, df: pd.DataFrame) -> Tuple[bool, str, Dict]:
+        """
+        RVOL thrust — the system's SECOND entry pathway (v14).
+
+        Fires when a stock draws abnormal volume (>=2.5x its 50-day average)
+        on a green day while above its 20-day MA. Unlike VCE this requires NO
+        prior volatility squeeze — it catches the sudden-interest / catalyst
+        move that VCE structurally misses (90% non-overlap with VCE, measured).
+
+        Returns (passed, reason, metrics).
+        """
+        metrics = {'rvol': 0.0, 'ma20': 0.0, 'green': False}
+        if df is None or len(df) < self.RVOL_BASELINE_DAYS + 2:
+            return False, f"Insufficient data (<{self.RVOL_BASELINE_DAYS + 2} bars)", metrics
+        try:
+            close = df['Close'].astype(float)
+            volume = df['Volume'].astype(float)
+
+            c = float(close.iloc[-1])
+            cp = float(close.iloc[-2])
+
+            # 1. RELATIVE VOLUME vs 50-day average (matches harness: v / vol50)
+            vol50 = float(volume.rolling(self.RVOL_BASELINE_DAYS).mean().iloc[-1])
+            if np.isnan(vol50) or vol50 <= 0:
+                return False, "Volume baseline unavailable", metrics
+            rvol = float(volume.iloc[-1]) / vol50
+            metrics['rvol'] = round(rvol, 2)
+            if rvol < self.RVOL_THRUST_MULT:
+                return False, (
+                    f"No thrust (RVOL {rvol:.1f}x < {self.RVOL_THRUST_MULT}x)"
+                ), metrics
+
+            # 2. GREEN DAY (close over prior close)
+            metrics['green'] = c > cp
+            if c <= cp:
+                return False, "Red/flat day on thrust bar", metrics
+
+            # 3. TREND: above 20-day MA
+            ma20 = float(close.rolling(self.RVOL_MA_PERIOD).mean().iloc[-1])
+            metrics['ma20'] = round(ma20, 2)
+            if np.isnan(ma20) or c <= ma20:
+                return False, f"Below MA20 ({c:.2f} <= {ma20:.2f})", metrics
+
+            return True, (
+                f"RVOL thrust: {rvol:.1f}x volume on green day above MA20 ${ma20:.2f}"
+            ), metrics
+
+        except Exception as e:
+            logger.error(f"Error checking RVOL thrust: {e}")
+            return False, str(e), metrics
+
     def check_vce_breakout(self, df: pd.DataFrame) -> Tuple[bool, str, Dict]:
         """
         Volatility Contraction→Expansion breakout — the system's PRIMARY entry.
@@ -662,6 +728,11 @@ class SmallCapSignals:
         # definition; requiring ATR>=3% would contradict the validated rule.
         vce_passed, vce_reason, vce_metrics = self.check_vce_breakout(df)
 
+        # v14 — SECOND PATHWAY: RVOL thrust (abnormal volume, no squeeze needed).
+        # Catches the ~90% of big moves VCE misses (measured R10 edge +3.34%,
+        # t=2.87). Evaluated alongside VCE; either pathway can fire a signal.
+        rvol_passed, rvol_reason, rvol_metrics = self.check_rvol_thrust(df)
+
         # Context metrics (display + downstream scoring; NOT trigger decisions)
         volume_surge = self.calculate_volume_surge(df, period=self._settings.volume_surge_baseline_days)
         atr_pct = self.calculate_atr_percent(df)
@@ -675,6 +746,12 @@ class SmallCapSignals:
             'passed': vce_passed,
             'reason': vce_reason,
             'metrics': vce_metrics,
+            'primary': True,
+        }
+        details['triggers']['rvol_thrust'] = {
+            'passed': rvol_passed,
+            'reason': rvol_reason,
+            'metrics': rvol_metrics,
             'primary': True,
         }
         details['triggers']['volume_surge'] = {
@@ -706,11 +783,19 @@ class SmallCapSignals:
         details['has_breakout'] = breakout_passed
         details['has_continuation'] = continuation_passed
         details['vce_metrics'] = vce_metrics
+        details['rvol_metrics'] = rvol_metrics
 
+        # Pathway selection: VCE takes precedence when BOTH fire (it is the
+        # narrower, squeeze-specific pattern); RVOL thrust is the second-chance
+        # pathway for the sudden-volume moves VCE structurally misses.
         if vce_passed:
             details['triggered'] = True
             details['trigger_pathway'] = 'vce_breakout'
             details['trigger_reason'] = vce_reason
+        elif rvol_passed:
+            details['triggered'] = True
+            details['trigger_pathway'] = 'rvol_thrust'
+            details['trigger_reason'] = rvol_reason
 
         return details['triggered'], details
     

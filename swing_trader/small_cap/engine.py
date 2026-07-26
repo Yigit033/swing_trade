@@ -820,6 +820,11 @@ class SmallCapEngine:
                 'ticker': ticker,
                 'date': signal_date_str,
                 'signal_type': 'SMALL_CAP_SWING',
+                # Hangi tetikleyici kapıdan geldi: 'vce_breakout' | 'rvol_thrust'.
+                # v14: RVOL thrust ikinci pathway olarak eklendi — sinyalin
+                # kaynağı UI'da ve forward-return telemetrisinde görünür olsun.
+                'trigger_pathway': trigger_details.get('trigger_pathway', 'vce_breakout'),
+                'trigger_reason': trigger_details.get('trigger_reason', ''),
                 'quality_score': round(quality_score, 1),
                 'entry_price': round(entry_price, 2),
                 

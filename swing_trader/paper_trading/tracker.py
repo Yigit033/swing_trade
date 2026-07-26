@@ -45,16 +45,26 @@ NYSE_OPEN_TIME = "09:30"  # NYSE opens 09:30 ET (= 16:30 Turkey time in winter)
 MAX_GAP_UP_PCT = 5.0
 MAX_GAP_DOWN_PCT = 7.0
 
-CONFIRM_ATR_MULTIPLIER = 1.5   # Stop distance at confirmation (aligned with signal generator)
+# 2026-07-26: 1.5 → 2.5. Exit ölçümü (scripts/exit_lab_vce_rvol.py, 57 ticker
+# 2024-06→2026-05, VCE n=387 + RVOL thrust n=330) canlı tracker mantığıyla
+# (chandelier trail peak-3ATR, T1 kısmi+BE) doğrulandı: confirm stop'u 1.5→2.5
+# ATR genişletmek VCE EV'yi +1.97→+2.64%, RVOL EV'yi +0.30→+0.97% yükseltiyor
+# ve WR'yi %49→%60'a çıkarıyor. Dar stop iyi trade'leri gürültüde stop'luyordu.
+CONFIRM_ATR_MULTIPLIER = 2.5   # Stop distance at confirmation (ölçümle: geniş stop kazanıyor)
 CONFIRM_TARGET_R = 2.0         # Target = entry + R × this (was 3.0 — too greedy)
 
+# 2026-07-26: cap'ler genişletildi (%8-12 → %14-18). Aynı ölçüm: stop 2.5x ATR
+# hesaplansa bile eski dar cap'ler onu %8-10'a kırpıp "geniş stop" kazanımını
+# yok ediyordu. cap%15 bandı EV/WR artışının çoğunu yakalar, stop3.0/cap%20'nin
+# geniş kuyruk riskinden (%5 en kötü −19~−22) kaçınır. Chandelier trail zaten
+# kârı kilitliyor; bu cap yalnız BAŞLANGIÇ stop'un ne kadar nefes alacağını belirler.
 MAX_STOP_BY_TYPE = {
-    'C': 0.08,   # Early entry — lower volatility expected
-    'A': 0.10,   # Continuation
-    'B': 0.10,   # Momentum
-    'S': 0.12,   # Squeeze — wider swings normal
+    'C': 0.14,   # Early entry — lower volatility expected
+    'A': 0.15,   # Continuation
+    'B': 0.16,   # Momentum
+    'S': 0.18,   # Squeeze — wider swings normal
 }
-MAX_STOP_DEFAULT = 0.10
+MAX_STOP_DEFAULT = 0.15
 
 # PENDING: if still unresolved after this many calendar days, auto-REJECT (data gaps / user never opened UI)
 MAX_STALE_PENDING_CALENDAR_DAYS = 14

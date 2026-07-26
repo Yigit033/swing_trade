@@ -43,7 +43,9 @@ class DataFetcher:
     @staticmethod
     def _drop_incomplete_last_bar(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
         """
-        Drop today's bar if the US session hasn't closed yet (before 16:00 ET).
+        Drop today's bar if the US session hasn't closed yet (before 16:00 ET),
+        AND drop the last bar if its OHLC is corrupt (provider glitch) regardless
+        of date.
 
         During market hours / premarket, providers return today's row with
         PARTIAL volume and a moving close. Every volume-relative check
@@ -52,6 +54,16 @@ class DataFetcher:
         ~always (the "0.1x volume surge on every stock" artifact). Daily-bar
         rules are only decidable on COMPLETED bars — intraday scans must
         evaluate the last completed session.
+
+        2026-07-25: the date-equality check alone missed a real failure mode —
+        yfinance occasionally returns the most recent COMPLETED trading day
+        with a populated Volume but NaN OHLC (upstream data-provider glitch,
+        not an incomplete-session artifact). That NaN row is only ~1/62 of the
+        series so _validate_ohlcv_data's 10% threshold lets it through, and it
+        silently poisons every rolling calc downstream (MA/ATR/VCE trigger —
+        `close > ma50` etc. all evaluate to False on NaN, masquerading as a
+        real rejection). Drop ANY trailing row with a NaN in OHLC, independent
+        of the "is it today" check above.
         """
         if df is None or len(df) == 0 or 'Date' not in df.columns:
             return df
@@ -62,9 +74,20 @@ class DataFetcher:
             if last_date == now_et.date() and now_et.hour < 16:
                 logger.debug("Dropping incomplete intraday bar (%s, %02d:%02d ET)",
                              last_date, now_et.hour, now_et.minute)
-                return df.iloc[:-1].reset_index(drop=True)
+                df = df.iloc[:-1].reset_index(drop=True)
+                if len(df) == 0:
+                    return df
         except Exception:
             pass
+
+        ohlc_cols = [c for c in ('Open', 'High', 'Low', 'Close') if c in df.columns]
+        if ohlc_cols and df[ohlc_cols].iloc[-1].isna().any():
+            logger.warning(
+                "Dropping trailing bar with NaN OHLC (date=%s) — provider glitch, not a real session",
+                df['Date'].iloc[-1],
+            )
+            df = df.iloc[:-1].reset_index(drop=True)
+
         return df
 
     def fetch_stock_data(

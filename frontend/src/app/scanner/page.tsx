@@ -84,6 +84,29 @@ function ScanHealthBanners({ stats }: { stats: Record<string, unknown> }) {
     );
 }
 
+/** Sinyalin hangi tetikleyici kapıdan geldiğini gösterir (v14: VCE + RVOL thrust). */
+function PathwayBadge({ pathway }: { pathway?: string }) {
+    if (!pathway) return null;
+    const isRvol = pathway === "rvol_thrust";
+    return (
+        <span
+            className="badge"
+            style={{
+                background: isRvol ? "rgba(168,85,247,0.15)" : "rgba(59,130,246,0.15)",
+                color: isRvol ? "#c084fc" : "#60a5fa",
+                fontSize: "0.62rem",
+                fontWeight: 700,
+                letterSpacing: "0.03em",
+            }}
+            title={isRvol
+                ? "RVOL Thrust: anormal hacim patlaması + yeşil + MA20 üstü (ikinci pathway)"
+                : "VCE: volatilite sıkışması → kırılım (birincil pathway)"}
+        >
+            {isRvol ? "⚡ RVOL" : "🎯 VCE"}
+        </span>
+    );
+}
+
 function QualityBadge({ score }: { score: number }) {
     const cls = score >= 80 ? "badge-green" : score >= 65 ? "badge-blue" : "badge-yellow";
     const emoji = score >= 80 ? "🔥" : score >= 65 ? "✅" : "⚠️";
@@ -146,6 +169,7 @@ function SignalCard({ s, onTrack, tracking }: { s: Signal; onTrack: (s: Signal) 
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     <span style={{ fontSize: "1.05rem", fontWeight: 800, color: "var(--accent)" }}>{s.ticker}</span>
                     <TypeLabel type={s.swing_type} label={s.swing_type_label} />
+                    <PathwayBadge pathway={s.trigger_pathway} />
                     <span>{qualityEmoji} {qualityLabel}</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

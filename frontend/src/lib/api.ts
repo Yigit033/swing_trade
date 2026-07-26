@@ -103,6 +103,9 @@ export interface Signal {
     ticker: string;
     date?: string;
     signal_type?: string;
+    // v14: hangi tetikleyici kapıdan geldi — 'vce_breakout' | 'rvol_thrust'
+    trigger_pathway?: string;
+    trigger_reason?: string;
     entry_price: number;
     stop_loss: number;
     target_1: number;

@@ -35,8 +35,9 @@ def test_default_matches_known_engine_constants():
     assert d.max_entry_rsi == 70
     assert d.volume_surge_trigger == 2.0
     assert d.min_atr_percent == 0.03
-    assert d.stop_atr_multiplier == 2.0
-    assert d.max_stop_by_type["C"] == 0.08
+    # 2026-07-26: exit ölçümü sonrası geniş stop (bkz. exit_lab_vce_rvol.py)
+    assert d.stop_atr_multiplier == 2.5
+    assert d.max_stop_by_type["C"] == 0.14
     assert d.type_atr_multipliers["S"] == 2.5
     assert d.min_rr_at_entry == 1.2
     assert d.regime_thresholds.bear_confirmed_min_quality == 80

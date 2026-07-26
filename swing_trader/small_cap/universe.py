@@ -487,6 +487,45 @@ class SmallCapUniverse:
                 frames.append(df6b)
 
             # ============================================================
+            # QUERY 7: RVOL THRUST FEED (v14 — 2026-07-26)
+            # İkinci sinyal pathway'i RVOL thrust'ı besler (signals.py
+            # check_rvol_thrust): anormal hacim + yeşil + MA20 üstü. Q6/Q6b
+            # "20g yeni zirve" ister; RVOL thrust hisse ZİRVEDE OLMADAN da
+            # ateşleyebildiği için Q6/Q6b onun %25'ini kaçırıyordu — ve ölçümde
+            # o kaçırılan %25, yakalananlardan DAHA İYİ edge veriyordu (exit-EV
+            # +3.08% vs +1.34%, WR %67 vs %60). Bu sorgu o boşluğu kapatır.
+            # Finviz karşılığı: RelVol>2 + Change:Up + SMA20 üstü. Canlı testte
+            # dar (bugün 2+9=11 ticker) — tarama maliyeti ihmal edilebilir, çöp
+            # patlaması yok. Motorun RVOL thrust trigger'ı (RelVol>=2.5) son
+            # kararı verir; bu sorgu yalnız aday havuzunu besler.
+            # ============================================================
+            q7_filters = {
+                'Market Cap.': 'Small ($300mln to $2bln)',
+                'Price': 'Over $7',
+                'Country': 'USA',
+                'Average Volume': 'Over 500K',
+                'Relative Volume': 'Over 2',
+                'Change': 'Up',
+                '20-Day Simple Moving Average': 'Price above SMA20',
+            }
+            df7 = self._run_finviz_query(q7_filters, "RVOL THRUST (small)")
+            if len(df7) > 0:
+                frames.append(df7)
+
+            q7b_filters = {
+                'Market Cap.': 'Mid ($2bln to $10bln)',
+                'Price': 'Over $7',
+                'Country': 'USA',
+                'Average Volume': 'Over 1M',
+                'Relative Volume': 'Over 2',
+                'Change': 'Up',
+                '20-Day Simple Moving Average': 'Price above SMA20',
+            }
+            df7b = self._run_finviz_query(q7b_filters, "RVOL THRUST (mid)")
+            if len(df7b) > 0:
+                frames.append(df7b)
+
+            # ============================================================
             # MERGE & DEDUPLICATE
             # ============================================================
             if not frames:

@@ -123,12 +123,17 @@ class SmallCapSettings(BaseModel):
     # (was 14). Validated on live Finviz universe (1606 VCE signals, OOS):
     # this exit profile lifts EV/trade from -0.26% (capped) to +0.94% with
     # 56% win rate. See scripts/exit_strategy_lab.py.
-    stop_atr_multiplier: float = Field(default=2.0, ge=0.5, le=5.0)
+    # 2026-07-26: stop 2.0→2.5, cap'ler genişletildi. Exit ölçümü
+    # (scripts/exit_lab_vce_rvol.py) canlı tracker mantığıyla doğruladı: geniş
+    # ATR stop iyi trade'leri gürültüde stop'lamayı bırakınca EV+WR monoton
+    # artıyor (VCE +1.97→+2.64%, WR %49→%60). Cap'ler tracker.MAX_STOP_BY_TYPE
+    # ile AYNI olmalı (sinyal üretimi + confirm tutarlılığı).
+    stop_atr_multiplier: float = Field(default=2.5, ge=0.5, le=5.0)
     min_stop_percent: float = Field(default=0.03, ge=0.01, le=0.25)
-    max_stop_percent_fallback: float = Field(default=0.10, ge=0.03, le=0.3)
+    max_stop_percent_fallback: float = Field(default=0.15, ge=0.03, le=0.3)
     max_holding_days: int = Field(default=20, ge=1, le=60)
     max_stop_by_type: Dict[str, float] = Field(
-        default_factory=lambda: {"C": 0.08, "A": 0.10, "B": 0.11, "S": 0.12}
+        default_factory=lambda: {"C": 0.14, "A": 0.15, "B": 0.16, "S": 0.18}
     )
     type_position_caps: Dict[str, float] = Field(
         default_factory=lambda: {"C": 0.25, "A": 0.25, "B": 0.20, "S": 0.15}
