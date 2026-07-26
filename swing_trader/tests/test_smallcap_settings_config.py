@@ -40,7 +40,9 @@ def test_default_matches_known_engine_constants():
     assert d.max_stop_by_type["C"] == 0.14
     assert d.type_atr_multipliers["S"] == 2.5
     assert d.min_rr_at_entry == 1.2
-    assert d.regime_thresholds.bear_confirmed_min_quality == 80
+    # 2026-07-27: eşikler kanıta göre yükseltildi (measure_score_edge.py)
+    assert d.regime_thresholds.bear_confirmed_min_quality == 82
+    assert d.regime_thresholds.bull_min_quality == 78  # yeni: BULL floor
 
 
 def test_load_partial_merge_over_defaults():
@@ -78,7 +80,7 @@ def test_apply_settings_patch_persists_and_merges():
         assert out.max_entry_rsi == 66
         assert out.regime_thresholds.bear_tentative_min_quality == 71
         # unrelated regime field preserved from previous merge
-        assert out.regime_thresholds.bear_confirmed_min_quality == 80
+        assert out.regime_thresholds.bear_confirmed_min_quality == 82
         reloaded = load_settings(p)
         assert reloaded.max_entry_rsi == 66
 

@@ -58,18 +58,32 @@ class TypeTargetCaps(BaseModel):
 
 
 class RegimeThresholds(BaseModel):
-    """Floors for min_quality and caps for top_n (see thresholds.effective_scan_thresholds)."""
+    """Floors for min_quality and caps for top_n (see thresholds.effective_scan_thresholds).
+
+    2026-07-27: BULL floor eklendi + değerler kanıta göre ayarlandı
+    (scripts/measure_score_edge.py, 469 gerçek sinyal). Eski durumda BULL'un
+    hiç tabanı yoktu (regime_min=0), efektif eşik UI değerine (65) ve
+    engine.py'nin ayrı 60 eşiğine düşüyordu → Q60-70 bandı (~0% getiri)
+    kullanıcıya gösteriliyordu. Ölçülen tatlı noktalar:
+      BULL:    Q78 → EV +3.86% WR %60 (67 sinyal, hâlâ bol) [Q60: +0.81% %48]
+      CAUTION: hiçbir eşik kârlı değil (Q80'de bile −0.76%) → en yükseğe çek,
+               sistem temkinli piyasada işlemden korusun
+      BEAR:    Q78 → EV +10.2% WR %80 (zaten güçlü; doğal olarak az sinyal)
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    bear_tentative_min_quality: int = Field(default=78, ge=50, le=100)
+    # BULL floor — eskiden yoktu (asıl "değersiz sinyal gösterme" kaynağı buydu)
+    bull_min_quality: int = Field(default=78, ge=50, le=100)
+    bull_top_n_max: int = Field(default=10, ge=1, le=50)
+    bear_tentative_min_quality: int = Field(default=80, ge=50, le=100)
     bear_tentative_top_n_max: int = Field(default=4, ge=1, le=50)
-    bear_confirmed_min_quality: int = Field(default=80, ge=50, le=100)
+    bear_confirmed_min_quality: int = Field(default=82, ge=50, le=100)
     bear_confirmed_top_n_max: int = Field(default=3, ge=1, le=50)
-    caution_confirmed_min_quality: int = Field(default=75, ge=50, le=100)
-    caution_confirmed_top_n_max: int = Field(default=4, ge=1, le=50)
-    caution_other_min_quality: int = Field(default=73, ge=50, le=100)
-    caution_other_top_n_max: int = Field(default=5, ge=1, le=50)
+    caution_confirmed_min_quality: int = Field(default=82, ge=50, le=100)
+    caution_confirmed_top_n_max: int = Field(default=3, ge=1, le=50)
+    caution_other_min_quality: int = Field(default=80, ge=50, le=100)
+    caution_other_top_n_max: int = Field(default=4, ge=1, le=50)
 
 
 class SmallCapSettings(BaseModel):

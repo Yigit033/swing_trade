@@ -62,14 +62,16 @@
   "slippage_bps_per_side": 5,
   "min_shares_for_partial": 2,
   "regime_thresholds": {
-    "bear_tentative_min_quality": 78,
+    "bull_min_quality": 78,
+    "bull_top_n_max": 10,
+    "bear_tentative_min_quality": 80,
     "bear_tentative_top_n_max": 4,
-    "bear_confirmed_min_quality": 80,
+    "bear_confirmed_min_quality": 82,
     "bear_confirmed_top_n_max": 3,
-    "caution_confirmed_min_quality": 75,
-    "caution_confirmed_top_n_max": 4,
-    "caution_other_min_quality": 73,
-    "caution_other_top_n_max": 5
+    "caution_confirmed_min_quality": 82,
+    "caution_confirmed_top_n_max": 3,
+    "caution_other_min_quality": 80,
+    "caution_other_top_n_max": 4
   },
   "scan_gates": {
     "parabolic_five_day_return_gt": 70.0,

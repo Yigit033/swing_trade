@@ -33,25 +33,35 @@ def effective_scan_thresholds(
                 if regime_confidence == "CONFIRMED"
                 else regime_caps.caution_other_min_quality
             )
+        elif regime == "BULL":
+            # 2026-07-27: BULL artık taban uyguluyor (eskiden 0'dı → Q60-70
+            # değersiz sinyaller geçiyordu). Ölçülen tatlı nokta Q78.
+            regime_min = regime_caps.bull_min_quality
         else:
-            regime_min = 0  # BULL / UNKNOWN — no floor applied
+            regime_min = 0  # UNKNOWN — taban yok (rejim belirsiz)
         eff_min = max(rq, regime_min)
     else:
         eff_min = rq
 
-    # Hard top_n caps per regime (explicit product rule).
-    if regime == "BEAR":
-        if regime_confidence == "TENTATIVE":
-            eff_top = min(rt, 4)
+    # Hard top_n caps per regime. 2026-07-27: hardcoded sayılar yerine
+    # regime_caps model değerlerinden okunuyor (tek kaynak — eskiden bu caps
+    # ile RegimeThresholds değerleri ayrışabiliyordu).
+    if regime_caps is not None:
+        if regime == "BEAR":
+            cap = (regime_caps.bear_tentative_top_n_max
+                   if regime_confidence == "TENTATIVE"
+                   else regime_caps.bear_confirmed_top_n_max)
+            eff_top = min(rt, cap)
+        elif regime == "CAUTION":
+            cap = (regime_caps.caution_other_top_n_max
+                   if regime_confidence != "CONFIRMED"
+                   else regime_caps.caution_confirmed_top_n_max)
+            eff_top = min(rt, cap)
+        elif regime == "BULL":
+            eff_top = min(rt, regime_caps.bull_top_n_max)
         else:
-            eff_top = min(rt, 3)
-    elif regime == "CAUTION":
-        if regime_confidence == "TENTATIVE":
-            eff_top = min(rt, 5)
-        else:
-            eff_top = min(rt, 4)
+            eff_top = rt  # UNKNOWN → user top_n
     else:
-        # BULL / UNKNOWN / other → user top_n
         eff_top = rt
 
     return eff_min, eff_top
