@@ -527,7 +527,24 @@ class SmallCapScoring:
             phase = trend_data.get('trend_phase', 'unknown')
             if phase in ('distribution', 'markdown'):
                 penalty += st.pen_weak_trend_phase
-        
+
+        # ============================================================
+        # SPREAD/SLIPPAGE RİSK CEZASI (S1 — 2026-07-27)
+        # ============================================================
+        # Gerçek order-book/spread verimiz yok (yfinance vermiyor). Proxy:
+        # düşük dolar-hacim + yüksek ATR% = geniş spread/kayma riski. Ölçüldü
+        # (measure_score_edge): ATR>8% sinyaller EV −6.90% (kaybettiriyor,
+        # ama nadir %1). Bu tür girişler limit-emir gerektirir; skoru düşürüp
+        # sıralamada aşağı çekiyoruz. df + atr_percent zaten mevcut.
+        try:
+            if df is not None and len(df) >= 20:
+                _dollar_vol = float((df['Volume'].tail(20) * df['Close'].tail(20)).mean())
+                _atr_p = atr_percent * 100 if atr_percent < 1 else atr_percent  # normalize %
+                if _dollar_vol < 7_000_000 and _atr_p > 8.0:
+                    penalty += st.pen_spread_risk
+        except Exception:
+            pass
+
         bonus = min(bonus, st.bonus_cap)
 
         final_score = total + bonus - penalty

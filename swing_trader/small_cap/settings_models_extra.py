@@ -447,6 +447,9 @@ class ScoringTuningSettings(BaseModel):
     pen_ma20_falling: int = Field(default=8, ge=0, le=20)
     pen_rejection_candle: int = Field(default=12, ge=0, le=25)
     pen_weak_trend_phase: int = Field(default=8, ge=0, le=20)
+    # S1 (2026-07-27): spread/slippage risk proxy — düşük dolar-hacim + yüksek
+    # ATR%. Ölçüm: ATR>8% sinyaller EV −6.90%. Skoru düşürüp sıralamada iner.
+    pen_spread_risk: int = Field(default=12, ge=0, le=30)
     bonus_volume_on_up_day: int = Field(default=5, ge=0, le=20, description="Bonus when volume surge arrives on an UP day (accumulation signal)")
 
 

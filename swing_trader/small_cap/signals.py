@@ -534,6 +534,14 @@ class SmallCapSignals:
     VCE_BREAKOUT_LOOKBACK = 20     # close must exceed prior 20-day high
     VCE_VOLUME_MULT = 1.5          # premium tier: breakout volume >= 1.5x 20d avg (scoring)
     VCE_CLOSE_POS_MIN = 0.6        # premium tier: close in upper 40% of range (scoring)
+    # 2026-07-27: VCE'ye ZORUNLU hacim barajı (fakeout filtresi). Ölçüldü
+    # (scripts/measure_score_edge.py, 389 VCE sinyali): hacim şartsız EV +1.55%
+    # WR %51 PF 1.43 → RVOL>=1.5x zorunlu: EV +3.64% WR %54 PF 2.13 (2.3x getiri).
+    # KRİTİK: 2.0x ve üstü TERS çalışıyor (EV +2.18 düşer — çok yüksek hacim =
+    # geç/chase). Sweet spot 1.5x. Metrik 50-GÜNLÜK ort hacme göre RVOL
+    # (calculate_volume_surge ile aynı; premium'daki 20g vol_ratio DEĞİL).
+    VCE_MIN_RVOL_GATE = 1.5        # zorunlu: breakout günü hacmi >= 1.5x 50g ort
+    VCE_RVOL_BASELINE_DAYS = 50
 
     # ── RVOL THRUST (v14 — SECOND SIGNAL PATHWAY) ─────────────────────────
     # 2026-07-26: discovered via scripts/discover_signal_families.py + validated
@@ -673,6 +681,20 @@ class SmallCapSignals:
             ma50 = float(close.rolling(50).mean().iloc[-1])
             if np.isnan(ma50) or c <= ma50:
                 return False, f"Below MA50 ({c:.2f} <= {ma50:.2f})", metrics
+
+            # 5. ZORUNLU HACİM BARAJI (2026-07-27 — fakeout filtresi, ÖLÇÜLDÜ).
+            # Hacimsiz kırılım small-cap'te büyük oranda sahte (fakeout). RVOL
+            # (bugünkü hacim / 50g ort) >= 1.5x zorunlu. Sweet spot 1.5x —
+            # ölçümde 2.0x+ TERS çalışıyor (chase), o yüzden bu bir ALT baraj,
+            # üst sınır yok. RVOL burada da metrics['rvol_50']'e yazılır.
+            vol50 = float(volume.rolling(self.VCE_RVOL_BASELINE_DAYS).mean().iloc[-1])
+            rvol50 = float(volume.iloc[-1]) / vol50 if vol50 > 0 else 0.0
+            metrics['rvol_50'] = round(rvol50, 2)
+            if rvol50 < self.VCE_MIN_RVOL_GATE:
+                return False, (
+                    f"Hacimsiz kırılım — RVOL {rvol50:.1f}x < {self.VCE_MIN_RVOL_GATE}x "
+                    f"(fakeout riski)"
+                ), metrics
 
             # ---- Premium-tier metrics (scoring only, NOT hard gates) ----
             vol20 = float(volume.rolling(20).mean().iloc[-1])

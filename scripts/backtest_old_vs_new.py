@@ -55,14 +55,20 @@ def enrich(df):
 
 
 def sig_vce(df, t):
-    """VCE Variant B: squeeze + breakout + green + MA50 (signals.py ile aynı)."""
+    """VCE Variant B: squeeze + breakout + green + MA50 + ZORUNLU RVOL>=1.5x.
+    2026-07-27: hacim barajı eklendi (signals.check_vce_breakout ile aynı —
+    hacimsiz kırılım fakeout riski, ölçüm: EV +1.55→+3.64% PF 1.43→2.13).
+    NOT: bu ham-sinyal harness'ı artık aşıldı; canlı-birebir için
+    backtest_live_replica.py gerçek scan_stock'u çağırır (bu gate dahil)."""
     a = df["atr_pct"].iloc[t - 1]; b = df["atr_pct"].iloc[t - 20:t - 5].mean()
     if pd.isna(a) or pd.isna(b) or b <= 0 or a >= b * 0.8:
         return False
     c = df["Close"].iloc[t]; hi = df["hi20"].iloc[t - 1]; ma50 = df["ma50"].iloc[t]
     if pd.isna(hi) or pd.isna(ma50):
         return False
-    return c > hi > 0 and c > df["Close"].iloc[t - 1] and c > ma50
+    vol50 = df["vol50"].iloc[t]
+    rvol = df["Volume"].iloc[t] / vol50 if vol50 > 0 else 0
+    return c > hi > 0 and c > df["Close"].iloc[t - 1] and c > ma50 and rvol >= 1.5
 
 
 def sig_rvol(df, t):

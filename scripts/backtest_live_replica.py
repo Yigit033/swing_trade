@@ -97,9 +97,28 @@ def finviz_hit(row, mcap):
 
 
 # ══════════════════════════════════════════════════════════════════════
-# EXIT SİMÜLASYONU (eski dar vs yeni geniş)
+# EXIT SİMÜLASYONU (eski dar vs yeni geniş) + SENTETİK SLIPPAGE (S1)
 # ══════════════════════════════════════════════════════════════════════
-def simulate(df, t, cfg):
+def _slippage_bps(df, t):
+    """S1 (2026-07-27): gerçekçi kayma tahmini (spread verisi yok → proxy).
+    Small-cap'te spread ≈ likidite azlığı + oynaklık. Dolar-hacim düşük ve/veya
+    ATR yüksekse giriş/çıkışta daha çok kayarsın. Backtest'i canlıya yaklaştırır
+    (kâğıt-üstü kârın slippage'te erimesini modeller). Tek yönlü bps döndürür."""
+    try:
+        dvol = float((df["Volume"].tail(20) * df["Close"].tail(20)).mean())
+        atrp = float(df["atr_pct"].iloc[t])
+    except Exception:
+        return 15.0  # bilinmiyorsa temkinli varsayım
+    slip = 8.0  # taban: likit small-cap ~8bps tek yön
+    if dvol < 3_000_000: slip += 25
+    elif dvol < 7_000_000: slip += 12
+    elif dvol < 15_000_000: slip += 5
+    if atrp > 8: slip += 20
+    elif atrp > 5: slip += 8
+    return slip
+
+
+def simulate(df, t, cfg, apply_slippage=True):
     o = df["Open"].astype(float).values; c = df["Close"].astype(float).values
     h = df["High"].astype(float).values; low = df["Low"].astype(float).values
     n = len(df); e = t + 1
@@ -108,6 +127,8 @@ def simulate(df, t, cfg):
     entry = o[e]; atr = float(df["atr"].iloc[t])
     if entry <= 0 or atr <= 0:
         return None
+    # Slippage: giriş + çıkış = 2 yön. Toplam getiriden düş (gerçekçilik).
+    slip_pct = (2 * _slippage_bps(df, t) / 10000.0) if apply_slippage else 0.0
     raw_stop = entry - cfg["stop_atr"] * atr
     cap_stop = entry * (1 - cfg["max_stop_pct"])
     stop = max(raw_stop, cap_stop)
@@ -134,7 +155,7 @@ def simulate(df, t, cfg):
                 stop = nt
     if pos > 0:
         realized += pos * (c[last] / entry - 1)
-    return realized * 100
+    return (realized - slip_pct) * 100  # slippage cezasını düş
 
 
 EXIT_OLD = dict(stop_atr=1.5, max_stop_pct=0.10, t1_pct=0.10, t1_frac=0.5,
