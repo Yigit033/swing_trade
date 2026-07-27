@@ -418,6 +418,8 @@ export interface BacktestResult {
     end_date: string;
     tickers_used: string[];
     initial_capital: number;
+    /** Finviz evreni geçmişe uygulandıysa survivorship-bias uyarısı (v33) */
+    survivorship_warning?: string | null;
     min_quality?: number;
     top_n?: number;
     /** Tickers with enough bars to participate in simulation */

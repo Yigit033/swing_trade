@@ -355,6 +355,20 @@ export default function BacktestPage() {
                         </div>
                     ) : (
                         <>
+                            {/* Survivorship bias uyarısı (Finviz evreni geçmişe uygulandıysa) */}
+                            {(() => {
+                                const sw = result.survivorship_warning;
+                                if (!sw) return null;
+                                return (
+                                    <div style={{
+                                        background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.35)",
+                                        borderRadius: 10, padding: "12px 16px", marginBottom: 16,
+                                        fontSize: "0.82rem", color: "#f59e0b", lineHeight: 1.5,
+                                    }}>
+                                        {sw}
+                                    </div>
+                                );
+                            })()}
                             {/* Key metrics */}
                             <div className="metrics-grid" style={{ marginBottom: 20 }}>
                                 <MetricBox label="Toplam Trade" value={`${m.total_trades}`} sub={`${m.winning_trades}W / ${m.losing_trades}L`} />

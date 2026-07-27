@@ -44,6 +44,7 @@ def run_smallcap_backtest(body: BacktestRequest):
         backtester = SmallCapBacktester(config=None)
 
         # Resolve ticker list: explicit [] must not fall through to Finviz
+        survivorship_warning = None
         if body.tickers is not None:
             tickers = [t.strip().upper() for t in body.tickers if t.strip()]
             if not tickers:
@@ -54,6 +55,16 @@ def run_smallcap_backtest(body: BacktestRequest):
             tickers = engine.get_small_cap_universe()
             if not tickers:
                 return {"error": "No tickers found from Finviz universe", "results": None}
+            # 2026-07-27: Finviz evreni BUGÜNKÜ listeyi geçmişe uygular →
+            # survivorship bias (bugün kazanan hisselerle geçmişi test etmek
+            # sonucu AŞIRI İYİMSER gösterir). Kullanıcı bunu bilmeli.
+            survivorship_warning = (
+                "⚠️ Bu backtest BUGÜNKÜ Finviz evrenini geçmişe uyguladı "
+                "(survivorship bias). Bugün var olan/kazanan hisselerle geçmişi "
+                "test etmek sonucu GERÇEKTEN İYİMSER gösterir — canlı performans "
+                "daha düşük olabilir. Gerçekçi ölçüm için scripts/backtest_live_replica.py "
+                "(point-in-time evren) kullanılır."
+            )
 
         logger.info(f"Backtest: {len(tickers)} tickers, {start_date.date()} → {end_date.date()}")
 
@@ -87,6 +98,7 @@ def run_smallcap_backtest(body: BacktestRequest):
             "metrics":        results.get("metrics", {}),
             "equity_curve":   results.get("equity_curve", []),
             "trades":         results.get("trades", []),
+            "survivorship_warning": survivorship_warning,
         })
 
     except Exception as e:
