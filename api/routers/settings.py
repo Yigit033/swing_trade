@@ -70,6 +70,16 @@ def _reset_smallcap_settings():
 
     s = default_settings()
     save_settings(s)
+    # Kalıcı DB yamasını da temizle — aksi halde reset yalnız dosyayı sıfırlar,
+    # sonraki load_settings() DB yamasını yeniden bindirir ve reset "işlemedi"
+    # görünür (2026-08-03 kalıcılık katmanı eklendiğinde ortaya çıkan tuzak).
+    try:
+        from swing_trader.data.settings_storage import clear_patch, is_enabled
+
+        if is_enabled():
+            clear_patch()
+    except Exception:
+        logger.exception("Ayar DB yaması temizlenemedi (reset kısmi kaldı)")
     invalidate_smallcap_engine_cache()
     logger.info("Small-cap settings reset to defaults; engine cache cleared")
     return sanitize_for_json({"ok": True, "settings": s.model_dump(mode="json")})

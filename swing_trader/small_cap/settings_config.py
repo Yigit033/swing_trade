@@ -235,26 +235,57 @@ def default_settings() -> SmallCapSettings:
     return SmallCapSettings()
 
 
+def _db_overlay() -> Dict[str, Any]:
+    """
+    Kalıcı (DB) kullanıcı yamasını getir. DB yok/erişilemiyorsa {}.
+
+    2026-08-03: fly.io'da mount olmadığı için dosyaya yazılan UI ayarları her
+    deploy'da siliniyordu (kullanıcının açtığı auto-scan sessizce kapandı).
+    Kalıcılık artık DB'de; dosya katmanı git-varsayılanı olarak kalıyor.
+    """
+    try:
+        from swing_trader.data.settings_storage import load_patch
+
+        return load_patch()
+    except Exception as e:  # modül yokluğu / beklenmeyen hata ürünü kilitlemesin
+        logger.debug("Settings DB overlay atlandı: %s", e)
+        return {}
+
+
 def load_settings(path: Optional[Path] = None) -> SmallCapSettings:
     """
-    Merge JSON file over defaults and return a validated SmallCapSettings.
-    Missing file → defaults only.
+    Katmanlı yükleme (en zayıftan en güçlüye):
+
+        kod varsayılanları  →  JSON dosyası (git)  →  DB yaması (UI değişikliği)
+
+    Dosya yoksa varsayılanlar, DB yoksa dosya katmanı kullanılır.
     """
     p = path or DEFAULT_SETTINGS_PATH
     base = SmallCapSettings().model_dump(mode="json")
-    if not p.exists():
+
+    if p.exists():
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raise ValueError("settings file must be a JSON object")
+            base = _deep_merge(base, raw)
+        except Exception as e:
+            logger.error("Failed to load %s: %s — using defaults", p, e)
+    else:
         logger.debug("Small-cap settings file missing, using defaults: %s", p)
-        return SmallCapSettings.model_validate(base)
+
+    # Açık bir `path` verilmişse (testler, geçici dosyalar) DB katmanı bindirilmez —
+    # o çağrı bilinçli olarak izole bir dosyayı okumak istiyordur.
+    if path is None:
+        overlay = _db_overlay()
+        if overlay:
+            base = _deep_merge(base, overlay)
 
     try:
-        raw = json.loads(p.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            raise ValueError("settings file must be a JSON object")
-        merged = _deep_merge(base, raw)
-        return SmallCapSettings.model_validate(merged)
-    except Exception as e:
-        logger.error("Failed to load %s: %s — using defaults", p, e)
         return SmallCapSettings.model_validate(base)
+    except Exception as e:
+        logger.error("Settings validation failed: %s — using defaults", e)
+        return SmallCapSettings.model_validate(SmallCapSettings().model_dump(mode="json"))
 
 
 def save_settings(settings: SmallCapSettings, path: Optional[Path] = None) -> None:
@@ -272,7 +303,16 @@ def apply_settings_patch(
     patch: Dict[str, Any], path: Optional[Path] = None
 ) -> SmallCapSettings:
     """
-    Deep-merge ``patch`` onto current file-backed settings, validate, and persist.
+    ``patch``'i mevcut ayarların üstüne birleştir, doğrula ve KALICI olarak sakla.
+
+    Kalıcılık iki katmanlı:
+      1. DB yaması (varsa) — deploy'lardan sağ çıkar, asıl kaynak burasıdır.
+      2. JSON dosyası — yerel geliştirme ve DB'siz kurulum için.
+
+    Sadece kullanıcının GÖNDERDİĞİ alanlar yama olarak saklanır (tam anlık görüntü
+    değil). Böylece kod/git varsayılanları ileride değişirse (ör. ölçümle
+    yükseltilen eşikler) kullanıcının dokunmadığı alanlar yeni değeri alır —
+    donmuş eski bir kopya yeni kalibrasyonu sessizce ezmez.
 
     Raises pydantic.ValidationError if the merged result is invalid.
     """
@@ -281,5 +321,30 @@ def apply_settings_patch(
     current = load_settings(path=path).model_dump(mode="json")
     merged = _deep_merge(current, patch)
     validated = SmallCapSettings.model_validate(merged)
+
+    # Dosya katmanı (yerel geliştirme + DB'siz kurulum)
     save_settings(validated, path=path)
+
+    # DB katmanı: birikimli yama (önceki yamanın üstüne bu yama)
+    if path is None:
+        try:
+            from swing_trader.data.settings_storage import (
+                is_enabled, load_patch, save_patch,
+            )
+
+            if is_enabled():
+                cumulative = _deep_merge(load_patch(), patch)
+                if not save_patch(cumulative):
+                    logger.warning(
+                        "Ayar DB'ye yazılamadı — yalnız dosyaya kaydedildi, "
+                        "bir sonraki deploy'da kaybolabilir."
+                    )
+            else:
+                logger.info(
+                    "DATABASE_URL yok — ayar yalnız dosyaya kaydedildi "
+                    "(fly.io'da deploy sonrası kaybolur)."
+                )
+        except Exception as e:
+            logger.error("Ayar kalıcılığı (DB) başarısız: %s", e)
+
     return validated
