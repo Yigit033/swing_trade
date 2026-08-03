@@ -81,17 +81,20 @@ def finviz_hit(row, mcap):
     rvol = row["Volume"] / row["avgvol50"] if row["avgvol50"] > 0 else 0
     green = row["chg"] > 0
 
-    # Q6 (small): 20g yeni zirve + SMA50 üstü + avgvol>500K
-    if small and av > 500e3 and above50 and new20:
+    # 2026-08-03: canlı sorgular 500K/1M → 300K/500K bandına gevşetildi
+    # (analyze_signal_lab.py: +%23 sinyal, ek EV +2.16%, OOS'ta tutuyor).
+    # Harness bandı canlıyla AYNI kalmalı — yoksa backtest artık ürünü ölçmez.
+    # Q6 (small): 20g yeni zirve + SMA50 üstü + avgvol>300K
+    if small and av > 300e3 and above50 and new20:
         return True
-    # Q6b (mid): avgvol>1M
-    if mid and av > 1e6 and above50 and new20:
+    # Q6b (mid): avgvol>500K
+    if mid and av > 500e3 and above50 and new20:
         return True
-    # Q7 (small): RVOL>2 + yeşil + SMA20 üstü + avgvol>500K
-    if small and av > 500e3 and rvol > 2 and green and above20:
+    # Q7 (small): RVOL>2 + yeşil + SMA20 üstü + avgvol>300K
+    if small and av > 300e3 and rvol > 2 and green and above20:
         return True
-    # Q7b (mid): avgvol>1M
-    if mid and av > 1e6 and rvol > 2 and green and above20:
+    # Q7b (mid): avgvol>500K
+    if mid and av > 500e3 and rvol > 2 and green and above20:
         return True
     return False
 

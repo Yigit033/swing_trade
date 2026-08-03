@@ -23,6 +23,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ── Finviz keşif bantları — TEK KAYNAK ───────────────────────────────────
+# Q6/Q6b/Q7/Q7b sorgularının "Average Volume" eşiği. Burada durmalarının sebebi
+# canlı ile backtest harness'ının (scripts/backtest_live_replica.py finviz_hit)
+# AYNI bandı kullanmak zorunda olması — ayrışırlarsa backtest artık ürünü ölçmez.
+#
+# 2026-08-03: 500K/1M → 300K/500K (ÖLÇÜLDÜ, curve-fit değil).
+#   Sebep : canlı üretim ~0.6 Q80 sinyal/ay; profesyonel pratik 4-12 işlem/ay.
+#   Ölçüm : scripts/analyze_signal_lab.py — 108 sinyal / 21 ay, 8 kapı tek tek
+#           gevşetildi. Dolar-hacim, mcap ve fiyat kapılarını gevşetmek HİÇ ek
+#           sinyal getirmedi; yalnız bu bant getirdi.
+#   Sonuç : +20 sinyal (%23), ek sinyallerin EV'si +2.16%, toplam EV +2.32% →
+#           +2.29% (seyrelme yok), OOS (2025-06-01) train +2.34% / test +2.25%.
+#   Not   : Likidite standardı DÜŞMEDİ — motorun $5M/gün dolar-hacim hard-gate'i
+#           (filters.apply_all_filters) aynen duruyor. Bu yalnız KEŞİF katmanı.
+FINVIZ_MIN_AVG_VOLUME_SMALL = "Over 300K"
+FINVIZ_MIN_AVG_VOLUME_MID = "Over 500K"
+
 _TICKER_SAFE_OVERVIEW_CLS = None
 
 
@@ -462,11 +479,22 @@ class SmallCapUniverse:
             # squeeze breakout. The engine then confirms the squeeze itself.
             # No volatility/RSI/float cap — the validated rule has none.
             # ============================================================
+            # 2026-08-03 — KEŞİF GENİŞLETMESİ (ölçülmüş): 'Over 500K' → 'Over 300K'.
+            # Gerekçe: canlı üretim ~0.6 Q80 sinyal/ay veriyordu; profesyonel swing
+            # pratiği 4-12 işlem/ay. scripts/analyze_signal_lab.py (108 sinyal, 21 ay)
+            # sekiz kapıyı tek tek gevşetti; dolar-hacim/mcap/fiyat kapılarını
+            # gevşetmek HİÇ ek sinyal getirmedi, yalnız bu bant getirdi:
+            #   +20 sinyal (%23 artış), ek sinyallerin EV'si +2.16% (pozitif),
+            #   toplam EV +2.32% → +2.29% (seyrelme yok), OOS'ta da tutuyor
+            #   (2025-06-01 kesimi: train +2.34% / test +2.25%).
+            # Likidite standardı DÜŞMÜYOR: motorun $5M/gün dolar-hacim hard-gate'i
+            # (filters.apply_all_filters) aynen duruyor. Bu yalnız KEŞİF katmanı —
+            # havuza daha çok aday girer, kararı yine motor verir.
             q6_filters = {
                 'Market Cap.': 'Small ($300mln to $2bln)',
                 'Price': 'Over $7',
                 'Country': 'USA',
-                'Average Volume': 'Over 500K',
+                'Average Volume': FINVIZ_MIN_AVG_VOLUME_SMALL,
                 '50-Day Simple Moving Average': 'Price above SMA50',
                 '20-Day High/Low': 'New High',
             }
@@ -474,11 +502,13 @@ class SmallCapUniverse:
             if len(df6) > 0:
                 frames.append(df6)
 
+            # Mid bandı da aynı ölçümle gevşetildi: 'Over 1M' → 'Over 500K'
+            # (harness'ın topladığı bant: small 300K / mid 500K).
             q6b_filters = {
                 'Market Cap.': 'Mid ($2bln to $10bln)',
                 'Price': 'Over $7',
                 'Country': 'USA',
-                'Average Volume': 'Over 1M',
+                'Average Volume': FINVIZ_MIN_AVG_VOLUME_MID,
                 '50-Day Simple Moving Average': 'Price above SMA50',
                 '20-Day High/Low': 'New High',
             }
@@ -499,11 +529,12 @@ class SmallCapUniverse:
             # patlaması yok. Motorun RVOL thrust trigger'ı (RelVol>=2.5) son
             # kararı verir; bu sorgu yalnız aday havuzunu besler.
             # ============================================================
+            # Hacim bandı Q6 ile aynı ölçüme göre gevşetildi (500K → 300K).
             q7_filters = {
                 'Market Cap.': 'Small ($300mln to $2bln)',
                 'Price': 'Over $7',
                 'Country': 'USA',
-                'Average Volume': 'Over 500K',
+                'Average Volume': FINVIZ_MIN_AVG_VOLUME_SMALL,
                 'Relative Volume': 'Over 2',
                 'Change': 'Up',
                 '20-Day Simple Moving Average': 'Price above SMA20',
@@ -516,7 +547,7 @@ class SmallCapUniverse:
                 'Market Cap.': 'Mid ($2bln to $10bln)',
                 'Price': 'Over $7',
                 'Country': 'USA',
-                'Average Volume': 'Over 1M',
+                'Average Volume': FINVIZ_MIN_AVG_VOLUME_MID,
                 'Relative Volume': 'Over 2',
                 'Change': 'Up',
                 '20-Day Simple Moving Average': 'Price above SMA20',

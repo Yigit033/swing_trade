@@ -49,21 +49,36 @@ def fake_db(monkeypatch):
 
 # ── Katman sırası ────────────────────────────────────────────────────────
 
-def test_db_overlay_wins_over_file(fake_db):
-    """DB yaması dosya/varsayılan değerini ezmeli — asıl bug buydu."""
-    file_value = sc.load_settings().auto_scan.enabled
-    assert file_value is False, "beklenen başlangıç: auto-scan kapalı"
+def _file_layer_value():
+    """DB katmanı olmadan dosya/koddan gelen auto_scan.enabled değeri."""
+    import json as _json
+    from pathlib import Path as _Path
+    p = _Path(sc.DEFAULT_SETTINGS_PATH)
+    if p.exists():
+        raw = _json.loads(p.read_text(encoding="utf-8"))
+        if isinstance(raw, dict) and "auto_scan" in raw and "enabled" in raw["auto_scan"]:
+            return bool(raw["auto_scan"]["enabled"])
+    return bool(sc.SmallCapSettings().auto_scan.enabled)
 
-    fake_db["patch"] = {"auto_scan": {"enabled": True}}
-    assert sc.load_settings().auto_scan.enabled is True
+
+def test_db_overlay_wins_over_file(fake_db):
+    """
+    DB yaması dosya/varsayılan değerini ezmeli — asıl bug buydu.
+    Belirli bir varsayılana bağlanmıyoruz: dosya katmanının TERSİNİ yamalayıp
+    üstün gelip gelmediğine bakıyoruz (varsayılan ileride değişse de geçerli).
+    """
+    base = _file_layer_value()
+    fake_db["patch"] = {"auto_scan": {"enabled": not base}}
+    assert sc.load_settings().auto_scan.enabled is (not base)
 
 
 def test_db_overlay_is_partial_not_snapshot(fake_db):
     """Yama yalnız bir alanı taşısa da diğer alanlar dosya/koddan gelmeli."""
-    fake_db["patch"] = {"auto_scan": {"enabled": True}}
+    base = _file_layer_value()
+    fake_db["patch"] = {"auto_scan": {"enabled": not base}}
     s = sc.load_settings()
-    assert s.auto_scan.enabled is True
-    # Dokunulmayan alan varsayılanını korur (yama tam görüntü DEĞİL)
+    assert s.auto_scan.enabled is (not base)
+    # Dokunulmayan alan değerini korur (yama tam görüntü DEĞİL)
     assert s.auto_scan.target_hour_et == 16
     # Tamamen ilgisiz bölüm de etkilenmez
     assert s.regime_thresholds.caution_other_min_quality == 80
@@ -72,7 +87,7 @@ def test_db_overlay_is_partial_not_snapshot(fake_db):
 def test_no_db_falls_back_to_file(no_db):
     """DATABASE_URL yoksa eski davranış: dosya tek kaynak, hata yok."""
     s = sc.load_settings()
-    assert s.auto_scan.enabled is False
+    assert s.auto_scan.enabled is _file_layer_value()
     assert s.regime_thresholds.caution_other_min_quality == 80
 
 

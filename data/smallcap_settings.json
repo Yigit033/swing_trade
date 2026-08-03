@@ -28,7 +28,7 @@
     "C": 1.5
   },
   "t2_atr_ratio": 1.7,
-    "type_target_caps": {
+  "type_target_caps": {
     "S": {
       "t1_max_pct": 0.12,
       "t2_max_pct": 0.65
@@ -353,7 +353,7 @@
     "weight_volatility": 0.13,
     "weight_float": 0.25,
     "weight_momentum": 0.25,
-    "weight_risk": 0.10,
+    "weight_risk": 0.1,
     "max_volume_score": 30.0,
     "max_volatility_score": 25.0,
     "max_float_score": 20.0,
@@ -441,5 +441,13 @@
     "close_trail_atr_20": 1.0,
     "close_gain_atr_15": 1.8,
     "close_trail_atr_15": 1.3
+  },
+  "auto_scan": {
+    "enabled": true,
+    "target_hour_et": 16,
+    "target_minute_et": 30,
+    "min_quality": 60,
+    "top_n": 15,
+    "portfolio_value": 10000.0
   }
 }
