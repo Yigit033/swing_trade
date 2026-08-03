@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { trackSignal, addTrade } from "@/lib/api";
 import { useScannerJob, SCAN_COMPLETE_EVENT } from "@/providers/ScannerJobProvider";
@@ -613,6 +613,11 @@ export default function ScannerPage() {
     const [minQuality, setMinQuality] = useState(65);
     const [topN, setTopN] = useState(10);
     const [portfolioValue, setPortfolioValue] = useState(10000);
+    // Auto-track effect'i [] bağımlılıkla kurulduğu için portfolioValue'yu
+    // doğrudan okusa bayat kapanış (10000) kullanırdı — sunucu boyutu yanlış
+    // tabana göre hesaplardı. Ref her render'da tazelenir.
+    const portfolioValueRef = useRef(portfolioValue);
+    portfolioValueRef.current = portfolioValue;
 
     // Auto-track settings
     const [autoTrackEnabled, setAutoTrackEnabled] = useState(true);
@@ -681,7 +686,7 @@ export default function ScannerPage() {
                 await Promise.all(
                     qualifying.map(async (s) => {
                         try {
-                            const res = await trackSignal(s);
+                            const res = await trackSignal(s, portfolioValueRef.current);
                             if (res?.status === "added") tracked.push(s.ticker);
                             else skipped.push(s.ticker);
                         } catch {
@@ -709,9 +714,13 @@ export default function ScannerPage() {
     const handleTrack = async (s: Signal) => {
         setAdding(s.ticker);
         try {
-            const res = await trackSignal(s);
+            const res = await trackSignal(s, portfolioValue);
             if (res?.status === "added") {
-                setMsg(`✅ ${s.ticker} paper trade'e eklendi! (ID: ${res.trade_id})`);
+                const sz = res.position_size;
+                const sizeNote = sz && sz !== s.position_size ? ` — boyut ${sz} hisse (risk tavanı)` : "";
+                setMsg(`✅ ${s.ticker} paper trade'e eklendi! (ID: ${res.trade_id})${sizeNote}`);
+            } else if (res?.status === "invalid_risk") {
+                setMsg(`⚠️ ${s.ticker}: giriş fiyatı stop'un üstünde değil — pozisyon boyutu hesaplanamadı, eklenmedi.`);
             } else if (res?.status === "entry_window_missed") {
                 setMsg(`⏱️ ${s.ticker}: sinyal barının ertesi açılışı geçti — ölçülen giriş penceresi kaçtı. Kapanış sonrası taramada hâlâ geçerliyse yeniden yakalanır.`);
             } else if (res?.status === "cooldown") {

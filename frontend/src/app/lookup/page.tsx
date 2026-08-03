@@ -411,7 +411,10 @@ export default function LookupPage() {
                 target: r.target_1,
             });
             if (res?.status === "added") {
-                setMsg(`✅ ${r.ticker} PENDING olarak eklendi!`);
+                const sz = res.position_size;
+                setMsg(`✅ ${r.ticker} PENDING olarak eklendi!${sz ? ` (boyut ${sz} hisse — risk tavanı)` : ""}`);
+            } else if (res?.status === "invalid_risk") {
+                setMsg(`⚠️ ${r.ticker}: giriş fiyatı stop'un üstünde değil — pozisyon boyutu hesaplanamadı`);
             } else if (res?.status === "duplicate") {
                 setMsg(`⏭️ ${r.ticker} zaten takipte (aktif PENDING/OPEN pozisyon var)`);
             } else if (res?.status === "cooldown") {

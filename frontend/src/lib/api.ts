@@ -280,7 +280,10 @@ export const runSmallcapScan = (params: {
     portfolio_value?: number;
 }) => api.post("/api/scanner/smallcap", params, { timeout: 600000 }).then((r) => r.data);
 
-export const trackSignal = (signal: Signal & { hold_days_max?: number }) =>
+export const trackSignal = (
+    signal: Signal & { hold_days_max?: number },
+    portfolioValue?: number,
+) =>
     api.post("/api/scanner/track", {
         ticker: signal.ticker,
         // Sinyal barının tarihi (tarama günü DEĞİL) — ölçülen giriş t+1 open
@@ -296,6 +299,9 @@ export const trackSignal = (signal: Signal & { hold_days_max?: number }) =>
         position_size: signal.position_size || 100,
         hold_days_max: signal.hold_days_max ?? signal.expected_hold_max ?? 7,
         atr: signal.atr || 0,
+        // Boyut sunucuda bu tabana göre YENİDEN hesaplanır (istemci boyutu yalnız
+        // üst sınır). Gönderilmezse sunucu 10k varsayar.
+        portfolio_value: portfolioValue ?? 10000,
     }).then((r) => r.data);
 
 // Market Regime

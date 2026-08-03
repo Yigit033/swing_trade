@@ -76,6 +76,53 @@ class TrackSignalRequest(BaseModel):
     hold_days_max: int = 7
     atr: Optional[float] = 0
     date: Optional[str] = None
+    # Sunucu tarafı boyut hesabının tabanı. İstemci göndermezse motorun
+    # varsayılan tarama portföyü (10k) kullanılır.
+    portfolio_value: float = 10000
+
+
+def _authoritative_position_size(body: "TrackSignalRequest") -> int:
+    """
+    Pozisyon boyutunu SUNUCUDA yeniden hesapla — istemciden gelene güvenme.
+
+    2026-08-03 adli tıp: canlı hesapta üç işlem aşırı boyutluydu (NSP 2901 hisse
+    = 141.830$ pozisyon / 11.546$ risk, izin verilen 150$'ın 77 katı; TH 6x,
+    CPRX 10x — CPRX tam olarak portfolio_value=100.000$ ile eşleşiyor). Motor
+    (risk.py calculate_position_size) doğru hesaplıyordu: hem %1.5 risk bütçesi
+    hem tipe özgü portföy tavanı (C/A %25, B %20, S %15) uygulanıyor. Sızıntı bu
+    endpoint'teydi: `position_size` istemciden ne gelirse doğrudan DB'ye
+    yazılıyordu. Tek bir bozuk boyut, -1.92%'lik bir fiyat hareketini -2.727$
+    zarara çevirdi ve hesabın toplam sonucunu (başabaş → -3.343$) tersine çevirdi.
+
+    Risk-kritik bir sayı asla istemciden alınmaz. İstemcinin gönderdiği değer
+    yalnızca üst sınır olarak kullanılır (kullanıcı daha küçük pozisyon isteyebilir).
+    """
+    from swing_trader.small_cap.risk import SmallCapRisk
+
+    risk = SmallCapRisk()
+    server_size, risk_amount = risk.calculate_position_size(
+        portfolio_value=body.portfolio_value,
+        entry_price=body.entry_price,
+        stop_loss=body.stop_loss,
+        swing_type=body.swing_type or "A",
+    )
+    if server_size <= 0:
+        # entry <= stop gibi tutarsız girdi — motorun reddini aynen taşı.
+        logger.warning(
+            "%s: sunucu boyutu 0 (entry=%.4f stop=%.4f) — istemci boyutu (%d) yok sayıldı",
+            body.ticker, body.entry_price, body.stop_loss, body.position_size,
+        )
+        return 0
+
+    client_size = max(0, int(body.position_size or 0))
+    final = min(client_size, server_size) if client_size > 0 else server_size
+
+    if client_size > server_size:
+        logger.warning(
+            "%s: istemci boyutu %d, sunucu tavanı %d (risk %.0f$, portföy %.0f$) — tavana çekildi",
+            body.ticker, client_size, server_size, risk_amount, body.portfolio_value,
+        )
+    return final
 
 
 @router.post("/track")
@@ -88,6 +135,13 @@ def track_signal(
     Returns: {"status": "added", "trade_id": N} or {"status": "duplicate"}
     """
     tracker = get_paper_tracker()
+    position_size = _authoritative_position_size(body)
+    if position_size <= 0:
+        return sanitize_for_json({
+            "status": "invalid_risk",
+            "trade_id": -4,
+            "detail": "Giriş fiyatı stop'un üstünde değil — pozisyon boyutu hesaplanamadı.",
+        })
     signal = {
         "ticker": body.ticker,
         "entry_price": body.entry_price,
@@ -96,14 +150,16 @@ def track_signal(
         "target_2": body.target_2 or body.target_1,
         "swing_type": body.swing_type,
         "quality_score": body.quality_score,
-        "position_size": body.position_size,
+        "position_size": position_size,
         "hold_days_max": body.hold_days_max,
         "atr": body.atr or 0,
         "date": body.date or datetime.date.today().isoformat(),
     }
     trade_id = tracker.add_trade_from_signal(signal, user_id)
     if trade_id > 0:
-        return sanitize_for_json({"status": "added", "trade_id": trade_id})
+        return sanitize_for_json({
+            "status": "added", "trade_id": trade_id, "position_size": position_size,
+        })
     elif trade_id == -2:
         return sanitize_for_json({"status": "cooldown", "trade_id": -2})
     elif trade_id == -3:
