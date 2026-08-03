@@ -13,7 +13,7 @@ import datetime
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Callable, Optional
@@ -535,6 +535,37 @@ def start_smallcap_scan(
     )
     thread.start()
     return {"job_id": job_id, "status": "queued"}
+
+
+@router.post("/daily-run")
+def daily_run(request: Request, force: bool = Query(False)):
+    """
+    Günlük bakım tetikleyicisi — GitHub Actions cron tarafından çağrılır.
+
+    Sırayla: PENDING onayı → çıkış kontrolü → günlük tarama.
+    fly.io makinesi boşta askıya alındığı için in-process zamanlayıcılar
+    çalışmıyor; bu endpoint makineyi uyandırıp işi yaptırır (7/24 makine
+    maliyeti olmadan). Ayrıntılı gerekçe: api/auto_scan.run_daily_maintenance.
+
+    Kimlik: X-Cron-Secret başlığı CRON_SECRET ortam değişkeniyle eşleşmeli.
+    CRON_SECRET tanımlı değilse endpoint 503 döner (kazara açık kalmasın).
+    """
+    import os as _os
+    import hmac
+
+    expected = (_os.environ.get("CRON_SECRET") or "").strip()
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="CRON_SECRET tanımlı değil — günlük tetikleyici devre dışı.",
+        )
+    provided = (request.headers.get("X-Cron-Secret") or "").strip()
+    if not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="Geçersiz cron secret")
+
+    from api.auto_scan import run_daily_maintenance
+
+    return sanitize_for_json(run_daily_maintenance(force=force))
 
 
 @router.get("/smallcap/job/{job_id}")

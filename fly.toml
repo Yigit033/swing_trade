@@ -17,22 +17,24 @@ primary_region = 'iad'
   # kullanıcıya "Fly proxy waited too much..."). Suspend RAM anlık görüntüsünden
   # ~1s'de döner; import maliyeti yalnız deploy sonrası ilk boot'ta kalır
   # (health check grace_period=30s bunu karşılar). Maliyet stop ile aynı.
-  # 2026-08-04: min_machines_running 0 → 1 (ZORUNLU, maliyet bilinçli).
-  # Askıya alınmış makinede HİÇBİR arka plan görevi çalışmaz — makine yalnız
-  # gelen HTTP isteğiyle uyanır. Loglarda görüldü: 18:32'de autosuspend, ertesi
-  # istek 18:58'de. Bu iki görevi de öldürüyordu:
-  #   1. auto_scan_loop (16:30 ET günlük tarama) — o saatte kimse girmezse
-  #      makine uykuda, tarama olmaz. Beteri: _next_target_et kaçırılan günü
-  #      sessizce YARINA atıyor → pratikte hiç çalışmaz.
-  #   2. _scheduled_pending_confirm_loop (5dk'da bir pending onayı + çıkış
-  #      kontrolü) — PENDING bir işlem t+1 açılış penceresini kaçırıp
-  #      reddedilebiliyor. Bu doğrudan para kaybı.
-  # Sistemin gözetimsiz çalışması ("para makinesi") makinenin ayakta olmasını
-  # gerektiriyor. Yan fayda: soğuk uyanış tamamen ortadan kalkar.
-  # Maliyet: shared-cpu-1x/1GB 7/24 ≈ $6/ay.
+  # 2026-08-04: min_machines_running 0 KALIYOR (7/24 makine ≈ $6/ay — gereksiz).
+  # Sorun: askıya alınmış makinede HİÇBİR arka plan görevi çalışmaz; makine
+  # yalnız gelen HTTP isteğiyle uyanır (logda: 18:32 autosuspend → 18:58 wake).
+  # Bu, auto_scan_loop'u ve pending/exit döngüsünü pratikte hiç çalıştırmıyordu.
+  #
+  # Çözüm 7/24 makine DEĞİL, dışarıdan tetikleme (.github/workflows/daily-run.yml):
+  # GitHub Actions cron her iş günü kapanış sonrası POST /api/scanner/daily-run
+  # çağırır → makine uyanır → pending onayı + çıkış kontrolü + otomatik tarama
+  # koşar → makine tekrar uyur. Maliyet $0.
+  #
+  # Bu bir uzlaşma değil, DAHA DOĞRU bir mimari: strateji GÜNLÜK BAR üzerinde
+  # karar veriyor (stop/T1/trailing/timeout hepsi günlük bar). 5 dakikada bir
+  # kontrol etmek yeni bilgi üretmiyor — kapanış sonrası tek koşu tam da doğru
+  # kadans. Ayrıca in-process asyncio döngüsüne bağımlılık kalkıyor: tetikleyici
+  # dışarıda ve gözlemlenebilir (Actions run geçmişi).
   auto_stop_machines = 'suspend'
   auto_start_machines = true
-  min_machines_running = 1
+  min_machines_running = 0
   processes = ['app']
 
   # 2026-07-22: soft_limit 1 → 200. Tek makineli deployment'ta soft_limit=1,

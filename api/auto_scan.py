@@ -44,6 +44,72 @@ def _next_target_et(target_hour: int, target_minute: int, now: Optional[datetime
     return target_today if now_et < target_today else target_today + timedelta(days=1)
 
 
+def run_daily_maintenance(force: bool = False) -> dict:
+    """
+    Günlük bakım — dışarıdan (cron) tetiklenir, in-process döngüye bağımlı değil.
+
+    NEDEN DIŞARIDAN: fly.io makinesi boşta askıya alınıyor (min_machines_running=0)
+    ve askıdayken hiçbir asyncio görevi çalışmıyor. Makine yalnız gelen HTTP
+    isteğiyle uyanıyor. 7/24 makine (~$6/ay) yerine GitHub Actions cron bu
+    endpoint'i çağırıyor: makine uyanır, iş biter, tekrar uyur — maliyet $0.
+
+    NEDEN GÜNDE BİR YETERLİ: strateji tamamen GÜNLÜK BAR üzerinde karar veriyor
+    (stop/T1/trailing/timeout hepsi günlük bar; VCE tetiği tamamlanmış bara
+    bakıyor). Kapanış sonrası tek koşu yeni bilginin tamamını görür — 5 dakikada
+    bir kontrol etmek ek bilgi üretmez.
+
+    Sıra önemli: önce pending onayı (dünkü sinyaller OPEN'a döner), sonra çıkış
+    kontrolü (yeni açılanlar da dahil), en son tarama (yarının adayları).
+    """
+    from api.deps import get_paper_tracker
+    from swing_trader.small_cap.settings_config import load_settings
+
+    global _last_run_date
+    result: dict = {"pending_confirmed": 0, "trades_closed": 0, "scan": "skipped"}
+    today = datetime.now(tz=_NYSE_TZ).date()
+    result["date_et"] = str(today)
+
+    tracker = get_paper_tracker()
+
+    # 1) PENDING → OPEN (t+1 açılış fiyatıyla; geç koşsa da tarihsel açılışı kullanır)
+    try:
+        processed = tracker.confirm_pending_trades(None)
+        result["pending_confirmed"] = len(processed or [])
+    except Exception:
+        logger.exception("Daily maintenance: pending confirm failed")
+        result["pending_error"] = True
+
+    # 2) Açık pozisyonların çıkış kontrolü (stop/T1/trailing/timeout)
+    try:
+        updated = tracker.update_all_open_trades(None) or []
+        closed = [t for t in updated if t.get("status") not in ("OPEN", "PENDING")]
+        result["trades_closed"] = len(closed)
+        result["closed_tickers"] = [t.get("ticker") for t in closed]
+    except Exception:
+        logger.exception("Daily maintenance: exit check failed")
+        result["exit_error"] = True
+
+    # 3) Günlük tarama (ayarda açıksa, işlem günüyse, bugün koşmadıysa)
+    try:
+        us = load_settings().auto_scan
+        if not us.enabled:
+            result["scan"] = "disabled"
+        elif not is_trading_day(today):
+            result["scan"] = "not_a_trading_day"
+        elif _last_run_date == today and not force:
+            result["scan"] = "already_ran_today"
+        else:
+            _last_run_date = today
+            _run_auto_scan_once()
+            result["scan"] = "ran"
+    except Exception:
+        logger.exception("Daily maintenance: auto-scan failed")
+        result["scan"] = "error"
+
+    logger.info("Daily maintenance done: %s", result)
+    return result
+
+
 def _run_auto_scan_once() -> None:
     """Senkron: mevcut manuel tarama koduyla AYNI fonksiyonu çağırır."""
     from swing_trader.small_cap.settings_config import load_settings

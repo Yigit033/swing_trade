@@ -1,0 +1,75 @@
+# Günlük bakım tetikleyicisi — PENDING onayı + çıkış kontrolü + otomatik tarama
+#
+# NEDEN VAR: fly.io makinesi boştayken askıya alınıyor (min_machines_running=0)
+# ve askıdayken hiçbir arka plan görevi çalışmıyor — makine yalnız gelen HTTP
+# isteğiyle uyanıyor. 7/24 makine (~$6/ay) yerine bu ücretsiz cron makineyi
+# uyandırıp işi yaptırıyor, sonra makine tekrar uyuyor.
+#
+# NEDEN GÜNDE BİR YETERLİ: strateji tamamen GÜNLÜK BAR üzerinde karar veriyor
+# (stop/T1/trailing/timeout ve VCE tetiği hepsi tamamlanmış günlük bara bakar).
+# Kapanış sonrası tek koşu yeni bilginin tamamını görür.
+#
+# SAAT: GitHub cron yalnız UTC kabul eder, ET ise yaz/kış (EDT/EST) kayıyor.
+# İki koşu tanımlı — biri EDT'de, diğeri EST'de kapanış sonrasına denk gelir:
+#   21:30 UTC = 17:30 EDT (yaz)  /  16:30 EST (kış)
+#   22:30 UTC = 18:30 EDT (yaz)  /  17:30 EST (kış)
+# İkisi de kapanıştan (16:00 ET) sonra. Çift koşma sorun değil: endpoint aynı
+# gün ikinci taramayı "already_ran_today" diyerek atlar (_last_run_date guard).
+#
+# GEREKLİ SECRET (repo → Settings → Secrets → Actions):
+#   CRON_SECRET  — fly secret'ı ile AYNI değer:  fly secrets set CRON_SECRET=...
+
+name: Daily Run
+
+on:
+  schedule:
+    - cron: '30 21 * * 1-5'   # Pzt-Cum
+    - cron: '30 22 * * 1-5'
+  workflow_dispatch:           # elle tetikleme (test için)
+    inputs:
+      force:
+        description: 'Aynı gün tekrar taramaya zorla'
+        type: boolean
+        default: false
+
+jobs:
+  daily-run:
+    name: Trigger daily maintenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Call daily-run endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          FORCE: ${{ inputs.force && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::CRON_SECRET repo secret'ı tanımlı değil"
+            exit 1
+          fi
+
+          URL="https://swing-trade.fly.dev/api/scanner/daily-run?force=${FORCE}"
+
+          # Makine askıda olabilir: ilk istek onu uyandırır ve soğuk başlangıç
+          # (Python import zinciri) birkaç saniye sürer. Tarama da dakikalar
+          # alabildiği için uzun timeout + tek yeniden deneme veriyoruz.
+          for attempt in 1 2; do
+            echo "Deneme $attempt ..."
+            HTTP=$(curl -sS -o response.json -w '%{http_code}' \
+                   --max-time 900 --connect-timeout 60 \
+                   -X POST "$URL" \
+                   -H "X-Cron-Secret: ${CRON_SECRET}" \
+                   -H 'Content-Type: application/json' || echo "000")
+            if [ "$HTTP" = "200" ]; then
+              echo "OK ($HTTP)"
+              cat response.json
+              exit 0
+            fi
+            echo "::warning::HTTP $HTTP"
+            [ -s response.json ] && cat response.json || true
+            [ "$attempt" = "1" ] && sleep 30
+          done
+
+          echo "::error::Günlük tetikleyici başarısız"
+          exit 1
