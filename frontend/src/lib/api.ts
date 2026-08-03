@@ -476,3 +476,65 @@ export const updateSmallCapSettings = (body: SmallCapSettingsJSON) =>
 export const resetSmallCapSettings = () =>
     api.post<SmallCapSettingsPutResponse>("/api/settings/reset").then((r) => r.data);
 
+
+// ── Sinyal Karnesi (forward-return tracking) ─────────────────────────────
+// Motorun ürettiği TÜM ham sinyaller (eşik-altı dahil) burada izlenir. Eşiğin
+// doğru yerde olup olmadığını ancak "almadıklarımızın" sonucuyla ölçebiliriz.
+export type EdgeAgg = {
+    n: number;
+    mean: number;
+    median: number;
+    win_rate: number;
+} | null;
+
+export type EdgeBucket = {
+    label: string;
+    n: number;
+    pending: number;
+    mean: number | null;
+    win_rate: number | null;
+};
+
+export type EdgeSide = {
+    n: number;
+    mean: number | null;
+    win_rate: number | null;
+    best?: number | null;
+    worst?: number | null;
+};
+
+export type EdgeSignal = {
+    ticker: string;
+    signal_date: string;
+    quality: number | null;
+    swing_type: string | null;
+    pathway: string | null;
+    regime: string | null;
+    entry_open: number | null;
+    r3: number | null;
+    r5: number | null;
+    r10: number | null;
+    mfe10: number | null;
+    mae10: number | null;
+    status: string;
+};
+
+export type EdgeTracking = {
+    n_tracked: number;
+    n_complete: number;
+    aggregates: Record<string, EdgeAgg>;
+    mfe10: EdgeAgg;
+    mae10: EdgeAgg;
+    quality_buckets: EdgeBucket[];
+    threshold_split: {
+        reference: number;
+        above: EdgeSide;
+        below: EdgeSide;
+    };
+    harness_expectation: Record<string, string>;
+    signals: EdgeSignal[];
+};
+
+export const getEdgeTracking = (refresh = false) =>
+    api.get<EdgeTracking>(`/api/scanner/smallcap/edge-tracking?refresh=${refresh}`,
+        { timeout: 180000 }).then((r) => r.data);

@@ -309,19 +309,77 @@ class ForwardReturnTracker:
                 "win_rate": round(sum(1 for v in vals if v > 0) / len(vals) * 100, 1),
             }
 
+        # ── Kalite kovaları ──────────────────────────────────────────────
+        # "Skor gerçekten ayırt ediyor mu?" sorusunun CANLI cevabı. Eşik-altı
+        # sinyaller bilerek kaydediliyor (scanner.py raw signals) — onlar
+        # olmadan eşiğin doğru yerde olduğunu ölçmek imkânsız olurdu.
+        def _bucket(lo: float, hi: float, horizon: str = "r10") -> Dict[str, Any]:
+            vals = [
+                r[horizon] for r in recs
+                if r.get("quality") is not None
+                and lo <= r["quality"] < hi
+                and r.get(horizon) is not None
+            ]
+            pending = sum(
+                1 for r in recs
+                if r.get("quality") is not None
+                and lo <= r["quality"] < hi
+                and r.get(horizon) is None
+            )
+            if not vals:
+                return {"label": f"Q{int(lo)}-{int(hi) - 1}", "n": 0, "pending": pending,
+                        "mean": None, "win_rate": None}
+            return {
+                "label": f"Q{int(lo)}-{int(hi) - 1}",
+                "n": len(vals),
+                "pending": pending,
+                "mean": round(sum(vals) / len(vals), 2),
+                "win_rate": round(sum(1 for v in vals if v > 0) / len(vals) * 100, 1),
+            }
+
+        # Eşik referansı: rejime göre 78-82 arasında oynuyor; 80 temsili kesim.
+        REF_THRESHOLD = 80.0
+
+        def _side(above: bool, horizon: str = "r10") -> Dict[str, Any]:
+            vals = [
+                r[horizon] for r in recs
+                if r.get("quality") is not None
+                and ((r["quality"] >= REF_THRESHOLD) if above else (r["quality"] < REF_THRESHOLD))
+                and r.get(horizon) is not None
+            ]
+            if not vals:
+                return {"n": 0, "mean": None, "win_rate": None, "best": None, "worst": None}
+            return {
+                "n": len(vals),
+                "mean": round(sum(vals) / len(vals), 2),
+                "win_rate": round(sum(1 for v in vals if v > 0) / len(vals) * 100, 1),
+                "best": round(max(vals), 2),
+                "worst": round(min(vals), 2),
+            }
+
         return {
             "n_tracked": len(recs),
             "n_complete": sum(1 for r in recs if r.get("status") == "complete"),
             "aggregates": {f"r{n}": _agg(f"r{n}") for n in HORIZONS},
             "mfe10": _agg("mfe10"),
             "mae10": _agg("mae10"),
+            # Skor karnesi: kalite kovaları + eşik-üstü/altı karşılaştırması
+            "quality_buckets": [
+                _bucket(0, 60), _bucket(60, 70), _bucket(70, 78),
+                _bucket(78, 80), _bucket(80, 101),
+            ],
+            "threshold_split": {
+                "reference": REF_THRESHOLD,
+                "above": _side(True),
+                "below": _side(False),
+            },
             # Harness reference (v13 measurement) — live numbers should converge here
             "harness_expectation": {
                 "r10_mean": "+7 ile +10% arası (benchmark +2.2%)",
                 "r5_win_rate": "55-60%",
                 "kaynak": "scripts/measure_signal_edge.py 2026-06-10 (n=123 VCE, OOS t=2.29)",
             },
-            "signals": recs[:50],
+            "signals": recs[:100],
         }
 
 
