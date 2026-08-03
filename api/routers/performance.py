@@ -7,10 +7,12 @@ Closed trades definition: status NOT IN ('OPEN', 'PENDING')
 """
 
 import logging
+import math
 from fastapi import APIRouter, Depends
 from typing import Optional
 from api.deps import get_paper_storage
 from api.auth import get_current_user_id
+from api.utils import sanitize_for_json
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -40,7 +42,11 @@ def _fetch_live_prices(tickers: list) -> dict:
                 col = close[t] if t in close.columns else close.iloc[:, 0]
                 val = col.dropna()
                 if not val.empty:
-                    prices[t] = round(float(val.iloc[-1].item()), 4)
+                    p = round(float(val.iloc[-1].item()), 4)
+                    # NaN/Inf fiyatı ALMA — (cp - entry) hesabı NaN üretir ve
+                    # JSON serileştirme 500'e düşer (trades.py'deki guard'ın eşi).
+                    if math.isfinite(p) and p > 0:
+                        prices[t] = p
             except Exception:
                 pass
         return prices
@@ -108,7 +114,9 @@ def get_performance(user_id: Optional[str] = Depends(get_current_user_id)):
     # Enrich open trades with live prices
     enriched_open = _enrich_open_trades(open_trades)
 
-    return {
+    # sanitize: eski kayıtlarda depolanmış NaN/Inf (ör. 2026-08-02 id=72/76) veya
+    # numpy skalerleri JSON'a çevrilemez → endpoint 500 verirdi. Son bariyer.
+    return sanitize_for_json({
         "summary": {
             "total_trades":   len(all_trades),
             "open_trades":    len(open_trades),
@@ -126,7 +134,7 @@ def get_performance(user_id: Optional[str] = Depends(get_current_user_id)):
         },
         "recent_closed": recent,
         "open_trades":   enriched_open,
-    }
+    })
 
 
 @router.get("/weekly-report")

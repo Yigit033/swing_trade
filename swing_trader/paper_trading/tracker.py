@@ -13,6 +13,7 @@ V4 Improvements (over V3):
 """
 
 import logging
+import math
 from typing import Dict, List, Tuple, Optional
 from datetime import datetime, timedelta, date
 import yfinance as yf
@@ -141,6 +142,18 @@ class PaperTradeTracker:
             if df is not None and len(df) > 0:
                 df = df.reset_index()
                 df['Date'] = pd.to_datetime(df['Date']).dt.date
+                # yfinance ara sıra Volume dolu / OHLC NaN bar döndürüyor
+                # (data/fetcher.py _drop_incomplete_last_bar aynı arızayı tarama
+                # tarafında eliyor). Bu yol ayrı olduğu için NaN buradan sızıp
+                # current_price/unrealized_pnl olarak DB'ye yazılıyor, ardından
+                # GET /api/trades ve /api/performance JSON serileştirmede 500
+                # veriyordu (2026-08-02: id=72 HR, id=76 DNOW).
+                _ohlc = [c for c in ('Open', 'High', 'Low', 'Close') if c in df.columns]
+                if _ohlc:
+                    df = df.dropna(subset=_ohlc)
+                if len(df) == 0:
+                    logger.warning(f"{ticker}: tüm barlar NaN OHLC — fiyat geçmişi yok sayıldı")
+                    return None
                 return df
 
         except Exception as e:
@@ -431,19 +444,26 @@ class PaperTradeTracker:
         else:
             # Still open - calculate unrealized P/L
             current_price = float(price_history['Close'].iloc[-1])
-            pnl = (current_price - trade['entry_price']) * trade['position_size']
-            pnl_pct = ((current_price / trade['entry_price']) - 1) * 100
 
-            trade['current_price'] = round(current_price, 2)
-            trade['unrealized_pnl'] = round(pnl, 2)
-            trade['unrealized_pnl_pct'] = round(pnl_pct, 2)
+            # Savunma katmanı: NaN/Inf fiyat DB'ye yazılırsa o satır kalıcı
+            # olarak JSON'lanamaz hale gelir (endpoint 500). Yukarıdaki NaN-drop
+            # bunu zaten elemeli; burası son bariyer.
+            if not math.isfinite(current_price):
+                logger.warning(f"{ticker}: son kapanış NaN/Inf — fiyat ve P&L güncellemesi atlandı")
+            else:
+                pnl = (current_price - trade['entry_price']) * trade['position_size']
+                pnl_pct = ((current_price / trade['entry_price']) - 1) * 100
 
-            # Persist to DB so GET /api/trades returns live values immediately
-            self.storage.update_trade(trade_id, {
-                'current_price': trade['current_price'],
-                'unrealized_pnl': trade['unrealized_pnl'],
-                'unrealized_pnl_pct': trade['unrealized_pnl_pct'],
-            }, user_id)
+                trade['current_price'] = round(current_price, 2)
+                trade['unrealized_pnl'] = round(pnl, 2)
+                trade['unrealized_pnl_pct'] = round(pnl_pct, 2)
+
+                # Persist to DB so GET /api/trades returns live values immediately
+                self.storage.update_trade(trade_id, {
+                    'current_price': trade['current_price'],
+                    'unrealized_pnl': trade['unrealized_pnl'],
+                    'unrealized_pnl_pct': trade['unrealized_pnl_pct'],
+                }, user_id)
 
             # Calculate days held
             entry_dt = datetime.strptime(entry_date[:10], '%Y-%m-%d').date()

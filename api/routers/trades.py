@@ -133,7 +133,9 @@ def list_trades(
     # Holiday-aware expected-entry info on PENDING rows (consistent with /api/pending)
     from api.routers.pending import _enrich_pending
     all_trades = [_enrich_pending(t) if t.get("status") == "PENDING" else t for t in all_trades]
-    return {"trades": all_trades}
+    # sanitize: depolanmış NaN/Inf (ör. 2026-08-02 id=72/76) JSON'a çevrilemez →
+    # endpoint 500 verirdi. Yazma tarafı da guard'landı; bu son bariyer.
+    return sanitize_for_json({"trades": all_trades})
 
 
 @router.get("/last-update")
