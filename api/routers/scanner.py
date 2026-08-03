@@ -405,6 +405,29 @@ def _execute_smallcap_scan(
     filtered = [s for s in signals if s.get("quality_score", 0) >= effective_min_quality]
     filtered = filtered[: effective_top_n]
 
+    # Motorun ürettiği ama eşiğin altında kaldığı için GÖSTERİLMEYEN sinyalleri
+    # açıkça logla. Aksi halde motor "SMALL CAP SWING 🚀: PRCH ... Q:61" diye
+    # sevinçli bir satır basıyor, kullanıcı ekranda 0 sinyal görüyor ve loglar
+    # yalan söylüyormuş gibi oluyor (2026-08-03 canlı tarama).
+    #
+    # Not: bu sinyaller ÇÖP DEĞİL — aşağıda ForwardReturnTracker'a HAM olarak
+    # kaydediliyorlar (bilerek: eşik-altı sonuç verisi olmadan eşiğin doğru
+    # yerde olup olmadığını ölçemeyiz). Type S ise motor tarafında rejim
+    # tabanından muaf (engine.py `_type_min_q = 0 if swing_type == 'S'`), o
+    # yüzden buraya Q61 gibi düşük skorla gelebiliyor; gösterim kararını yine
+    # bu tek eşik veriyor.
+    _dropped = [s for s in signals if s.get("quality_score", 0) < effective_min_quality]
+    if _dropped:
+        logger.info(
+            "Kalite eşiği Q%s: %d sinyal üretildi ama GÖSTERİLMEDİ (forward-tracker'a yine de kaydedilir) — %s",
+            effective_min_quality,
+            len(_dropped),
+            ", ".join(
+                f"{s.get('ticker')} Q{s.get('quality_score', 0):.0f} type-{s.get('swing_type', '?')}"
+                for s in _dropped[:8]
+            ),
+        )
+
     try:
         regime_data = getattr(engine, "_last_regime", None)
         if regime_data:
