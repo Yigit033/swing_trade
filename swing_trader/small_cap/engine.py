@@ -643,43 +643,6 @@ class SmallCapEngine:
             # 3/4 reddi + swing onayı bu vakaları zaten eliyordu.
             sg = self.settings.scan_gates
 
-            # ================================================================
-            # V5.0: OBV DISTRIBUTION HARD GATE — Smart Money Filter
-            # If OBV shows distribution (smart money selling), reject signal.
-            # Exception: Type S (short squeeze) — distribution is expected
-            # before a squeeze.
-            # ================================================================
-            if boosters.get('obv_distribution', False) and swing_type != 'S':
-                logger.debug(
-                    f"{ticker}: OBV Distribution — hard reject "
-                    f"(smart money exiting, type={swing_type})"
-                )
-                _bump_scan_reject(reject_counts, "obv_distribution")
-                return None
-
-            # ================================================================
-            # V5.0: TREND QUALITY GATE — Reject only extreme downtrend cases.
-            #
-            # CHANGED: "distribution" is now excluded from hard reject because
-            # the Wyckoff "distribution" label here means "price fell + volume
-            # expanded" — which can also be panic selling (a buy opportunity).
-            # "markdown" (price fell + low volume) is kept but threshold lowered
-            # from 30 → 10, and Type C is exempt (pullback entry is its purpose).
-            #
-            # Both phases are already penalized in scoring (-8 pts).
-            # ================================================================
-            trend_data = swing_details.get("trend_quality", {})
-            trend_phase = trend_data.get("trend_phase", "unknown")
-            if trend_phase == "markdown" and swing_type not in ('S', 'C'):
-                trend_strength = trend_data.get("trend_strength", 50)
-                if trend_strength < 10:
-                    logger.debug(
-                        f"{ticker}: Extreme markdown phase "
-                        f"(strength={trend_strength}) — rejected"
-                    )
-                    _bump_scan_reject(reject_counts, "trend_phase_weak")
-                    return None
-
             # DAĞITIM GÜNÜ KAPISI SİLİNDİ — 2026-08-04 (measure_gate_value.py):
             # ΔEV tam 0.00, hiç ateşlenmiyordu. Sebep yapısal: VCE ve RVOL thrust
             # İKİSİ DE "yeşil kapanış" şartı koyuyor, dolayısıyla "hacimli düşüş
@@ -932,34 +895,13 @@ class SmallCapEngine:
                 signal['expected_hold_min'] = hold_days[0]
                 signal['expected_hold_max'] = hold_days[1]
             
-            # ================================================================
-            # HARD R:R GATE — Never enter a trade where the math can't win.
-            # At ~27% historical win rate, break-even requires avg_win > 2.7×
-            # avg_loss. We enforce a minimum T2/risk ratio of 2.5 so every
-            # trade we take has a theoretical path to profitability.
-            # Exception: Type S (short squeeze) — asymmetric payoff profile.
-            # ================================================================
-            rr_t2 = signal.get('risk_reward_t2', 0)
-            # Regime-aware R:R minimum: BULL tolerates lower R:R; BEAR demands more margin.
-            # 2026-08-04: değerler koda gömülü DEĞİL artık — regime_thresholds'tan
-            # okunuyor. Eskiden `{"BULL":1.0,"CAUTION":1.5,"BEAR":2.0}` gömülüydü ve
-            # `min_rr_at_entry=1.8` ayarı yalnız BİLİNMEYEN rejimde devreye giriyordu:
-            # ayar 1.8 diyor, gerçek 1.0-2.0 uygulanıyordu (yanıltıcı ayar tuzağı).
-            _rt = self.settings.regime_thresholds
-            _regime_rr = {
-                "BULL": _rt.bull_min_rr,
-                "CAUTION": _rt.caution_min_rr,
-                "BEAR": _rt.bear_min_rr,
-            }
-            min_rr = _regime_rr.get(regime, self.settings.min_rr_at_entry)
-            if rr_t2 < min_rr and swing_type != 'S':
-                logger.debug(
-                    f"{ticker}: R:R(T2)={rr_t2:.1f} < {min_rr} minimum "
-                    f"(stop={signal.get('stop_loss_pct',0):.1f}% "
-                    f"T2={signal.get('target_2_pct',0):.1f}%) — rejected"
-                )
-                _bump_scan_reject(reject_counts, "rr_too_low")
-                return None
+            # R:R KAPISI SİLİNDİ — 2026-08-04 (measure_remaining_gates.py):
+            # ΔEV tam 0.00, TRAIN ve OOS'ta da 0.00, hiç ek sinyal yok — 21 ayda
+            # HİÇ ateşlenmemiş. Sebep yapısal: 2.5×ATR stop + T1 %10 + tipe özgü
+            # T2 tavanları kombinasyonu matematiksel olarak neredeyse her zaman
+            # R:R(T2) > 2.0 üretiyor, yani eşik zaten sağlanmış oluyor.
+            # NOT: exit parametreleri (stop çarpanı / T2 tavanları) materyal
+            # olarak değişirse bu kapı yeniden ÖLÇÜLMELİ — o zaman bağlayabilir.
 
             # Enhanced logging with type
             type_emoji = "🐢" if swing_type == 'A' else "🚀"

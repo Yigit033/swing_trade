@@ -12,7 +12,10 @@
       "Bash(./venv/Scripts/python.exe -m pytest swing_trader/tests/test_universe_ranking.py -q)",
       "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; & \"c:\\\\active_projects\\\\swing_trade\\\\venv\\\\Scripts\\\\python.exe\" -m pytest \"c:\\\\active_projects\\\\swing_trade\\\\swing_trader\\\\tests\\\\test_universe_ranking.py\" \"c:\\\\active_projects\\\\swing_trade\\\\swing_trader\\\\tests\\\\test_universe_rank_info.py\" -q 2>&1 | Select-Object -Last 15)",
       "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; & \"c:\\\\active_projects\\\\swing_trade\\\\venv\\\\Scripts\\\\python.exe\" -m pytest \"c:\\\\active_projects\\\\swing_trade\\\\swing_trader\\\\tests\" \"c:\\\\active_projects\\\\swing_trade\\\\api\\\\tests\" \"c:\\\\active_projects\\\\swing_trade\\\\tests\" -q 2>&1 | Select-Object -Last 8)",
-      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe scripts/measure_remaining_gates.py)"
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe scripts/measure_remaining_gates.py)",
+      "PowerShell(\"--- olcum durumu ---\")",
+      "Bash(./venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('swing_trader/small_cap/engine.py',encoding='utf-8'\\).read\\(\\)\\); print\\('sozdizimi OK'\\)\")",
+      "PowerShell(cd \"c:\\\\active_projects\\\\swing_trade\"; $env:PYTHONIOENCODING=\"utf-8\"; & \".\\\\venv\\\\Scripts\\\\python.exe\" -m pytest swing_trader/tests api/tests tests -q 2>&1 | Select-Object -Last 12)"
     ]
   }
 }

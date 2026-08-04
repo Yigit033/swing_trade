@@ -300,7 +300,7 @@ export default function BacktestPage() {
                         )}
                         {result.params?.slippage_bps_per_side != null && (
                             <span style={{ display: "block", marginTop: 6 }}>
-                                Simülasyon slip: {result.params.slippage_bps_per_side} bps/kenar. Giriş min R:R: {result.params.min_rr_at_entry ?? "—"}. T1 kısmi çıkış: %{Math.round((result.params.partial_at_t1_fraction ?? 0.5) * 100)} (kalan T2 / BE). Komisyon yok. Parite: repo içi docs/BACKTEST_LIVE_PARITY.md
+                                Simülasyon slip: {result.params.slippage_bps_per_side} bps/kenar. T1 kısmi çıkış: %{Math.round((result.params.partial_at_t1_fraction ?? 0.33) * 100)} (kalan T2 / BE). Komisyon yok. Parite: repo içi docs/BACKTEST_LIVE_PARITY.md
                             </span>
                         )}
                         {result.diagnostics && Object.keys(result.diagnostics).length > 0 && (

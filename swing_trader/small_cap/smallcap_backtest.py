@@ -65,7 +65,6 @@ class SmallCapBacktester:
             "entry_skip_gap_down": 0,
             "entry_skip_tip_c": 0,
             "entry_skip_risk": 0,
-            "entry_skip_rr": 0,
             "entry_skip_trend": 0,
             "entries_opened": 0,
         }
@@ -229,7 +228,6 @@ class SmallCapBacktester:
                 'top_n': self.top_n,
                 'max_concurrent': self._max_concurrent,
                 'slippage_bps_per_side': self.settings.slippage_bps_per_side,
-                'min_rr_at_entry': self.settings.min_rr_at_entry,
                 'partial_at_t1_fraction': self.settings.partial_at_t1_fraction,
             },
         }
@@ -600,30 +598,12 @@ class SmallCapBacktester:
                 self._diag["entry_skip_risk"] += 1
                 continue
             
-            # R:R check with actual entry-based values.
-            # Use T2 reward (not T1) to match the scanner's min_rr_at_entry gate,
-            # which was calibrated against T2 R:R.  T1 alone would be ~1.2-1.5R
-            # for most setups and would reject every valid signal at 2.5× minimum.
-            risk_px = entry_price - sl
-            reward_t1 = t1 - entry_price
-            reward_t2 = t2 - entry_price
-            # 2026-08-04 PARİTE: canlı motor (engine.scan_stock) R:R minimumunu
-            # REJİME göre alıyor (regime_thresholds.bull/caution/bear_min_rr).
-            # Burada `min_rr_at_entry` kullanmak backtest'i canlıdan ayırırdı —
-            # tam olarak bu turda düzelttiğimiz hata sınıfı (T1 parite kırığı).
-            _rt = self.settings.regime_thresholds
-            _regime_rr = {
-                "BULL": _rt.bull_min_rr,
-                "CAUTION": _rt.caution_min_rr,
-                "BEAR": _rt.bear_min_rr,
-            }
-            min_rr = _regime_rr.get(regime_str, self.settings.min_rr_at_entry)
-            if risk_px <= 0 or reward_t2 / risk_px < min_rr:
-                self._diag["entry_skip_rr"] += 1
-                logger.debug(
-                    f"{ticker}: Entry R:R(T2) {reward_t2/max(risk_px,1e-9):.2f} < min {min_rr} — skipped"
-                )
-                continue
+            # R:R KAPISI SİLİNDİ — 2026-08-04, canlı motorla PARİTE.
+            # measure_remaining_gates.py: kapı 21 ayda hiç ateşlenmedi
+            # (ΔEV 0.00, TRAIN ve OOS'ta da 0.00). 2.5×ATR stop + T1 %10 +
+            # tipe özgü T2 tavanları zaten R:R(T2) > 2.0 üretiyor.
+            # Canlıda silinip burada bırakılsa backtest ürünü ölçmez olurdu.
+
             self._open_trade(sig, current_date, df_today)
             self._diag["entries_opened"] += 1
         
@@ -1048,7 +1028,6 @@ class SmallCapBacktester:
                 'top_n': getattr(self, 'top_n', 10),
                 'max_concurrent': getattr(self, '_max_concurrent', 3),
                 'slippage_bps_per_side': self.settings.slippage_bps_per_side,
-                'min_rr_at_entry': self.settings.min_rr_at_entry,
                 'partial_at_t1_fraction': self.settings.partial_at_t1_fraction,
             },
         }

@@ -1196,24 +1196,10 @@ export default function SettingsPage() {
                 title="Backtest / giriş yürütme"
                 help="Min ödül:risk, gap sınırları, kısmi satış oranı, kalite tabanları ve gap sonrası portföy risk limiti gibi hem backtest hem canlı yürütmeyle uyumlu giriş kuralları. Sadece simülasyon değil; motor bu alanı da okur."
             >
-                <FieldNum
-                    label="Min R:R (C değil)"
-                    hint="Girişte beklenen ödül/risk oranı; tip C hariç tipler için."
-                    value={num("min_rr_at_entry", 1.2)}
-                    onChange={(v) => setNum("min_rr_at_entry", v)}
-                    step="0.1"
-                    min={0.5}
-                    max={10}
-                />
-                <FieldNum
-                    label="Min R:R — tip C"
-                    hint="Erken tip C için genelde biraz daha yüksek R:R ister."
-                    value={num("min_rr_type_c", 1.5)}
-                    onChange={(v) => setNum("min_rr_type_c", v)}
-                    step="0.1"
-                    min={0.5}
-                    max={10}
-                />
+                {/* 2026-08-04: iki "Min R:R" alanı KALDIRILDI. R:R kapısı hem
+                    canlıdan hem eski backtest'ten silindi — measure_remaining_gates.py:
+                    21 ayda hiç ateşlenmedi (ΔEV 0.00, TRAIN ve OOS'ta da 0.00).
+                    2.5×ATR stop + T1 %10 + T2 tavanları zaten R:R > 2.0 üretiyor. */}
                 <FieldNum
                     label="T1 kısmi çıkış oranı"
                     hint="T1’de pozisyonun ne kadarı kapatılır (kalan T2’ye taşınır)."

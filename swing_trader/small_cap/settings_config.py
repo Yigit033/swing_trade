@@ -73,14 +73,9 @@ class RegimeThresholds(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # 2026-08-04: rejime göre R:R minimumları BURAYA taşındı. Eskiden engine.py
-    # içinde `_regime_rr = {"BULL": 1.0, "CAUTION": 1.5, "BEAR": 2.0}` diye
-    # koda gömülüydü ve `min_rr_at_entry=1.8` ayarı YALNIZ bilinmeyen rejimde
-    # devreye giriyordu — yani ayar "1.8" diyor, gerçek uygulanan 1.0-2.0
-    # arasıydı. Klasik "ölü/yanıltıcı ayar" tuzağı. Artık tek kaynak burada.
-    bull_min_rr: float = Field(default=1.0, ge=0.0, le=10.0)
-    caution_min_rr: float = Field(default=1.5, ge=0.0, le=10.0)
-    bear_min_rr: float = Field(default=2.0, ge=0.0, le=10.0)
+    # NOT: R:R minimumları (bull/caution/bear_min_rr) 2026-08-04'te eklenmiş,
+    # aynı gün ölçülüp SİLİNMİŞTİR — kapı 21 ayda hiç ateşlenmiyordu
+    # (measure_remaining_gates.py, ΔEV 0.00). Bkz. GATE_AUDIT.md.
 
     # BULL floor — eskiden yoktu (asıl "değersiz sinyal gösterme" kaynağı buydu)
     bull_min_quality: int = Field(default=78, ge=50, le=100)
@@ -180,9 +175,11 @@ class SmallCapSettings(BaseModel):
     )
 
     # --- Backtest entry / execution (also used for parity tuning later) ---
-    min_rr_at_entry: float = Field(default=1.2, ge=0.5, le=10.0)
-    min_rr_type_c: float = Field(default=1.5, ge=0.5, le=10.0)
-    partial_at_t1_fraction: float = Field(default=0.5, ge=0.05, le=1.0)
+    # min_rr_at_entry / min_rr_type_c SİLİNDİ (2026-08-04): R:R kapısı hem
+    # canlıdan hem eski backtest'ten kaldırıldı — 21 ayda hiç ateşlenmiyordu.
+    # partial default 0.5 → 0.33: ölçüldü (measure_t1_fraction.py, monotonik,
+    # TRAIN+OOS aynı yön; %50 → %33 = +0.42 puan EV).
+    partial_at_t1_fraction: float = Field(default=0.33, ge=0.05, le=1.0)
     min_quality_type_c: int = Field(default=65, ge=30, le=100)
     min_quality_type_a: int = Field(default=60, ge=30, le=100)
     min_quality_type_b: int = Field(default=60, ge=30, le=100)
@@ -274,6 +271,13 @@ _REMOVED_KEYS = {
     "scan_gates.late_entry_rsi_gt",
     "scan_gates.distribution_day_min_vol",
     "scan_gates.distribution_day_max_change_pct",
+    # 2026-08-04 (2. tur denetim): R:R kapısı 21 ayda hiç ateşlenmedi
+    # (ΔEV 0.00, TRAIN+OOS 0.00) → kapı hem canlıdan hem eski backtest'ten silindi
+    "min_rr_at_entry",
+    "min_rr_type_c",
+    "regime_thresholds.bull_min_rr",
+    "regime_thresholds.caution_min_rr",
+    "regime_thresholds.bear_min_rr",
 }
 
 

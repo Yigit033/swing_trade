@@ -31,10 +31,8 @@ def test_default_matches_known_engine_constants():
     assert d.universe_scan.use_finviz is True
     assert d.universe_scan.min_finviz_tickers_skip_static_merge == 30
     # 2026-08-04: rank_weight_* / chase_penalty_* SİLİNDİ (composite sıralama
-    # tek ölçüte indi — dolar-hacim). Rejim R:R'leri koddan ayara taşındı:
-    assert d.regime_thresholds.bull_min_rr == 1.0
-    assert d.regime_thresholds.caution_min_rr == 1.5
-    assert d.regime_thresholds.bear_min_rr == 2.0
+    # tek ölçüte indi — dolar-hacim). R:R kapısı da ölçülüp silindi.
+    assert d.regime_thresholds.caution_other_min_quality == 80
     assert d.backtest_type_quality.type_c_bear == 82
     assert len(d.scoring_tuning.volume_surge_tiers) == 8
     assert len(d.scoring_tuning.atr_percent_tiers) == 7
@@ -46,7 +44,7 @@ def test_default_matches_known_engine_constants():
     assert d.stop_atr_multiplier == 2.5
     assert d.max_stop_by_type["C"] == 0.14
     assert d.type_atr_multipliers["S"] == 2.5
-    assert d.min_rr_at_entry == 1.2
+    assert d.partial_at_t1_fraction == 0.33   # ölçüldü: monotonik, +0.42 puan
     # 2026-07-27: eşikler kanıta göre yükseltildi (measure_score_edge.py)
     assert d.regime_thresholds.bear_confirmed_min_quality == 82
     assert d.regime_thresholds.bull_min_quality == 78  # yeni: BULL floor
@@ -59,7 +57,7 @@ def test_load_partial_merge_over_defaults():
         s = load_settings(p)
     assert s.max_entry_rsi == 65
     assert s.volume_surge_trigger == 1.8
-    assert s.min_rr_at_entry == 1.2  # untouched default
+    assert s.partial_at_t1_fraction == 0.33  # untouched default
 
 
 def test_save_load_roundtrip():

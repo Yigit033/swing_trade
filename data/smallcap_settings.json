@@ -46,8 +46,6 @@
       "t2_max_pct": 0.55
     }
   },
-  "min_rr_at_entry": 1.8,
-  "min_rr_type_c": 1.6,
   "partial_at_t1_fraction": 0.33,
   "min_quality_type_c": 70,
   "min_quality_type_a": 70,
@@ -71,10 +69,7 @@
     "caution_confirmed_min_quality": 82,
     "caution_confirmed_top_n_max": 3,
     "caution_other_min_quality": 80,
-    "caution_other_top_n_max": 4,
-    "bull_min_rr": 1.0,
-    "caution_min_rr": 1.5,
-    "bear_min_rr": 2.0
+    "caution_other_top_n_max": 4
   },
   "scan_gates": {},
   "swing": {

@@ -435,7 +435,6 @@ export interface BacktestResult {
         top_n: number;
         max_concurrent: number;
         slippage_bps_per_side?: number;
-        min_rr_at_entry?: number;
         partial_at_t1_fraction?: number;
     };
     /** Walk-forward funnel: signals, pending, entry skips */
