@@ -362,57 +362,26 @@ class ScoringTuningSettings(BaseModel):
     max_float_score: float = 20
     max_momentum_score: float = 15
     max_risk_score: float = 15
-    bonus_cap: int = 30
     final_score_max: int = 140
     risk_score_atr_mult: float = 1.5
-    # Booster bonuses (subset — catalyst/sector still from live data)
-    bonus_high_rvol: int = 3
-    bonus_gap_continuation: int = 4
-    bonus_higher_highs: int = 3
-    bonus_swing_ready: int = 10
-    bonus_higher_lows: int = 5
-    bonus_multi_day_volume: int = 3
-    bonus_surge_days_3: int = 5
-    bonus_surge_days_2: int = 3
-    bonus_early_entry_lo: float = 5
-    bonus_early_entry_hi: float = 15
-    bonus_early_entry_pts: int = 8
-    bonus_very_early_hi: float = 5
-    bonus_very_early_pts: int = 5
-    bonus_rsi_divergence: int = 8
-    # RSI penalties by type
-    pen_a_rsi_gt_70: int = 10
-    pen_a_rsi_gt_65: int = 5
-    pen_b_rsi_gt_85: int = 15
-    pen_b_rsi_gt_80: int = 10
-    pen_b_rsi_gt_75: int = 5
-    pen_c_rsi_gt_65: int = 10
-    pen_c_rsi_gt_60: int = 5
-    pen_ext_day_gt_25: int = 15
-    pen_ext_day_gt_20: int = 8
-    pen_today_gt_15: int = 10
-    pen_today_gt_10: int = 5
-    pen_5d_gt_40: int = 15
-    pen_5d_gt_30: int = 10
-    pen_5d_gt_25: int = 5
-    pen_parabolic: int = 15
-    parabolic_day3_min_pct: float = 10.0
-    pen_not_swing_ready: int = 5
-    # v5.0: Directional scoring fields
     weight_trend: float = Field(default=0.15, ge=0.0, le=1.0)
     max_trend_score: float = Field(default=25.0, ge=1.0, le=100.0)
-    bonus_golden_cross: int = Field(default=5, ge=0, le=20)
-    bonus_confirmed_breakout: int = Field(default=8, ge=0, le=20)
-    # v5.0: Directional penalties
-    pen_obv_distribution: int = Field(default=15, ge=0, le=30)
-    pen_below_ma50: int = Field(default=10, ge=0, le=25)
-    pen_ma20_falling: int = Field(default=8, ge=0, le=20)
-    pen_rejection_candle: int = Field(default=12, ge=0, le=25)
-    pen_weak_trend_phase: int = Field(default=8, ge=0, le=20)
-    # S1 (2026-07-27): spread/slippage risk proxy — düşük dolar-hacim + yüksek
-    # ATR%. Ölçüm: ATR>8% sinyaller EV −6.90%. Skoru düşürüp sıralamada iner.
-    pen_spread_risk: int = Field(default=12, ge=0, le=30)
-    bonus_volume_on_up_day: int = Field(default=5, ge=0, le=20, description="Bonus when volume surge arrives on an UP day (accumulation signal)")
+
+    # Bonus artık koşullu değil, SABİT. 14 koşullu bonus (high_rvol,
+    # gap_continuation, higher_highs, swing_ready, higher_lows, multi_day_volume,
+    # surge_days, early_entry, rsi_divergence, golden_cross, confirmed_breakout,
+    # volume_on_up_day + sector_rs + obv) toplanıp buraya kırpılıyordu; ölçüm
+    # gösterdi ki tavan sinyallerin %100'ünde bağlıyor (ham toplam ~60), yani
+    # 14 koşulun net çıktısı herkese aynı +30. Ayarları kaldırdık, sabit kaldı.
+    bonus_cap: int = 30
+
+    # CEZALAR — yalnız ölçülüp "çıkarınca EV düşüyor" çıkanlar kaldı (5/21).
+    # Silinen 16'nın kanıtı GATE_AUDIT.md'de.
+    pen_a_rsi_gt_70: int = 10
+    pen_a_rsi_gt_65: int = 5
+    pen_c_rsi_gt_65: int = 10
+    pen_c_rsi_gt_60: int = 5
+    pen_today_gt_10: int = 5
 
 
 class BacktestLoopSettings(BaseModel):

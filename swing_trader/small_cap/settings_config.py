@@ -284,6 +284,53 @@ _REMOVED_KEYS = {
     # geçmişe dönük yok, hiç doğrulanamamıştı; katalizör modülü silinince
     # sınıflandırma dalı ulaşılamaz hale geldi
     "swing.type_s",
+    # ── 2026-08-05: SKOR DEĞİŞTİRİCİ DENETİMİ ────────────────────────────
+    # 34 bonus/ceza bırak-birini-çıkar ile ölçüldü (measure_score_modifiers.py).
+    # 14 bonus: bonus_cap sinyallerin %100'ünde bağlıyor (ham toplam ~60 vs
+    # tavan 30) → hiçbirinin marjinal etkisi yok, net çıktı herkese sabit +30.
+    # Kod tek satıra indi (bonus = bonus_cap), ayarlar gereksiz kaldı.
+    "scoring_tuning.bonus_high_rvol",
+    "scoring_tuning.bonus_gap_continuation",
+    "scoring_tuning.bonus_higher_highs",
+    "scoring_tuning.bonus_swing_ready",
+    "scoring_tuning.bonus_higher_lows",
+    "scoring_tuning.bonus_multi_day_volume",
+    "scoring_tuning.bonus_surge_days_3",
+    "scoring_tuning.bonus_surge_days_2",
+    "scoring_tuning.bonus_early_entry_lo",
+    "scoring_tuning.bonus_early_entry_hi",
+    "scoring_tuning.bonus_early_entry_pts",
+    "scoring_tuning.bonus_very_early_hi",
+    "scoring_tuning.bonus_very_early_pts",
+    "scoring_tuning.bonus_rsi_divergence",
+    "scoring_tuning.bonus_golden_cross",
+    "scoring_tuning.bonus_confirmed_breakout",
+    "scoring_tuning.bonus_volume_on_up_day",
+    # 16 ceza: 10'u 21 ayda HİÇ ateşlenmedi (girdileri VCE/RVOL tetiğinin
+    # zaten garantilediği şeyler), 6'sı ateşledi ama ΔEV 0.00 ve cezaladığı
+    # sinyaller ORTALAMANIN ÜSTÜNDE kazandı (yön tersti).
+    "scoring_tuning.pen_b_rsi_gt_85",
+    "scoring_tuning.pen_b_rsi_gt_80",
+    "scoring_tuning.pen_b_rsi_gt_75",
+    "scoring_tuning.pen_ext_day_gt_25",
+    "scoring_tuning.pen_ext_day_gt_20",
+    "scoring_tuning.pen_today_gt_15",
+    "scoring_tuning.pen_5d_gt_40",
+    "scoring_tuning.pen_5d_gt_30",
+    "scoring_tuning.pen_5d_gt_25",
+    "scoring_tuning.pen_parabolic",
+    "scoring_tuning.parabolic_day3_min_pct",
+    "scoring_tuning.pen_not_swing_ready",
+    "scoring_tuning.pen_obv_distribution",
+    "scoring_tuning.pen_below_ma50",
+    "scoring_tuning.pen_ma20_falling",
+    "scoring_tuning.pen_rejection_candle",
+    "scoring_tuning.pen_weak_trend_phase",
+    # pen_spread_risk: iki koşulu (dolar-hacim<7M VE ATR>%8) 21 ayda hiç
+    # birlikte gerçekleşmedi → kapı fiilen ölüydü. Saf ATR>%8 cezası da
+    # ölçüldü: Q80'de tek bir sinyal etkileniyor, TRAIN/OOS yönü tutarsız
+    # (6-8% bandı TRAIN +9.09% / OOS −9.63%) → tek işleme eğri uydurma olurdu.
+    "scoring_tuning.pen_spread_risk",
 }
 
 

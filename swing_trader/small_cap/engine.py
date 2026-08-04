@@ -773,7 +773,7 @@ class SmallCapEngine:
                     signal["technical_levels"] = None
 
                 try:
-                    narrative = generate_signal_narrative(signal, language="tr")
+                    narrative = generate_signal_narrative(signal)
                     signal["narrative"] = narrative
                     signal["narrative_text"] = narrative.get("full_text", "")
                     signal["narrative_headline"] = narrative.get(

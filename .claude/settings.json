@@ -20,7 +20,23 @@
       "Bash(./venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('swing_trader/small_cap/engine.py',encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
       "PowerShell(cd \"c:\\\\active_projects\\\\swing_trade\"; $env:PYTHONIOENCODING=\"utf-8\"; & \".\\\\venv\\\\Scripts\\\\python.exe\" -m pytest swing_trader/tests api/tests tests -q 2>&1 | Select-Object -Last 16)",
       "PowerShell(cd \"c:\\\\active_projects\\\\swing_trade\"; $env:PYTHONIOENCODING=\"utf-8\"; & \".\\\\venv\\\\Scripts\\\\python.exe\" -m pytest swing_trader/tests api/tests tests -q 2>&1 | Select-Object -Last 8)",
-      "Bash(./venv/Scripts/python.exe -m pytest swing_trader/tests/test_smallcap_settings_config.py::test_default_matches_known_engine_constants)"
+      "Bash(./venv/Scripts/python.exe -m pytest swing_trader/tests/test_smallcap_settings_config.py::test_default_matches_known_engine_constants)",
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe scripts/measure_score_modifiers.py)",
+      "Bash(./venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('swing_trader/small_cap/narrative.py',encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(./venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('swing_trader/small_cap/narrative.py',encoding='utf-8'\\).read\\(\\)\\); print\\('sozdizimi OK'\\)\")",
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe -c ' *)",
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe -)",
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe \"C:\\\\Users\\\\YIIT~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--active-projects-swing-trade\\\\0670cd7a-b438-4082-8a3a-ae8d8bad9b9a\\\\scratchpad\\\\bonus_cap_check.py\")",
+      "Bash(./venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('swing_trader/small_cap/scoring.py',encoding='utf-8'\\).read\\(\\)\\); print\\('sozdizimi OK'\\)\")",
+      "Bash(./venv/Scripts/python.exe -)",
+      "Bash(pkill -f \"grep -rln\")",
+      "Bash(./venv/Scripts/python.exe \"C:/Users/YIIT~1/AppData/Local/Temp/claude/c--active-projects-swing-trade/0670cd7a-b438-4082-8a3a-ae8d8bad9b9a/scratchpad/prune_json.py\")",
+      "Bash(./venv/Scripts/python.exe -m pytest swing_trader/tests api/tests -q)",
+      "Bash(./venv/Scripts/python.exe \"C:/Users/YIIT~1/AppData/Local/Temp/claude/c--active-projects-swing-trade/0670cd7a-b438-4082-8a3a-ae8d8bad9b9a/scratchpad/parity_check.py\")",
+      "Bash(./venv/Scripts/python.exe \"C:/Users/YIIT~1/AppData/Local/Temp/claude/c--active-projects-swing-trade/0670cd7a-b438-4082-8a3a-ae8d8bad9b9a/scratchpad/rank_check.py\")",
+      "Bash(echo \"tsc exit=$?\")",
+      "Bash(./venv/Scripts/python.exe -m pytest swing_trader/tests/test_no_dead_settings.py api/tests/test_settings_api_integration.py swing_trader/tests/test_smallcap_settings_config.py -q)",
+      "Bash(./venv/Scripts/python.exe -m pytest swing_trader/tests/test_score_modifiers_measured.py -q)"
     ]
   }
 }

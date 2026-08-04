@@ -2294,8 +2294,8 @@ export default function SettingsPage() {
                         max={100}
                     />
                     <FieldNum
-                        label="Bonus tavanı"
-                        hint="Katalizör / RVOL / swing ready vb. bonusların toplamına uygulanan üst sınır."
+                        label="Bonus (sabit)"
+                        hint="Her sinyalin kalite skoruna eklenen sabit puan. Eskiden 14 koşullu bonusun toplamına uygulanan tavandı; ölçüm tavanın %100 bağladığını gösterdi (ham toplam ~60) → bonus fiilen sabitti, kod da sabitlendi. Bunu değiştirmek TÜM skorları aynı miktarda kaydırır; Q78/80/82 eşiklerini de birlikte kaydırmanız gerekir."
                         value={nn(["scoring_tuning", "bonus_cap"], 40)}
                         onChange={(v) => sn(["scoring_tuning", "bonus_cap"], Math.round(v))}
                         step={1}
@@ -2320,112 +2320,12 @@ export default function SettingsPage() {
                         min={0.5}
                         max={5}
                     />
-                    <FieldNum
-                        label="Bonus high RVOL"
-                        hint="Günlük rel. volume çok yüksekse kalite skoruna eklenen bonus (bonus_cap altında)."
-                        value={nn(["scoring_tuning", "bonus_high_rvol"], 3)}
-                        onChange={(v) => sn(["scoring_tuning", "bonus_high_rvol"], Math.round(v))}
-                        step={1}
-                        max={30}
-                    />
-                    <FieldNum
-                        label="Bonus gap devam"
-                        hint="Önceki gün gap’i ve bugünkü devam yapısı uyuyorsa ek puan."
-                        value={nn(["scoring_tuning", "bonus_gap_continuation"], 4)}
-                        onChange={(v) => sn(["scoring_tuning", "bonus_gap_continuation"], Math.round(v))}
-                        step={1}
-                        max={30}
-                    />
-                    <FieldNum
-                        label="Bonus higher highs"
-                        hint="HH yapısı skorlamada zaten var; burada ekstra küçük bonus katsayısı."
-                        value={nn(["scoring_tuning", "bonus_higher_highs"], 3)}
-                        onChange={(v) => sn(["scoring_tuning", "bonus_higher_highs"], Math.round(v))}
-                        step={1}
-                        max={30}
-                    />
-                    <FieldNum
-                        label="Bonus swing ready"
-                        hint="MA20 / yapı ‘hazır’ filtresi geçildiğinde en büyük tek satır bonuslardan biri."
-                        value={nn(["scoring_tuning", "bonus_swing_ready"], 10)}
-                        onChange={(v) => sn(["scoring_tuning", "bonus_swing_ready"], Math.round(v))}
-                        step={1}
-                        max={50}
-                    />
-                    <FieldNum
-                        label="Bonus higher lows"
-                        hint="Yükselen dipler (trend sağlığı) için küçük ek bonus."
-                        value={nn(["scoring_tuning", "bonus_higher_lows"], 5)}
-                        onChange={(v) => sn(["scoring_tuning", "bonus_higher_lows"], Math.round(v))}
-                        step={1}
-                        max={30}
-                    />
-                    <FieldNum
-                        label="Bonus multi-day vol"
-                        hint="Ardışık günlerde hacim birikimi tespit edilirse ek puan."
-                        value={nn(["scoring_tuning", "bonus_multi_day_volume"], 3)}
-                        onChange={(v) => sn(["scoring_tuning", "bonus_multi_day_volume"], Math.round(v))}
-                        step={1}
-                        max={30}
-                    />
-                    <FieldNum
-                        label="Bonus surge gün ≥3"
-                        hint="Son N günde en az 3 gün volume surge koşulu — sıkı kurulum."
-                        value={nn(["scoring_tuning", "bonus_surge_days_3"], 5)}
-                        onChange={(v) => sn(["scoring_tuning", "bonus_surge_days_3"], Math.round(v))}
-                        step={1}
-                        max={30}
-                    />
-                    <FieldNum
-                        label="Bonus surge gün ≥2"
-                        hint="Daha az sıkı: 2 gün surge ile ek puan."
-                        value={nn(["scoring_tuning", "bonus_surge_days_2"], 3)}
-                        onChange={(v) => sn(["scoring_tuning", "bonus_surge_days_2"], Math.round(v))}
-                        step={1}
-                        max={30}
-                    />
-                    <FieldNum
-                        label="Erken giriş 5g min %"
-                        hint="5g getiri bu ile üst sınır arasında ‘erken trend’ bonusu için bant altı."
-                        value={nn(["scoring_tuning", "bonus_early_entry_lo"], 5)}
-                        onChange={(v) => sn(["scoring_tuning", "bonus_early_entry_lo"], v)}
-                        max={50}
-                    />
-                    <FieldNum
-                        label="Erken giriş 5g max %"
-                        hint="Erken giriş bandının üst sınırı; çok koşmuş hisseye açık bırakmamak için."
-                        value={nn(["scoring_tuning", "bonus_early_entry_hi"], 15)}
-                        onChange={(v) => sn(["scoring_tuning", "bonus_early_entry_hi"], v)}
-                        max={80}
-                    />
-                    <FieldNum
-                        label="Erken giriş puan"
-                        hint="Bant içindeyse kaliteye eklenen ham puan."
-                        value={nn(["scoring_tuning", "bonus_early_entry_pts"], 8)}
-                        onChange={(v) => sn(["scoring_tuning", "bonus_early_entry_pts"], Math.round(v))}
-                        max={40}
-                    />
-                    <FieldNum
-                        label="Çok erken 5g üst %"
-                        hint="5g getiri bu kadar düşükse ‘çok erken’ sayılır; ayrı küçük bonus/etiket."
-                        value={nn(["scoring_tuning", "bonus_very_early_hi"], 5)}
-                        onChange={(v) => sn(["scoring_tuning", "bonus_very_early_hi"], v)}
-                        max={30}
-                    />
-                    <FieldNum
-                        label="Çok erken puan"
-                        hint="Çok erken senaryoda eklenen puan (düşük momentum ile uyumlu)."
-                        value={nn(["scoring_tuning", "bonus_very_early_pts"], 5)}
-                        onChange={(v) => sn(["scoring_tuning", "bonus_very_early_pts"], Math.round(v))}
-                        max={30}
-                    />
-                    <FieldNum
-                        label="Bonus RSI divergence"
-                        hint="Fiyat vs RSI uyumsuzluğu (momentum sönümü) tespit edilirse ek puan."
-                        value={nn(["scoring_tuning", "bonus_rsi_divergence"], 8)}
-                        onChange={(v) => sn(["scoring_tuning", "bonus_rsi_divergence"], Math.round(v))}
-                        max={30}
-                    />
+                    {/* 14 bonus slider'ı 2026-08-05'te kaldırıldı: ölçüm (95 sinyal /
+                        21 ay) bonus tavanının sinyallerin %100'ünde bağladığını gösterdi
+                        (ham toplam ~60 vs tavan 30) — yani hangi bonus açık olursa olsun
+                        skora giden net katkı hep aynıydı: +30. Ayarlanabilir olmaları
+                        kullanıcıya "bunu kısarsam skor değişir" izlenimi veriyordu; halbuki
+                        değişmiyordu. Bonus artık sabit; ayarlanan tek şey tavanın kendisi. */}
                     <FieldNum
                         label="Ceza A RSI&gt;70"
                         hint="Tip A sınıflandırmasında RSI aşırı yüksekse kaliteden düşülen puan."
@@ -2438,27 +2338,6 @@ export default function SettingsPage() {
                         hint="Daha düşük eşikte ikinci kademe A cezası."
                         value={nn(["scoring_tuning", "pen_a_rsi_gt_65"], 5)}
                         onChange={(v) => sn(["scoring_tuning", "pen_a_rsi_gt_65"], Math.round(v))}
-                        max={50}
-                    />
-                    <FieldNum
-                        label="Ceza B RSI&gt;85"
-                        hint="Momentum tip B için çok ısınmış RSI cezası."
-                        value={nn(["scoring_tuning", "pen_b_rsi_gt_85"], 15)}
-                        onChange={(v) => sn(["scoring_tuning", "pen_b_rsi_gt_85"], Math.round(v))}
-                        max={50}
-                    />
-                    <FieldNum
-                        label="Ceza B RSI&gt;80"
-                        hint="Orta-yüksek RSI bandı cezası."
-                        value={nn(["scoring_tuning", "pen_b_rsi_gt_80"], 10)}
-                        onChange={(v) => sn(["scoring_tuning", "pen_b_rsi_gt_80"], Math.round(v))}
-                        max={50}
-                    />
-                    <FieldNum
-                        label="Ceza B RSI&gt;75"
-                        hint="Hafif B cezası (daha erken uyarı)."
-                        value={nn(["scoring_tuning", "pen_b_rsi_gt_75"], 5)}
-                        onChange={(v) => sn(["scoring_tuning", "pen_b_rsi_gt_75"], Math.round(v))}
                         max={50}
                     />
                     <FieldNum
@@ -2476,75 +2355,19 @@ export default function SettingsPage() {
                         max={50}
                     />
                     <FieldNum
-                        label="Ceza tek gün &gt;25%"
-                        hint="Tek günde aşırı hareket (ör. %25+) kaliteyi düşürür."
-                        value={nn(["scoring_tuning", "pen_ext_day_gt_25"], 15)}
-                        onChange={(v) => sn(["scoring_tuning", "pen_ext_day_gt_25"], Math.round(v))}
-                        max={50}
-                    />
-                    <FieldNum
-                        label="Ceza tek gün &gt;20%"
-                        hint="Bir alt kademe tek gün aşırı hareket cezası."
-                        value={nn(["scoring_tuning", "pen_ext_day_gt_20"], 8)}
-                        onChange={(v) => sn(["scoring_tuning", "pen_ext_day_gt_20"], Math.round(v))}
-                        max={50}
-                    />
-                    <FieldNum
-                        label="Ceza bugün &gt;15%"
-                        hint="Bugünkü günlük % değişim bu üstündeyse ceza."
-                        value={nn(["scoring_tuning", "pen_today_gt_15"], 10)}
-                        onChange={(v) => sn(["scoring_tuning", "pen_today_gt_15"], Math.round(v))}
-                        max={50}
-                    />
-                    <FieldNum
                         label="Ceza bugün &gt;10%"
-                        hint="Daha düşük eşikte günlük hareket cezası."
+                        hint="Tek günde %10+ sıçramış hisseye giriş cezası. Ölçüldü: 3 kez ateşledi, kaldırılınca EV düşüyor → kalıyor."
                         value={nn(["scoring_tuning", "pen_today_gt_10"], 5)}
                         onChange={(v) => sn(["scoring_tuning", "pen_today_gt_10"], Math.round(v))}
                         max={50}
                     />
-                    <FieldNum
-                        label="Ceza 5g &gt;40%"
-                        hint="Beş günlük toplam getiri aşırı yüksekse agresif ceza."
-                        value={nn(["scoring_tuning", "pen_5d_gt_40"], 15)}
-                        onChange={(v) => sn(["scoring_tuning", "pen_5d_gt_40"], Math.round(v))}
-                        max={50}
-                    />
-                    <FieldNum
-                        label="Ceza 5g &gt;30%"
-                        hint="Orta-yüksek 5g ralli cezası."
-                        value={nn(["scoring_tuning", "pen_5d_gt_30"], 10)}
-                        onChange={(v) => sn(["scoring_tuning", "pen_5d_gt_30"], Math.round(v))}
-                        max={50}
-                    />
-                    <FieldNum
-                        label="Ceza 5g &gt;25%"
-                        hint="Hafif 5g uzama uyarısı."
-                        value={nn(["scoring_tuning", "pen_5d_gt_25"], 5)}
-                        onChange={(v) => sn(["scoring_tuning", "pen_5d_gt_25"], Math.round(v))}
-                        max={50}
-                    />
-                    <FieldNum
-                        label="Ceza parabolik"
-                        hint="Parabolik / blow-off paternine girildiğinde kaliteden düşülen toplam puan."
-                        value={nn(["scoring_tuning", "pen_parabolic"], 15)}
-                        onChange={(v) => sn(["scoring_tuning", "pen_parabolic"], Math.round(v))}
-                        max={50}
-                    />
-                    <FieldNum
-                        label="Parabolik gün3 min %"
-                        hint="3. gün kapanışında getiri bu altındaysa parabolik sayılmaz (ek koşul)."
-                        value={nn(["scoring_tuning", "parabolic_day3_min_pct"], 10)}
-                        onChange={(v) => sn(["scoring_tuning", "parabolic_day3_min_pct"], v)}
-                        max={50}
-                    />
-                    <FieldNum
-                        label="Ceza swing ready değil"
-                        hint="Yapı / MA20 hazır değilse kaliteye küçük ceza."
-                        value={nn(["scoring_tuning", "pen_not_swing_ready"], 5)}
-                        onChange={(v) => sn(["scoring_tuning", "pen_not_swing_ready"], Math.round(v))}
-                        max={30}
-                    />
+                    {/* 16 ceza slider'ı 2026-08-05'te kaldırıldı (B RSI merdiveni, tek gün
+                        >20/25%, bugün >15%, 5g >25/30/40%, parabolik, swing-ready değil,
+                        OBV dağıtım, MA50 altı, MA20 düşüyor, red mumu, zayıf trend fazı,
+                        spread riski). 10'u 21 ayda hiç ateşlenmedi — girdilerini VCE/RVOL
+                        tetiği zaten garanti ediyor. 6'sı ateşledi ama cezaladığı sinyaller
+                        ORTALAMANIN ÜSTÜNDE kazandı (5g>25% → +13.24%, 5g>40% → +20.36%,
+                        tek gün>25% → +21.12%), yani ceza yönü tersti. */}
                 </div>
                 </div>
             </details>

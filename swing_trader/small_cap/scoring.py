@@ -340,216 +340,75 @@ class SmallCapScoring:
         
         st = self._st
         # ============================================================
-        # BOOSTER BONUSES (max +35, expanded from +25)
+        # BONUS = SABİT +30 (ölçüldü — 2026-08-04)
         # ============================================================
-        bonus = 0
-        if boosters:
-            if boosters.get('high_rvol'):
-                bonus += st.bonus_high_rvol
-            if boosters.get('gap_continuation'):
-                bonus += st.bonus_gap_continuation
-            if boosters.get('higher_highs'):
-                bonus += st.bonus_higher_highs
-            
-            # SWING TRADE BONUSES
-            if boosters.get('swing_ready'):
-                bonus += st.bonus_swing_ready
-            if boosters.get('higher_lows'):
-                bonus += st.bonus_higher_lows
-            if boosters.get('multi_day_volume'):
-                bonus += st.bonus_multi_day_volume
-            
-            # SUSTAINED VOLUME PATTERN
-            swing_details = boosters.get('swing_details', {})
-            multi_day_vol = swing_details.get('multi_day_volume', {})
-            surge_days = multi_day_vol.get('surge_days', 0)
-            if surge_days >= 3:
-                bonus += st.bonus_surge_days_3
-            elif surge_days >= 2:
-                bonus += st.bonus_surge_days_2
-            
-            five_day_mom = swing_details.get('five_day_momentum', {})
-            five_day_return = five_day_mom.get('return', 0)
-            if st.bonus_early_entry_lo <= five_day_return <= st.bonus_early_entry_hi:
-                bonus += st.bonus_early_entry_pts
-            elif 0 < five_day_return < st.bonus_very_early_hi:
-                bonus += st.bonus_very_early_pts
-            
-            # Sektör göreli gücü. rs_bonus_vs_spy ile hesaplanır — canlıda da
-            # backtest'te de AYNI fonksiyon (2026-08-04 parite düzeltmesi;
-            # eskiden canlı SectorRS'in gerçek ETF hesabını, backtest SPY
-            # proxy'sini kullanıyordu → aynı hisse iki yolda farklı skor alıyordu).
-            bonus += boosters.get('sector_rs_bonus', 0)
-
-            # ============================================================
-            # KATALİZÖR BONUSLARI KALDIRILDI — 2026-08-04
-            # ============================================================
-            # short_interest (+10) / insider (+8) / news (+5) / sektör rotasyonu
-            # (+5/−10) bonusları skordan ÇIKARILDI. Sebep ölçüldü:
-            #
-            # Bu dört bileşen backtest_mode'da HER ZAMAN 0 (geçmişe dönük
-            # short-interest / insider / haber verisi yok). Yani kalite eşiği
-            # dahil BÜTÜN ölçümlerimiz bonussuz skorlarla yapıldı, canlı ise
-            # şişirilmiş skor kullanıyordu. Canlı 29 sinyalde ölçüldü:
-            #     ortalama şişme +5.8 puan (maks +17)
-            # → canlı "Q80" eşiği ölçüm diliyle fiilen Q74 gibi davranıyordu.
-            #   Ölçülen EV: Q80 +2.41% ama Q73 yalnız +1.18%.
-            #
-            # Doğrulanamayan (geçmiş verisi olmayan) bir bileşenin eşiği 6 puan
-            # kaydırması, sistemin en pahalı sessiz hatasıydı. Bonuslar
-            # silinince canlı skor == ölçülen skor olur ve Q80 gerçekten Q80'dir.
-            # Bileşenler kanıtlanamadığı için değil, KANITLANAMAZ oldukları için
-            # çıkarıldı: point-in-time veri olmadan asla doğrulanamazlar.
-            if boosters.get('rsi_divergence'):
-                bonus += st.bonus_rsi_divergence
-
-            # OBV Trend (v3.0 — Smart Money detection)
-            obv_bonus = boosters.get('obv_bonus', 0)
-            bonus += obv_bonus  # +8 accumulation, +4 confirm, -5 distribution
-
-            # VCP Pattern (Minervini) — tight base before breakout
-            vcp_bonus = boosters.get('vcp_bonus', 0)
-            bonus += vcp_bonus  # +15 perfect, +10 strong, +6 valid, +3 forming
-
-            # Weinstein Stage — only buy Stage 2 markup
-            weinstein_bonus = boosters.get('weinstein_bonus', 0)
-            bonus += weinstein_bonus  # +10 Stage 2, +3 Stage 1, -3 Stage 3, -10 Stage 4
-
-            # v5.0: Golden Cross bonus
-            trend_data = boosters.get('swing_details', {}).get('trend_quality', {})
-            if trend_data.get('golden_cross', False):
-                bonus += st.bonus_golden_cross
-
-            # v5.0: Confirmed breakout gets stronger bonus
-            trigger_details = boosters.get('trigger_details', {})
-            if trigger_details and trigger_details.get('has_breakout', False):
-                bonus += st.bonus_confirmed_breakout
-
-            # v6.0: Pullback entry bonus — higher win-rate setup rewards
-            pullback_bonus = boosters.get('pullback_bonus', 0)
-            bonus += pullback_bonus  # +20 perfect, +15 clean, +8 basic
-
-            # v6.0: Active sector rotation bonus/penalty
-            sector_rotation_bonus = boosters.get('sector_rotation_bonus', 0)
-            bonus += sector_rotation_bonus  # +5 top sector, -10 weak sector
-
-            # Volume direction: institutional accumulation signal
-            # High volume on an UP day = buyers in control = strongest setup
-            if boosters.get('volume_up_day', False) and volume_surge >= 2.0:
-                bonus += st.bonus_volume_on_up_day
+        # Burada 14 koşullu bonus (high_rvol, gap_continuation, higher_highs,
+        # swing_ready, higher_lows, multi_day_volume, surge_days, early_entry,
+        # rsi_divergence, golden_cross, confirmed_breakout, volume_on_up_day)
+        # + sector_rs_bonus + obv_bonus toplanıp `min(bonus, bonus_cap)` ile
+        # 30'a kırpılıyordu.
+        #
+        # ÖLÇÜM (scripts/measure_score_modifiers.py, 95 sinyal / 21 ay):
+        #   • Bonus tavanına dayanan sinyal oranı: %100
+        #   • Tavan üstü aşılan miktar: ortalama +29.7 (maks +48)
+        #     → ham toplam ~60, tavan 30
+        #   • Bırak-birini-çıkar: 14 bonusun HİÇBİRİNİN tek başına etkisi YOK
+        #     (hepsinde ΔEV tam 0.00) — çünkü biri gitse toplam yine ≥30.
+        #
+        # Yani 14 koşulun net çıktısı HER SİNYAL İÇİN AYNI SAYI: +30.
+        # Ayırt etme gücü sıfır; sadece skoru sabit bir miktar kaydırıyordu.
+        # 40 satır kod, 14 ayarlanabilir parametre ve 14 UI alanı, tek bir
+        # sabitin işini yapıyordu. Sabitle değiştirildi: davranış BİREBİR aynı
+        # (dolayısıyla Q78/80/82 eşikleri ve tüm ölçümler geçerli kalır).
+        #
+        # NOT: Alternatif, tavanı kaldırıp bonusların gerçekten ayırt etmesini
+        # sağlamaktı — ama bu ÖLÇÜLMEMİŞ bir davranış değişikliği olurdu (ham
+        # toplam 40-78 bandına çıkıyor, tüm eşiklerin yeniden kalibrasyonu
+        # gerekir). Ölçmeden yapılmaz; sonraki denetim turunun konusu.
+        bonus = st.bonus_cap
 
         # ============================================================
-        # PENALTY SYSTEM (max -60, expanded in v5.0)
+        # CEZALAR — yalnız ölçülmüş olanlar (2026-08-05)
         # ============================================================
+        # 21 cezanın hepsi bırak-birini-çıkar ile ölçüldü. Sadece 5'ini
+        # çıkarmak EV'yi DÜŞÜRÜYOR (yani işe yarıyorlar): aşağıdaki RSI
+        # merdivenleri + today_gt_10. Diğer 16'sı silindi — gerekçeler
+        # GATE_AUDIT.md'de tek tek yazılı. Kısaca iki grup:
+        #   (a) Hiç ateşlemeyenler (10): girdileri VCE/RVOL tetiğinin zaten
+        #       garantilediği şeyleri tekrar kontrol ediyordu (MA50 üstü,
+        #       swing_ready, trend fazı, OBV, parabolik, today>15 ...).
+        #   (b) Ateşleyip ΔEV 0.00 verenler (6): cezaladıkları sinyaller
+        #       ORTALAMANIN ÜSTÜNDE kazandı (5d>25 → +13.24%, 5d>40 → +20.36%,
+        #       tek-gün>25 → +21.12%, MA20 düşüyor → +11.24%) — yani ceza
+        #       yönü TERSTİ; sadece Q80 seçimini değiştirecek kadar büyük
+        #       olmadığı için zarar görünmüyordu.
         penalty = 0
         if boosters:
-            swing_details = boosters.get('swing_details', {})
-            
             rsi = boosters.get('rsi', 50)
             swing_type = boosters.get('swing_type', 'A')
-            
+
             if swing_type == 'A':
                 if rsi > 70:
-                    penalty += st.pen_a_rsi_gt_70
+                    penalty += st.pen_a_rsi_gt_70      # 28 ateşleme, ΔEV -0.07
                 elif rsi > 65:
-                    penalty += st.pen_a_rsi_gt_65
-            elif swing_type == 'B':
-                if rsi > 85:
-                    penalty += st.pen_b_rsi_gt_85
-                elif rsi > 80:
-                    penalty += st.pen_b_rsi_gt_80
-                elif rsi > 75:
-                    penalty += st.pen_b_rsi_gt_75
-            else:
+                    penalty += st.pen_a_rsi_gt_65      # 4 ateşleme, ΔEV -0.09
+            elif swing_type != 'B':
+                # Type C (ve bilinmeyen tip) — en muhafazakâr eşik
                 if rsi > 65:
-                    penalty += st.pen_c_rsi_gt_65
+                    penalty += st.pen_c_rsi_gt_65      # 17 ateşleme, ΔEV -0.16
                 elif rsi > 60:
-                    penalty += st.pen_c_rsi_gt_60
-            
-            ext_info = swing_details.get('overextension', {})
-            ext_details = ext_info.get('details', {})
-            
-            max_single_day = ext_details.get('max_single_day', 0)
-            if max_single_day > 25:
-                penalty += st.pen_ext_day_gt_25
-            elif max_single_day > 20:
-                penalty += st.pen_ext_day_gt_20
-            
-            today_change = ext_details.get('today_change', 0)
-            if today_change > 15:
-                penalty += st.pen_today_gt_15
-            elif today_change > 10:
+                    penalty += st.pen_c_rsi_gt_60      # 12 ateşleme, ΔEV -0.20
+            # Type B (momentum/parabolik): RSI cezası YOK. 75/80/85 merdiveni
+            # ölçüldü — 75 ve 80 hiç ateşlemedi, 85 bir kez ateşledi ve o sinyal
+            # +8.75% kazandı. Type B'nin tanımı zaten "yüksek RSI ile koşuyor".
+
+            # Tek günde >%10 sıçrayıp giriş: 3 ateşleme, ΔEV -0.10 (işe yarıyor)
+            today_change = (boosters.get('swing_details', {})
+                            .get('overextension', {})
+                            .get('details', {})
+                            .get('today_change', 0))
+            if today_change > 10:
                 penalty += st.pen_today_gt_10
-            
-            five_day_total = ext_details.get('five_day_total', 0)
-            if five_day_total > 40:
-                penalty += st.pen_5d_gt_40
-            elif five_day_total > 30:
-                penalty += st.pen_5d_gt_30
-            elif five_day_total > 25:
-                penalty += st.pen_5d_gt_25
-            
-            if df is not None and len(df) >= 4:
-                try:
-                    day1_ret = (df['Close'].iloc[-3] / df['Close'].iloc[-4] - 1) * 100
-                    day2_ret = (df['Close'].iloc[-2] / df['Close'].iloc[-3] - 1) * 100
-                    day3_ret = (df['Close'].iloc[-1] / df['Close'].iloc[-2] - 1) * 100
-                    
-                    if day1_ret < day2_ret < day3_ret and day3_ret >= st.parabolic_day3_min_pct:
-                        penalty += st.pen_parabolic
-                except Exception:
-                    pass
-            
-            if not boosters.get('swing_ready'):
-                penalty += st.pen_not_swing_ready
-
-            # ================================================================
-            # v5.0: DIRECTIONAL PENALTIES (NEW — these are critical)
-            # ================================================================
-            trend_data = swing_details.get('trend_quality', {})
-
-            # OBV Distribution: -15 (was -5 via obv_bonus)
-            # This stacks with the hard gate — if somehow it passes the gate,
-            # the score still gets hammered.
-            if boosters.get('obv_distribution', False):
-                penalty += st.pen_obv_distribution
-
-            # Close below MA50: -10 (long-term downtrend)
-            ma50_dist = trend_data.get('ma50_distance_pct', 0)
-            if ma50_dist < -3:
-                penalty += st.pen_below_ma50
-
-            # MA20 falling slope: -8 (short-term trend fading)
-            if not trend_data.get('ma20_slope_ok', True):
-                penalty += st.pen_ma20_falling
-
-            # Rejection candle (bull trap): -12
-            if trend_data.get('rejection_candle', False):
-                penalty += st.pen_rejection_candle
-
-            # Distribution/Markdown trend phase: -8
-            phase = trend_data.get('trend_phase', 'unknown')
-            if phase in ('distribution', 'markdown'):
-                penalty += st.pen_weak_trend_phase
-
-        # ============================================================
-        # SPREAD/SLIPPAGE RİSK CEZASI (S1 — 2026-07-27)
-        # ============================================================
-        # Gerçek order-book/spread verimiz yok (yfinance vermiyor). Proxy:
-        # düşük dolar-hacim + yüksek ATR% = geniş spread/kayma riski. Ölçüldü
-        # (measure_score_edge): ATR>8% sinyaller EV −6.90% (kaybettiriyor,
-        # ama nadir %1). Bu tür girişler limit-emir gerektirir; skoru düşürüp
-        # sıralamada aşağı çekiyoruz. df + atr_percent zaten mevcut.
-        try:
-            if df is not None and len(df) >= 20:
-                _dollar_vol = float((df['Volume'].tail(20) * df['Close'].tail(20)).mean())
-                _atr_p = atr_percent * 100 if atr_percent < 1 else atr_percent  # normalize %
-                if _dollar_vol < 7_000_000 and _atr_p > 8.0:
-                    penalty += st.pen_spread_risk
-        except Exception:
-            pass
-
-        bonus = min(bonus, st.bonus_cap)
 
         final_score = total + bonus - penalty
 
