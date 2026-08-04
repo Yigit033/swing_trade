@@ -42,9 +42,54 @@ NYSE_OPEN_TIME = "09:30"  # NYSE opens 09:30 ET (= 16:30 Turkey time in winter)
 #   ve pump-open/exhaustion koruması olarak kalıyor.
 # Karar: up 5% KALDI, down 5% → 7% GEVŞETİLDİ
 #   (ölçülen hücre up5/dn7: n=387, R10 edge +2.24, t=2.56).
-# Bu sabitleri scripts/measure_gap_filter.py'yi yeniden koşmadan DEĞİŞTİRME.
-MAX_GAP_UP_PCT = 5.0
-MAX_GAP_DOWN_PCT = 7.0
+# Bu değerleri scripts/measure_gap_filter.py'yi yeniden koşmadan DEĞİŞTİRME.
+#
+# 2026-08-04: değerler ayardan OKUNUYOR (eskiden kod sabitiydi). Tuzak şuydu —
+# settings JSON'da max_gap_down_pct=4.0 yazıyordu ama kod 7.0 sabitini
+# kullanıyordu; ayarı değiştiren biri davranışın değişmediğini fark etmiyordu
+# ("ölü ayar"). Artık tek kaynak: settings. Fallback yalnız ayar okunamazsa.
+def _gap_limits() -> Tuple[float, float]:
+    try:
+        from swing_trader.small_cap.settings_config import load_settings
+
+        s = load_settings()
+        return float(s.max_gap_up_pct), float(s.max_gap_down_pct)
+    except Exception:
+        logger.warning("Gap limitleri ayardan okunamadı — ölçülen varsayılan (5/7) kullanılıyor")
+        return 5.0, 7.0
+
+
+MAX_GAP_UP_PCT, MAX_GAP_DOWN_PCT = _gap_limits()
+
+
+# T1 KISMİ ORANI — 2026-08-04'te ölçüldü (scripts/measure_t1_fraction.py,
+# 78 Q80+ sinyal, gerçek motor + gerçek exit + slippage):
+#     %25  EV +3.31%   (TRAIN +2.59  OOS +3.81)
+#     %33  EV +3.11%   (TRAIN +2.35  OOS +3.63)   ← seçilen
+#     %50  EV +2.69%   (TRAIN +1.86  OOS +3.26)   ← eski canlı değer
+#     %66  EV +2.29%   |   %100 EV +1.44%
+# İlişki MONOTONİK ve TRAIN/OOS'ta aynı yönde: az satmak daha iyi. Sebep
+# mekanik — swing getiri dağılımı sağa çarpık, T1'de çok satmak sağ kuyruğu
+# (büyük kazananları) kesiyor. Breakeven-stop koruması oranı ne olursa olsun
+# T1'de devreye girdiği için düşük oran güvenliği azaltmıyor.
+#
+# %25 en yüksek EV'yi verdi ama ölçülen aralığın SINIRINDA — monotonik bir
+# eğrinin uç noktasını seçmek klasik aşırı-uydurma tuzağıdır (20% veya 15%
+# daha mı iyi? ölçülmedi). %33 iç noktada, kazancın %87'sini yakalıyor
+# (0.42 puanın 0.35'i) ve tüm diğer ölçümlerimizin kullandığı değer —
+# ölçüm yığını kendi içinde tutarlı kalıyor.
+#
+# NOT: bu değer eskiden koda gömülüydü (%50) ve settings'teki
+# partial_at_t1_fraction canlıda HİÇ okunmuyordu ("ölü ayar" + parite kırığı:
+# harness %33 ölçüyor, canlı %50 uyguluyordu). Artık tek kaynak settings.
+def _t1_partial_fraction() -> float:
+    try:
+        from swing_trader.small_cap.settings_config import load_settings
+
+        return float(load_settings().partial_at_t1_fraction)
+    except Exception:
+        logger.warning("T1 kısmi oranı ayardan okunamadı — ölçülen varsayılan (0.33)")
+        return 0.33
 
 # 2026-07-26: 1.5 → 2.5. Exit ölçümü (scripts/exit_lab_vce_rvol.py, 57 ticker
 # 2024-06→2026-05, VCE n=387 + RVOL thrust n=330) canlı tracker mantığıyla
@@ -284,8 +329,9 @@ class PaperTradeTracker:
             if not has_partial and target_2 > target * 1.01 and high >= target:
                 exit_date = _exit_ts(current_date, 16, 0)  # target hit intraday; proxy to close
                 pnl_pct = ((target / entry_price) - 1) * 100
+                _frac_pct = _t1_partial_fraction() * 100
                 reason = (
-                    f"T1 partial 50% at ${target:.2f} ({pnl_pct:+.1f}%) | "
+                    f"T1 partial {_frac_pct:.0f}% at ${target:.2f} ({pnl_pct:+.1f}%) | "
                     f"Stop->breakeven ${entry_price:.2f} | T2 ${target_2:.2f}"
                 )
                 return ('T1_PARTIAL', target, exit_date, reason, trailing_stop)
@@ -391,9 +437,10 @@ class PaperTradeTracker:
 
         if status == 'T1_PARTIAL':
             target_2 = trade.get('target_2') or trade['target']
+            _partial_pct = _t1_partial_fraction() * 100
             self.storage.update_trade(trade_id, {
                 'partial_exit_price': exit_price,
-                'partial_exit_pct': 50.0,
+                'partial_exit_pct': _partial_pct,
                 'stop_loss': trade['entry_price'],
                 'trailing_stop': trade['entry_price'],
                 'initial_stop': trade['entry_price'],   # V4: anchor trail math to breakeven
@@ -401,7 +448,7 @@ class PaperTradeTracker:
                 'notes': reason,
             }, user_id)
             trade['partial_exit_price'] = exit_price
-            trade['partial_exit_pct'] = 50.0
+            trade['partial_exit_pct'] = _partial_pct
             trade['stop_loss'] = trade['entry_price']
             trade['trailing_stop'] = trade['entry_price']
             trade['initial_stop'] = trade['entry_price']

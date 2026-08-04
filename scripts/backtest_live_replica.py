@@ -163,6 +163,10 @@ def simulate(df, t, cfg, apply_slippage=True):
 
 EXIT_OLD = dict(stop_atr=1.5, max_stop_pct=0.10, t1_pct=0.10, t1_frac=0.5,
                 be_after_t1=True, t2_pct=0.28, trail_atr=2.5, trail_after=2.0, hold=10)
+# t1_frac 0.33 = CANLI değerle AYNI (tracker._t1_partial_fraction → settings
+# partial_at_t1_fraction). 2026-08-04'te parite kırığı bulundu: canlı %50
+# uygularken harness %33 ölçüyordu; ölçüm (measure_t1_fraction.py) %33'ün
+# %50'den +0.42 puan iyi olduğunu gösterdi ve canlı buna hizalandı.
 EXIT_NEW = dict(stop_atr=2.5, max_stop_pct=0.15, t1_pct=0.10, t1_frac=0.33,
                 be_after_t1=True, t2_pct=None, trail_atr=3.0, trail_after=1.5, hold=20)
 
