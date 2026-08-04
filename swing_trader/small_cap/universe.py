@@ -1,13 +1,13 @@
 """
-Small Cap Universe Provider - Dynamic universe using finvizfinance.
-Provides fresh small-cap stock lists from Finviz screener.
+Finviz tabanlı small/mid-cap aday havuzu (evren) sağlayıcısı.
 
-OPTIMIZED v3.0 - "Para Kazanma Makinesi" Edition
-- Pre-filters at Finviz level to avoid scanning 200+ stocks that will fail downstream
-- Multi-factor momentum ranking (not just today's change%)
-- Country filter to avoid ADR noise
-- Float filter to focus on explosion potential
-- Volatility filter to ensure tradeable setups
+Dört sorgu koşar ve birleştirir:
+  Q6/Q6b  20 günlük yeni zirve + SMA50 üstü  → VCE tetiğinin ön koşulu
+  Q7/Q7b  RVOL > 2 + yeşil + SMA20 üstü      → RVOL thrust beslemesi
+(small/mid ayrımı Finviz hacim eşiği bandına göre.)
+
+Sonuç dolar-hacme göre sıralanıp ``max_scan_tickers`` tavanına kırpılır.
+Finviz erişilemezse static yedek listeye düşer.
 """
 
 from __future__ import annotations
@@ -108,15 +108,10 @@ def _ticker_safe_overview_cls():
 
 def build_rank_info(df: pd.DataFrame, cap: int) -> Dict:
     """
-    Composite sıralamasından tavan (cap) telemetrisi üret — huni 3. aşama ölçümü.
+    Tavan (cap) telemetrisi — kesilen ticker'lar tarama geçmişine yazılır ki
+    "tavan bir VCE adayını kurban etti mi?" sorusu ölçülebilsin.
 
-    Sorgular bir VCE adayını getirse bile composite sıralaması onu
-    ``max_scan_tickers`` tavanının altına gömüp kestirebilir. Kesilen
-    ticker'lar burada kayda geçer ve tarama geçmişine yazılır; birkaç haftalık
-    canlı veriyle "tavan kurbanı VCE var mı?" sorusu ek tarama maliyeti
-    olmadan cevaplanır (2026-07-18, universe recall çalışmasının devamı).
-
-    df: composite_score'a göre ÇOKTAN sıralanmış DataFrame ('Ticker' kolonu).
+    df: sıralanmış DataFrame ('Ticker' kolonu zorunlu).
     """
     tickers = list(df['Ticker'])
     return {
@@ -128,24 +123,7 @@ def build_rank_info(df: pd.DataFrame, cap: int) -> Dict:
 
 
 class SmallCapUniverse:
-    """
-    Dynamic small-cap universe provider using finvizfinance.
-
-    PRE-SCREENING STRATEGY (v3.0):
-    We run TWO Finviz queries and merge results for maximum coverage:
-
-    Query 1 - MOMENTUM HUNTERS (aggressive):
-      Market Cap: Small ($300M-$2B), Float: Under 100M
-      Relative Volume: Over 1.5, Price: Over $3
-      Country: USA, Volatility: Week Over 5%
-
-    Query 2 - SETUP BUILDERS (wider net):
-      Market Cap: Small ($300M-$2B), Float: Under 100M
-      Average Volume: Over 1M, Price: Over $3
-      Country: USA, RSI: Not Overbought (<60)
-
-    Then rank by COMPOSITE MOMENTUM SCORE and return top N.
-    """
+    """Finviz sorgularını koşar, birleştirir, dolar-hacme göre sıralar."""
 
     # Known delisted/problematic tickers to exclude
     EXCLUDED_TICKERS = {
@@ -174,17 +152,6 @@ class SmallCapUniverse:
     def get_last_rank_info(self) -> Optional[Dict]:
         """Son Finviz fetch'inin sıralama/tavan telemetrisi (static path'te None)."""
         return self._last_rank_info
-
-    def _parse_percent(self, value) -> float:
-        """Parse percentage string like '5.23%' to float 5.23"""
-        try:
-            if isinstance(value, (int, float)):
-                return float(value)
-            if isinstance(value, str):
-                return float(value.replace('%', '').replace(',', ''))
-            return 0.0
-        except Exception:
-            return 0.0
 
     def _parse_volume(self, value) -> float:
         """Parse volume string like '1.5M' or '500K' to numeric"""
@@ -242,58 +209,8 @@ class SmallCapUniverse:
             logger.warning(f"  [{label}] query failed: {e}")
             return pd.DataFrame()
 
-    def _calculate_composite_score(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Evren sıralama anahtarını hesapla: DOLAR-HACİM (fiyat × hacim).
-
-        Sıralamanın tek işi, evren ``max_scan_tickers`` tavanını aştığında
-        hangi adayların taranacağına karar vermek. Tavan 15/15 taramada
-        bağlamadı (cut=0) ama evren 39 → 172'ye çıktı, yani yakında bağlayacak.
-        O yüzden sıralamanın SAVUNULABİLİR olması gerekiyor.
-
-        Neden dolar-hacim: measure_price_band.py kesişim testi fiyatı SABİT
-        tutup likiditeyi değiştirdiğinde likit grup +3.31% (WR %62), illikit
-        grup −2.14% (WR %44) verdi. Likidite elimizdeki en güçlü ayırıcı.
-        """
-        # Parse columns
-        if 'Volume' in df.columns:
-            df['vol_numeric'] = df['Volume'].apply(self._parse_volume)
-        else:
-            df['vol_numeric'] = 0.0
-
-        # ============================================================
-        # SIRALAMA ANAHTARI — dolar-hacim (fiyat × hacim)
-        # ============================================================
-        # 2026-08-04 TEMİZLİK: eski 4-ağırlıklı composite skor (rvol .30 /
-        # change .25 / volume .25 / mcap .20) + kovalama cezası + erken-birikim
-        # bonusu SİLİNDİ (~90 satır). Hiçbir ağırlık ölçülmemişti ve etkisi de
-        # doğrulanamıyordu: tavan 15/15 taramada bağlamadı (cut=0). Ama evren
-        # 39 → 172'ye çıkmıştı (tavan 260) — doğrulanmamış bir karar "hangi
-        # hisseler taranacak" sorusuna cevap vermeye hazır bekliyordu.
-        #
-        # Tek ölçüt DOLAR-HACİM, gerekçesi ÖLÇÜLMÜŞ: measure_price_band.py
-        # kesişim testi (fiyat SABİT, likidite değişken) likit grupta +3.31%
-        # WR %62 / illikit grupta −2.14% WR %44 verdi. Likidite elimizdeki en
-        # güçlü ayırıcı; tavan bağladığında en likit adayları korumak
-        # savunulabilir tek sıralama.
-        if 'Price' in df.columns:
-            df['price_numeric'] = pd.to_numeric(df['Price'], errors='coerce').fillna(15.0)
-        else:
-            df['price_numeric'] = 15.0
-        df['dollar_vol_numeric'] = df['vol_numeric'] * df['price_numeric']
-        df['composite_score'] = df['dollar_vol_numeric'].astype(float)
-
-        return df
-
     def get_finviz_universe(self, max_tickers: Optional[int] = None) -> List[str]:
-        """
-        Get small-cap universe from Finviz with optimized pre-screening.
-
-        Runs 2 queries for different profiles, merges and ranks by composite score.
-
-        Returns:
-            List of ticker symbols sorted by COMPOSITE MOMENTUM SCORE
-        """
+        """Dört Finviz sorgusunu koş, birleştir, dolar-hacme göre sırala, tavana kırp."""
         try:
             cap = self._us.max_scan_tickers if max_tickers is None else max_tickers
             self._last_rank_info = None  # başarısız fetch'te bayat telemetri kalmasın
@@ -301,63 +218,11 @@ class SmallCapUniverse:
 
             frames: List[pd.DataFrame] = []
 
-            # ============================================================
-            # QUERY 1/2/3 (MOMENTUM HUNTERS / SETUP BUILDERS / WIDER NET)
-            # SİLİNDİ — 2026-08-04. 2026-07-18 recall ölçümü
-            # (scripts/measure_universe_recall.py) üçünün de marjinal katkısını
-            # %0.5-2 bulmuştu ve settings üzerinden KAPATILMIŞLARDI. Ama kod
-            # 73 satır olarak durmaya devam ediyordu: kapalı, ölü, ama okuyanı
-            # "burada 6 sorgu var" diye yanıltan bir yük.
-            # Yeniden gerekirse git geçmişinde (7ad152f öncesi) duruyor.
-            # ============================================================
-
-            # ============================================================
-            # QUERY 4 (EARLY SETUP, RSI<=40) KALDIRILDI — 2026-07-18 recall
-            # ölçümü (scripts/measure_universe_recall.py): 408 doğrulanmış VCE
-            # sinyalinin 0'ını yakaladı. RSI<=40 şartı, kırılım gününün doğasıyla
-            # (green day + 20g yeni zirve) yapısal olarak çelişiyor. Q1-Q3 de
-            # aynı ölçümle settings üzerinden kapatıldı (%0.5-2 katkı).
-            # ============================================================
-
-            # ============================================================
-            # QUERY 5/5b (VCE BREAKOUT DAY, small+mid) KALDIRILDI — 2026-07-22
-            # marjinal-katkı ölçümü (scripts/measure_universe_recall.py, [3b]):
-            # 408 doğrulanmış VCE sinyalinden Q5/Q5b'nin yakaladığı 71'in
-            # HEPSİ zaten Q6/Q6b tarafından da yakalanmıştı — net katkı 0.
-            # Yapısal sebep (bağımsız kontrolle doğrulandı): Q5/Q5b'nin şartı
-            # "bugün %2+ arttı + hacim yüksek"; Q6/Q6b'nin şartı "20g zirve +
-            # trend yukarı" — bir hisse 20 günün zirvesine çıkarken pratikte
-            # her zaman o gün yükselip hacmi de artıyor, yani Q5/Q5b kümesi
-            # Q6/Q6b kümesinin bir ALT KÜMESİ. Ayrıca Q5/Q5b'nin RelVol/Change
-            # kriterleri pre-market'te sıfırlanmış Finviz kolonlarına bağımlı
-            # (saatten etkilenen tek sorgu grubuydu) — kaldırılınca bu
-            # kırılganlık da gider. Q6/Q6b (saatten bağımsız, dünün kapanışına
-            # göre) VCE'nin kesin ön koşulunu zaten tam kapsıyor.
-            # ============================================================
-
-            # ============================================================
-            # QUERY 6: 20-DAY NEW HIGH IN UPTREND (v13.3 — VCE precise feed)
-            # The EXACT necessary condition for a VCE breakout is "closes at a
-            # new 20-day high while above SMA50". The momentum/volatility
-            # queries (1-3,5) select for stocks already MOVING — they
-            # systematically miss a quiet squeeze that breaks out on LOW
-            # volume / small change (which Variant B now accepts). This query
-            # surfaces EVERY 20-day-high-in-uptrend stock regardless of today's
-            # %change or RVOL, so the engine gets a shot at every real
-            # squeeze breakout. The engine then confirms the squeeze itself.
-            # No volatility/RSI/float cap — the validated rule has none.
-            # ============================================================
-            # 2026-08-03 — KEŞİF GENİŞLETMESİ (ölçülmüş): 'Over 500K' → 'Over 300K'.
-            # Gerekçe: canlı üretim ~0.6 Q80 sinyal/ay veriyordu; profesyonel swing
-            # pratiği 4-12 işlem/ay. scripts/analyze_signal_lab.py (108 sinyal, 21 ay)
-            # sekiz kapıyı tek tek gevşetti; dolar-hacim/mcap/fiyat kapılarını
-            # gevşetmek HİÇ ek sinyal getirmedi, yalnız bu bant getirdi:
-            #   +20 sinyal (%23 artış), ek sinyallerin EV'si +2.16% (pozitif),
-            #   toplam EV +2.32% → +2.29% (seyrelme yok), OOS'ta da tutuyor
-            #   (2025-06-01 kesimi: train +2.34% / test +2.25%).
-            # Likidite standardı DÜŞMÜYOR: motorun $5M/gün dolar-hacim hard-gate'i
-            # (filters.apply_all_filters) aynen duruyor. Bu yalnız KEŞİF katmanı —
-            # havuza daha çok aday girer, kararı yine motor verir.
+            # DÖRT AKTİF SORGU: Q6/Q6b (20g yeni zirve — VCE'nin ön koşulu) ve
+            # Q7/Q7b (RVOL patlaması — RVOL thrust'ın beslemesi). Small ve mid
+            # bantları ayrı çünkü Finviz hacim eşiği bandına göre değişiyor.
+            # Kaldırılmış sorguların (Q1-Q5) ölçüm gerekçeleri: GATE_AUDIT.md +
+            # scripts/measure_universe_recall.py. Kodları git geçmişinde.
             q6_filters = {
                 'Market Cap.': 'Small ($300mln to $2bln)',
                 'Price': 'Over $7',
@@ -452,25 +317,21 @@ class SmallCapUniverse:
                 logger.warning("All tickers filtered out after post-processing")
                 return []
 
-            # ============================================================
-            # COMPOSITE MOMENTUM RANKING
-            # ============================================================
-            df = self._calculate_composite_score(df)
-
-            # Sort by composite score (highest first)
-            df = df.sort_values('composite_score', ascending=False)
-
-            # Get top tickers
+            # Sıralama: DOLAR-HACİM (fiyat × hacim), en likit önce.
+            # Tek işi tavan bağladığında hangi adayların taranacağını seçmek.
+            # Neden likidite: measure_price_band.py kesişim testi (fiyat sabit,
+            # likidite değişken) likit grupta +3.31% / illikitte −2.14% verdi.
+            df['dollar_volume'] = (
+                df['Volume'].apply(self._parse_volume)
+                * pd.to_numeric(df.get('Price'), errors='coerce').fillna(15.0)
+            )
+            df = df.sort_values('dollar_volume', ascending=False)
             tickers = df['Ticker'].head(cap).tolist()
 
-            # Tavan telemetrisi (cap kesintisi + tam sıralama) — scanner stats'a akar
+            # Tavan telemetrisi → scanner stats. Tavan bağlaması ANORMAL
+            # (15/15 taramada bağlamadı), o yüzden WARNING.
             self._last_rank_info = build_rank_info(df, cap)
             if self._last_rank_info['cut_tickers']:
-                # 2026-08-04: INFO → WARNING. Tavan bağlaması ANORMAL bir durum:
-                # 15/15 taramada hiç bağlamadı (cut=0), yani bağladığı gün
-                # ya evren beklenmedik şekilde büyümüş ya sorgu bozulmuş demektir.
-                # Ayrıca sıralama artık dolar-hacme göre — tavan bağladığında
-                # EN LİKİT adaylar korunur, en illikitler kesilir (ölçülmüş yön).
                 logger.warning(
                     "Universe cap BAĞLADI: %d ticker tavanın (%d) altında kaldı — "
                     "en düşük dolar-hacimliler kesildi: %s",
@@ -479,7 +340,7 @@ class SmallCapUniverse:
                 )
 
             # Log diagnostics
-            top_cols = ['Ticker', 'Price', 'Change', 'Volume', 'composite_score']
+            top_cols = ['Ticker', 'Price', 'Change', 'Volume', 'dollar_volume']
             available_cols = [c for c in top_cols if c in df.columns]
             top_10 = df.head(10)[available_cols]
             logger.info(f"Top 10 momentum candidates:\n{top_10.to_string()}")
