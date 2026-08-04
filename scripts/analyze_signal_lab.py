@@ -27,7 +27,10 @@ MAXES = dict(vol=30, atr=25, float=20, mom=15, risk=15, trend=25)
 OOS_SPLIT = "2025-06-01"
 
 # Canlı (mevcut) kapı değerleri
-LIVE = dict(price=7.0, mcap_m=250.0, dvol_m=5.0, avgvol_k=500.0)
+# 2026-08-04: price_max 1000 → 200 (measure_price_band.py: $200+ EV -2.24%,
+# OOS +2.51→+3.45; mekanik sebep: $2.500 pozisyon tavanında $200 üstü hissede
+# 1 hisse pozisyonun >%8'i, sizing yuvarlamaya boğuluyor).
+LIVE = dict(price=7.0, price_max=200.0, mcap_m=250.0, dvol_m=5.0, avgvol_k=500.0)
 
 
 def load():
@@ -38,10 +41,13 @@ def load():
     return recs
 
 
-def gate(recs, price=None, mcap_m=None, dvol_m=None, avgvol_k=None, mcap_max=None):
+def gate(recs, price=None, price_max=None, mcap_m=None, dvol_m=None,
+         avgvol_k=None, mcap_max=None):
     out = recs
     if price is not None:
         out = [r for r in out if r["price"] >= price]
+    if price_max is not None:
+        out = [r for r in out if r["price"] <= price_max]
     if mcap_m is not None:
         out = [r for r in out if r["mcap_m"] >= mcap_m]
     if mcap_max is not None:
