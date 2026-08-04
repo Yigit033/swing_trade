@@ -365,15 +365,28 @@ class SmallCapUniverse:
         df['early_bonus'] = np.where(early_accumulation, 15, 0)
 
         # ============================================================
-        # COMPOSITE SCORE
+        # SIRALAMA ANAHTARI — 2026-08-04'te BASİTLEŞTİRİLDİ
         # ============================================================
-        df['composite_score'] = (
-            df['rvol_score'] * us.rank_weight_rvol
-            + df['change_score'] * us.rank_weight_change
-            + df['vol_score'] * us.rank_weight_volume
-            + df['mcap_score'] * us.rank_weight_mcap
-            + df['early_bonus']
-        )
+        # ESKİ: 4 ağırlıklı composite (rvol .30 / change .25 / volume .25 /
+        # mcap .20) + kovalama cezası + erken-birikim bonusu.
+        # SORUN: bu ağırlıkların HİÇBİRİ ölçülmemişti ve sıralama 15/15
+        # taramada tavanı hiç kesmediği için etkisi de doğrulanamıyordu
+        # (universe_cut_count = 0). Yani doğrulanmamış bir karar, sessizce
+        # "hangi hisseler taranacak" sorusuna cevap vermeye hazır bekliyordu.
+        # Evren 39 → 172'ye çıktı (tavan 260) — yakında devreye girecekti.
+        #
+        # YENİ: tek ölçüt = DOLAR-HACİM (fiyat × hacim). Sebebi ölçülmüş:
+        # measure_price_band.py kesişim testi, fiyat sabit tutulup likidite
+        # değiştirildiğinde likit grup +3.31% / illikit grup -2.14% verdi —
+        # likidite, elimizdeki EN GÜÇLÜ ayırıcı. Tavan bağladığında en likit
+        # adayları taramak, doğrulanmamış 4 ağırlığa göre sıralamaktan daha
+        # savunulabilir. Ayrıca tek satır: anlaşılır, test edilebilir.
+        #
+        # Diğer bileşenler (rvol_score, change_score, mcap_score, early_bonus)
+        # telemetri/gösterim için HESAPLANMAYA DEVAM EDİYOR ama sıralamaya
+        # girmiyor — silmek yerine etkisiz bırakıldı ki eski tarama kayıtları
+        # okunabilir kalsın.
+        df['composite_score'] = df['dollar_vol_numeric'].astype(float)
 
         return df
 
@@ -598,8 +611,14 @@ class SmallCapUniverse:
             # Tavan telemetrisi (cap kesintisi + tam sıralama) — scanner stats'a akar
             self._last_rank_info = build_rank_info(df, cap)
             if self._last_rank_info['cut_tickers']:
-                logger.info(
-                    "Universe cap cut: %d ticker tavanın (%d) altında kaldı: %s",
+                # 2026-08-04: INFO → WARNING. Tavan bağlaması ANORMAL bir durum:
+                # 15/15 taramada hiç bağlamadı (cut=0), yani bağladığı gün
+                # ya evren beklenmedik şekilde büyümüş ya sorgu bozulmuş demektir.
+                # Ayrıca sıralama artık dolar-hacme göre — tavan bağladığında
+                # EN LİKİT adaylar korunur, en illikitler kesilir (ölçülmüş yön).
+                logger.warning(
+                    "Universe cap BAĞLADI: %d ticker tavanın (%d) altında kaldı — "
+                    "en düşük dolar-hacimliler kesildi: %s",
                     len(self._last_rank_info['cut_tickers']), cap,
                     self._last_rank_info['cut_tickers'][:15],
                 )

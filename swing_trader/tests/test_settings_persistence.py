@@ -140,3 +140,39 @@ def test_corrupt_db_patch_does_not_break_loading(monkeypatch):
     monkeypatch.setattr(sc, "_db_overlay", lambda: {"auto_scan": {"enabled": "evet-mi-hayır-mı"}})
     s = sc.load_settings()          # fırlatmamalı
     assert s.auto_scan.enabled in (True, False)
+
+
+# ── Kademeli geri çekilme (2026-08-04) ───────────────────────────────────
+# RİSK: DB yaması katmanı eklendiğinde şu senaryo doğdu — bir ayar alanı koddan
+# kaldırılırsa (model extra="forbid") ama DB'deki eski yama o alanı taşırsa,
+# doğrulama patlar ve load_settings TÜM kalibrasyonu (eşikler, exit, evren
+# filtreleri) sessizce varsayılana düşürür. Ölçülmüş her parametre bir anda
+# kaybolur ve kimse fark etmez. Çözüm: katmanları tek tek geri çek.
+
+def test_invalid_db_patch_falls_back_to_file_not_defaults(monkeypatch, tmp_path):
+    """
+    Bozuk DB yaması yalnız KENDİSİ yok sayılmalı; dosya katmanındaki ölçülmüş
+    değerler KORUNMALI. Eskiden hepsi birden varsayılana düşüyordu.
+    """
+    # Dosya katmanında ölçülmüş, varsayılandan FARKLI bir değer olsun
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps({"max_holding_days": 17}), encoding="utf-8")
+    monkeypatch.setattr(sc, "DEFAULT_SETTINGS_PATH", p)
+    # DB yaması geçersiz (modelde olmayan alan → extra="forbid" patlatır)
+    monkeypatch.setattr(sc, "_db_overlay", lambda: {"bu_alan_yok_artik": 123})
+
+    s = sc.load_settings()
+    assert s.max_holding_days == 17, (
+        "bozuk DB yaması dosya katmanındaki ölçülmüş değeri de sildi — "
+        "kademeli geri çekilme çalışmıyor"
+    )
+
+
+def test_invalid_file_and_db_falls_back_to_defaults(monkeypatch, tmp_path):
+    """İki katman da bozuksa varsayılana düşer (son çare) ama ÇÖKMEZ."""
+    p = tmp_path / "s.json"
+    p.write_text('{"bu_alan_yok_artik": 1}', encoding="utf-8")
+    monkeypatch.setattr(sc, "DEFAULT_SETTINGS_PATH", p)
+    monkeypatch.setattr(sc, "_db_overlay", lambda: {"baska_olmayan_alan": 2})
+    s = sc.load_settings()          # fırlatmamalı
+    assert s.max_holding_days == sc.SmallCapSettings().max_holding_days

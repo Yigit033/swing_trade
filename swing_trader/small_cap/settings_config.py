@@ -284,7 +284,32 @@ def load_settings(path: Optional[Path] = None) -> SmallCapSettings:
     try:
         return SmallCapSettings.model_validate(base)
     except Exception as e:
-        logger.error("Settings validation failed: %s — using defaults", e)
+        # KADEMELİ GERİ ÇEKİLME — hepsini birden varsayılana düşürmek TEHLİKELİ.
+        # Senaryo: bir ayar alanı koddan kaldırılır (model extra="forbid"), ama
+        # DB'deki eski kullanıcı yaması o alanı hâlâ taşır → doğrulama patlar →
+        # sistem SESSİZCE tüm kalibrasyonu (eşikler, exit, evren) varsayılana
+        # düşürür. Ölçülmüş her parametre bir anda kaybolur ve kimse fark etmez.
+        # Bu yüzden önce sadece DB katmanını atarak dene; o da tutmazsa dosya
+        # katmanını dene; en son çare varsayılan.
+        logger.error("Settings validation failed (%s) — katmanlar tek tek geri çekiliyor", e)
+
+        if path is None:
+            try:
+                file_only = SmallCapSettings().model_dump(mode="json")
+                if p.exists():
+                    raw = json.loads(p.read_text(encoding="utf-8"))
+                    if isinstance(raw, dict):
+                        file_only = _deep_merge(file_only, raw)
+                s = SmallCapSettings.model_validate(file_only)
+                logger.error(
+                    "DB ayar yaması geçersiz — YOK SAYILDI, dosya katmanıyla devam "
+                    "ediliyor. Yamayı düzeltmek için: POST /api/settings/reset"
+                )
+                return s
+            except Exception as e2:
+                logger.error("Dosya katmanı da geçersiz (%s)", e2)
+
+        logger.error("TÜM KATMANLAR GEÇERSİZ — kod varsayılanlarına düşüldü (kalibrasyon KAYIP)")
         return SmallCapSettings.model_validate(SmallCapSettings().model_dump(mode="json"))
 
 
