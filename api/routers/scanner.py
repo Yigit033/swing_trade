@@ -45,6 +45,15 @@ logger = logging.getLogger(__name__)
 # o da tutmazsa açık bir data_quality hatasına çevirir.
 MIN_FETCH_SUCCESS_RATIO = 0.5
 
+# Hisselerin bu orandan fazlası beklenen son seansın GERİSİNDE kalmışsa tarama
+# durdurulur. 2026-08-04: yfinance 03 Ağustos barını tüm piyasa için OHLC=NaN
+# döndürdü (SPY ve AAPL dahil); NaN-guard barı düşürünce sistem sessizce iki
+# seans eski veriyle koştu. Fetch-oranı devre kesicisi bunu yakalamıyor çünkü
+# fetch başarılı — eksik olan yalnız en son bar. Sessizce bayat sinyal üretmek
+# hiç üretmemekten kötü: geçmiş bir kırılımı "bugünün fırsatı" sanıp ölçülen
+# t+1 girişini kaçırırız.
+STALE_ABORT_RATIO = 0.5
+
 SESSION_WARNINGS = {
     "pre_market": (
         "Tarama pre-market'te çalıştı (ET < 09:30): Finviz'in anlık Change/RelVol "
@@ -283,6 +292,58 @@ def _scan_regime_and_thresholds(
     return actual_regime, 1.0, regime_confidence, eff_min, eff_top
 
 
+def _assess_data_staleness(data_dict: dict, now=None) -> dict:
+    """
+    "Gelen barlar beklenen son tamamlanmış seansa ait mi?" sorusunu ölçer.
+
+    Sağlayıcı arızalarında (2026-08-04: yfinance tüm piyasa için son barı
+    OHLC=NaN döndürdü) NaN-guard son barı düşürür ve sistem sessizce bir/iki
+    seans eski veriye düşer. Bu fonksiyon o durumu SAYISALLAŞTIRIR; çağıran
+    taraf eşiği aşarsa taramayı durdurur.
+
+    Neden çoğunluk (mod) barına bakıyoruz: tek tek hisselerin bar tarihi meşru
+    sebeplerle geride olabilir (halt, yeni listing, düşük likidite). Sistemik
+    arıza ise HERKESİ aynı tarihte bırakır — mod tam bunu yakalar.
+    """
+    from collections import Counter
+
+    from swing_trader.utils.market_calendar import last_completed_session, sessions_behind
+
+    expected = last_completed_session(now)
+    dates = []
+    for df in data_dict.values():
+        try:
+            if df is None or len(df) == 0 or "Date" not in df.columns:
+                continue
+            dates.append(pd.to_datetime(df["Date"].iloc[-1]).date())
+        except Exception:
+            continue
+
+    total = len(dates)
+    if total == 0:
+        return {"abort": False, "total": 0, "stale_count": 0, "stale_ratio": 0.0,
+                "expected_session": str(expected), "dominant_bar_date": None,
+                "dominant_sessions_behind": 0}
+
+    stale_count = sum(1 for d in dates if sessions_behind(d, now) >= 1)
+    dominant, _ = Counter(dates).most_common(1)[0]
+    behind = sessions_behind(dominant, now)
+    ratio = stale_count / total
+
+    return {
+        # Eşik MIN_FETCH_SUCCESS_RATIO ile aynı mantık: çoğunluk bozuksa dur.
+        # Çoğunluğun bar tarihi de geride olmalı — yoksa tek tek gecikmeler
+        # (halt/yeni listing) taramayı durdurmasın.
+        "abort": ratio > STALE_ABORT_RATIO and behind >= 1,
+        "total": total,
+        "stale_count": stale_count,
+        "stale_ratio": round(ratio, 3),
+        "expected_session": str(expected),
+        "dominant_bar_date": str(dominant),
+        "dominant_sessions_behind": behind,
+    }
+
+
 def _execute_smallcap_scan(
     body: ScanRequest,
     on_progress: Optional[Callable[[int, str, str], None]] = None,
@@ -367,6 +428,45 @@ def _execute_smallcap_scan(
             if session_warning:
                 stats["session_warning"] = session_warning
             return {"signals": [], "stats": stats, "market_regime": "UNKNOWN"}
+
+    # ── Bayatlık devre kesicisi ───────────────────────────────────────────
+    # 2026-08-04: yfinance 03 Ağustos barını TÜM piyasa için OHLC=NaN / hacim
+    # dolu döndürdü (14/15 örnek ticker, SPY ve AAPL dahil). NaN-guard barı
+    # doğru şekilde düşürüyor ama sistem sessizce iki seans eski (31 Temmuz)
+    # veriye düşüyordu: tarama, rejim tespiti (SPY) ve çıkış kontrolü hep bayat
+    # barla koşuyordu. Fetch-oranı devre kesicisi bunu YAKALAMIYOR çünkü fetch
+    # başarılı — eksik olan yalnız EN SON bar.
+    # Sessizce bayat sinyal üretmek, hiç sinyal üretmemekten çok daha kötü:
+    # eski bir kırılımı "bugünün fırsatı" sanıp t+1 girişini kaçırmış oluruz.
+    stale_info = _assess_data_staleness(data_dict)
+    if stale_info["abort"]:
+        logger.error(
+            "Stale data abort: %d/%d ticker beklenen seansın (%s) gerisinde; "
+            "en yaygın bar tarihi %s (%d seans eski)",
+            stale_info["stale_count"], stale_info["total"], stale_info["expected_session"],
+            stale_info["dominant_bar_date"], stale_info["dominant_sessions_behind"],
+        )
+        stats = {
+            "reason": "stale_data",
+            "message": (
+                f"Fiyat verisi güncel değil: hisselerin %{stale_info['stale_ratio'] * 100:.0f}'ı "
+                f"{stale_info['dominant_bar_date']} barında kalmış (beklenen son seans "
+                f"{stale_info['expected_session']}, {stale_info['dominant_sessions_behind']} seans eski). "
+                "Veri sağlayıcısı son seansı OHLC=NaN döndürüyor. Tarama, bayat barla "
+                "sahte sinyal üretmek yerine güvenli şekilde durduruldu — sağlayıcı "
+                "veriyi düzeltince (genelde birkaç saat) tekrar deneyin."
+            ),
+            "stocks_scanned": len(tickers),
+            "stocks_with_data": len(data_dict),
+            "fetch_success_ratio": round(fetch_ratio, 3),
+            "market_session": market_session,
+            "data_as_of": stale_info["dominant_bar_date"],
+            "expected_session": stale_info["expected_session"],
+            "sessions_behind": stale_info["dominant_sessions_behind"],
+        }
+        if session_warning:
+            stats["session_warning"] = session_warning
+        return {"signals": [], "stats": stats, "market_regime": "UNKNOWN"}
 
     prog(83, "fetch", f"Price data ready: {len(data_dict)}/{len(tickers)} tickers")
 

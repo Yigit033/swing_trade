@@ -49,6 +49,13 @@ function ScanHealthBanners({ stats }: { stats: Record<string, unknown> }) {
             key: "rl", color: "#f59e0b", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.3)",
             text: message || "Veri kaynağı rate limit uyguladı. Birkaç dakika sonra tekrar deneyin.",
         });
+    } else if (reason === "stale_data") {
+        // 2026-08-04: sağlayıcı son seansı OHLC=NaN döndürdüğünde sistem sessizce
+        // eski bara düşüyordu. Artık tarama duruyor ve sebebi burada görünüyor.
+        banners.push({
+            key: "stale", color: "var(--red)", bg: "rgba(239,68,68,0.1)", border: "rgba(239,68,68,0.3)",
+            text: message || "Fiyat verisi güncel değil — tarama bayat barla sinyal üretmemek için durduruldu.",
+        });
     }
     if (sessionWarning) {
         banners.push({
@@ -336,7 +343,7 @@ function SignalCard({ s, onTrack, tracking }: { s: Signal; onTrack: (s: Signal) 
                             {s.swing_type === "A" && "📊 Trend devamı — Mevcut trende uygun giriş. Planlı kâr al."}
                         </div>
                         {s.target_2 != null && s.target_1 != null && s.target_2 > s.target_1 && (
-                            <div>🎯 T1'de %50 sat (${s.target_1.toFixed(2)}), kalan %50'yi T2'ye taşı (${s.target_2.toFixed(2)}). Stop → breakeven.</div>
+                            <div>🎯 T1&apos;de %50 sat (${s.target_1.toFixed(2)}), kalan %50&apos;yi T2&apos;ye taşı (${s.target_2.toFixed(2)}). Stop → breakeven.</div>
                         )}
                         {(s.rsi || 50) > 70 && (
                             <div style={{ color: "var(--yellow)" }}>⚠️ RSI yüksek ({s.rsi?.toFixed(0)}) — kademeli kâr al, tam pozisyon girme.</div>
@@ -348,7 +355,7 @@ function SignalCard({ s, onTrack, tracking }: { s: Signal; onTrack: (s: Signal) 
                             <div style={{ color: "var(--red)" }}>🐻 Bear market — Pozisyon boyutunu %50 küçült, daha sıkı stop kullan.</div>
                         )}
                         {s.market_regime === "CAUTION" && (
-                            <div style={{ color: "var(--yellow)" }}>⚠️ Piyasa temkinli — Normal pozisyonun %75'i ile gir.</div>
+                            <div style={{ color: "var(--yellow)" }}>⚠️ Piyasa temkinli — Normal pozisyonun %75&apos;i ile gir.</div>
                         )}
                         {s.obv_accumulation && (
                             <div style={{ color: "var(--green)" }}>📊 Smart money birikim yapıyor — güçlü destek sinyali.</div>
@@ -996,7 +1003,7 @@ export default function ScannerPage() {
                         <div className="glass-card" style={{ padding: 48, textAlign: "center", color: "var(--text-muted)" }}>
                             <TrendingUp size={48} style={{ marginBottom: 12, opacity: 0.3 }} />
                             <div>
-                                {["data_quality", "rate_limited"].includes(String((result.stats as Record<string, unknown>).reason))
+                                {["data_quality", "rate_limited", "stale_data"].includes(String((result.stats as Record<string, unknown>).reason))
                                     ? "Tarama veri sorunu nedeniyle tamamlanamadı — yukarıdaki uyarıya bakın."
                                     : "Mevcut filtrelerle sinyal bulunamadı. Min Quality'yi düşürmeyi deneyin."}
                             </div>

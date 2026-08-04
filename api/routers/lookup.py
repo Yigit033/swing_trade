@@ -8,6 +8,7 @@ with the exact rejection stage reported for each ticker.
 
 import logging
 from datetime import datetime
+import pandas as pd
 import yfinance as yf
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -185,8 +186,13 @@ def lookup_tickers(body: LookupRequest):
     for ticker in body.tickers:
         ticker = ticker.upper().strip()
         try:
-            # Use DataFetcher — same fetch path as the scanner
-            df = fetcher.fetch_stock_data(ticker, period='3mo')
+            # Use DataFetcher — same fetch path as the scanner.
+            # 2026-08-04: period 3mo → 6mo. Taramayla AYNI pencere olmalı; VCE'nin
+            # 50 günlük RVOL/hacim tabanı 3mo'nun (~62 bar) sınırına tehlikeli
+            # yakındı ve tek eksik bar (halt, yeni listing) sessiz bir ayrışma
+            # üretebilirdi. Aynı motora farklı veri vermek, lookup ile taramanın
+            # farklı cevap vermesi demektir — kullanıcı hangisine güvenecek?
+            df = fetcher.fetch_stock_data(ticker, period='6mo')
 
             if df is None or len(df) < 20:
                 results.append({
@@ -195,6 +201,18 @@ def lookup_tickers(body: LookupRequest):
                 })
                 continue
 
+            # Değerlendirilen barın tarihi + bayatlık. Sağlayıcı arızasında
+            # (2026-08-04: yfinance son barı OHLC=NaN döndürdü) NaN-guard barı
+            # düşürüyor ve lookup sessizce ESKİ bara bakıyordu — kullanıcı
+            # "tarama sinyal verdi ama lookup vermedi" diye haklı olarak
+            # sistemin tutarsız olduğunu düşündü. Artık hangi bara bakıldığı
+            # ve kaç seans geride olduğu cevapta açıkça yazıyor.
+            from swing_trader.utils.market_calendar import (
+                last_completed_session, sessions_behind,
+            )
+            _bar_date = pd.to_datetime(df["Date"].iloc[-1]).date()
+            _behind = sessions_behind(_bar_date)
+
             info = {}
             try:
                 info = yf.Ticker(ticker).info or {}
@@ -202,6 +220,16 @@ def lookup_tickers(body: LookupRequest):
                 pass
 
             result = _analyze_smallcap_ticker(ticker, df, info, engine, body.portfolio_value)
+            result["data_as_of"] = str(_bar_date)
+            result["expected_session"] = str(last_completed_session())
+            result["sessions_behind"] = _behind
+            if _behind >= 1:
+                result["stale_warning"] = (
+                    f"Değerlendirilen bar {_bar_date} — beklenen son seansın {_behind} "
+                    f"seans gerisinde. Veri sağlayıcısı son seansı bozuk (OHLC=NaN) "
+                    f"döndürüyor, bu yüzden analiz eski barla yapıldı. Sağlayıcı "
+                    f"veriyi düzeltince sonuç değişebilir."
+                )
             # CRITICAL: convert all numpy types before JSON serialization
             results.append(sanitize_for_json(result))
 

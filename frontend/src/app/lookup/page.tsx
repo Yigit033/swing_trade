@@ -40,6 +40,11 @@ type AnalysisResult = {
     filter_passed?: boolean;
     trigger_passed?: boolean;
     rejection_reason?: string;
+    // Hangi bara göre değerlendirildi (sağlayıcı arızasında bayat olabilir)
+    data_as_of?: string;
+    expected_session?: string;
+    sessions_behind?: number;
+    stale_warning?: string;
     rsi?: number;
     five_day_return?: number;
     quality_score?: number;
@@ -130,6 +135,13 @@ function ResultCard({ r, onAdd, adding }: { r: AnalysisResult; onAdd: (r: Analys
                         <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.05em", marginTop: 2, color: isSignal ? "var(--green)" : isError ? "var(--yellow)" : "var(--red)" }}>
                             {isSignal ? "✅ SWING HAZIR" : isError ? `⚠️ HATA — ${r.message}` : "❌ SWING HAZIR DEĞİL"}
                         </div>
+                        {/* Hangi bara göre karar verildi — sağlayıcı arızasında bayat olabilir */}
+                        {r.data_as_of && (
+                            <div style={{ fontSize: "0.65rem", marginTop: 3, color: (r.sessions_behind ?? 0) >= 1 ? "var(--yellow)" : "var(--text-muted)" }}>
+                                📅 bar: {r.data_as_of}
+                                {(r.sessions_behind ?? 0) >= 1 && ` — ${r.sessions_behind} seans ESKİ (beklenen ${r.expected_session})`}
+                            </div>
+                        )}
                     </div>
                 </div>
                 {/* Quick metrics */}
@@ -154,6 +166,17 @@ function ResultCard({ r, onAdd, adding }: { r: AnalysisResult; onAdd: (r: Analys
 
             {open && !isError && (
                 <div style={{ padding: "18px 20px" }}>
+                    {/* ── Bayat veri uyarısı ────────────────────────────────────── */}
+                    {r.stale_warning && (
+                        <div style={{
+                            marginBottom: 16, padding: "10px 14px", borderRadius: 8,
+                            background: "rgba(234,179,8,0.10)", border: "1px solid rgba(234,179,8,0.35)",
+                            fontSize: "0.78rem", lineHeight: 1.5, color: "var(--yellow)",
+                        }}>
+                            ⚠️ <strong>Veri güncel değil.</strong> {r.stale_warning}
+                        </div>
+                    )}
+
                     {/* ── Stage tracker ──────────────────────────────────────────── */}
                     {!isSignal && (
                         <div style={{ marginBottom: 18 }}>

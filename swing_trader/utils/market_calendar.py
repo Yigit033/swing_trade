@@ -107,6 +107,52 @@ def next_session_open_et(d: date) -> datetime:
     return datetime(nxt.year, nxt.month, nxt.day, 9, 30, tzinfo=_NYSE_TZ)
 
 
+def prev_trading_day(d: date) -> date:
+    """Last NYSE session strictly BEFORE `d` (skips weekends + holidays)."""
+    prev = d - timedelta(days=1)
+    while not is_trading_day(prev):
+        prev -= timedelta(days=1)
+    return prev
+
+
+def last_completed_session(now: Optional[datetime] = None) -> date:
+    """
+    En son TAMAMLANMIŞ NYSE seansının tarihi.
+
+    Sistem yalnız tamamlanmış barlarla karar verir; bu fonksiyon "veri hangi
+    güne kadar gelmiş olmalı" sorusunun beklenen cevabını verir. Kapanış
+    16:00 ET; o saatten önceyse bugünün barı henüz tamamlanmamıştır.
+
+    2026-08-04 arızası bunun için gerekli oldu: yfinance 03 Ağustos barını
+    tüm piyasa için OHLC=NaN / hacim dolu döndürdü. NaN-guard barı düşürünce
+    sistem 31 Temmuz'a (iki seans eski) düşüyor ve bunu kimse fark etmiyordu —
+    tarama, rejim tespiti ve çıkış kontrolü sessizce bayat veriyle koşuyordu.
+    Bu fonksiyon "olması gereken" ile "gelen"i karşılaştırmayı mümkün kılar.
+    """
+    et = (now or datetime.now(tz=_NYSE_TZ)).astimezone(_NYSE_TZ)
+    today = et.date()
+    if is_trading_day(today) and et.time() >= dtime(16, 0):
+        return today
+    return prev_trading_day(today)
+
+
+def sessions_behind(bar_date: date, now: Optional[datetime] = None) -> int:
+    """
+    `bar_date` beklenen son tamamlanmış seansın KAÇ seans gerisinde?
+
+    0 = güncel, 1 = bir seans eski, ... Negatif olamaz (ileri tarihli bar 0 sayılır).
+    """
+    expected = last_completed_session(now)
+    if bar_date >= expected:
+        return 0
+    n = 0
+    cur = expected
+    while cur > bar_date and n < 30:
+        cur = prev_trading_day(cur)
+        n += 1
+    return n
+
+
 def entry_window_open(bar_date: date, now: Optional[datetime] = None) -> bool:
     """
     True while the measured entry for a signal bar is still takeable.
