@@ -1608,24 +1608,11 @@ export default function SettingsPage() {
                     min={0}
                     max={500}
                 />
-                <FieldBool
-                    label="Sorgu: Momentum hunters"
-                    hint="RVOL + volatilite ağırlıklı dar Finviz ekranı; kapatırsanız o kanaldan aday gelmez."
-                    value={nb(["universe_scan", "enable_finviz_query_momentum"], true)}
-                    onChange={(v) => sb(["universe_scan", "enable_finviz_query_momentum"], v)}
-                />
-                <FieldBool
-                    label="Sorgu: Setup builders"
-                    hint="Hacim + RSI ‘aşırı alım değil’ tabanlı ikinci ekran."
-                    value={nb(["universe_scan", "enable_finviz_query_setup"], true)}
-                    onChange={(v) => sb(["universe_scan", "enable_finviz_query_setup"], v)}
-                />
-                <FieldBool
-                    label="Sorgu: Wider net"
-                    hint="Daha geniş float bandı, yüksek RVOL şartı ile üçüncü kaynak."
-                    value={nb(["universe_scan", "enable_finviz_query_wider"], true)}
-                    onChange={(v) => sb(["universe_scan", "enable_finviz_query_wider"], v)}
-                />
+                {/* 2026-08-04: "Momentum hunters / Setup builders / Wider net"
+                    toggle'ları KALDIRILDI. Bu üç Finviz sorgusu 2026-07-18 recall
+                    ölçümünde %0.5-2 marjinal katkı verdiği için kapatılmıştı ve
+                    2026-08-04'te kodu da silindi. Toggle'ları burada bırakmak yeni
+                    bir "ölü ayar" tuzağı olurdu: kullanıcı açar, hiçbir şey olmaz. */}
                 <FieldNum
                     label="Son fiyat filtresi — min ($)"
                     hint="Finviz sonrası kod içi fiyat bandı (tablodaki Price sütunu)."

@@ -478,6 +478,9 @@ class SmallCapEngine:
 
             # Step 3.5: SWING CONFIRMATION GATE (NEW)
             # Must pass 5-day momentum > 0 AND Close > MA20
+            # GATE DENETİMİ (2026-08-04): ΔEV −0.50 (TRAIN −1.00 / OOS −0.10).
+            # EN KESKİN kapı: yalnız 4 sinyal ekliyor ama onların EV'si −7.16%.
+            # Az sayıda ama felaket işlemleri engelliyor. DOKUNMA.
             swing_ready = boosters.get('swing_ready', False)
             swing_details = boosters.get('swing_details', {})
 
@@ -638,6 +641,11 @@ class SmallCapEngine:
             # V4: Hard overextension gate — reject late entries (except squeeze candidates)
             overext_details = overext.get("details", {})
             five_day_total = overext_details.get("five_day_total", five_day_return)
+            # GATE DENETİMİ (2026-08-04): DORMANT — ΔEV 0.00, hiç ateşlenmiyor.
+            # Sebep yapısal: VCE muafiyeti + Weinstein Stage 3/4 reddi + swing
+            # onayı bu vakaları zaten eliyor. SİLİNMEDİ çünkü 3. pathway
+            # eklenirse popülasyon değişir ve koruyucu hale gelebilir; maliyeti
+            # sıfır, faydası opsiyon değeri (GATE_AUDIT.md).
             sg = self.settings.scan_gates
             if (
                 five_day_total > sg.late_entry_five_day_total_gt
@@ -701,6 +709,9 @@ class SmallCapEngine:
                 _dist_change_pct = (
                     float(df['Close'].iloc[-1]) / float(df['Close'].iloc[-2]) - 1
                 ) * 100
+            # GATE DENETİMİ (2026-08-04): DORMANT — ΔEV 0.00, hiç ateşlenmiyor.
+            # Sebep: VCE ve RVOL thrust İKİSİ DE yeşil kapanış şartı koyuyor,
+            # "hacimli düşüş günü" tetiği hiç geçemiyor. Bkz. GATE_AUDIT.md.
             if (
                 _dist_change_pct < sg.distribution_day_max_change_pct
                 and volume_surge >= sg.distribution_day_min_vol
@@ -743,6 +754,11 @@ class SmallCapEngine:
             # Stage 0 = insufficient data → pass through (don't penalize data gaps).
             # ================================================================
             _wstage = stage_data.get('stage', 0)
+            # GATE DENETİMİ (2026-08-04, measure_gate_value.py — GATE_AUDIT.md):
+            # EN GÜÇLÜ KAPI. Kaldırılınca EV +3.11% → +2.13% (ΔEV −0.98;
+            # TRAIN −1.46 / OOS −0.54, aynı yön). Eklediği 18 sinyalin EV'si
+            # −2.10%: dağıtım (Stage 3) / düşüş (Stage 4) fazına girmek doğrudan
+            # para kaybı. DOKUNMA.
             if _wstage > 0:
                 if sg.reject_stage4 and _wstage == 4:
                     logger.debug(

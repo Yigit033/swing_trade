@@ -310,13 +310,22 @@ class UniverseScanSettings(BaseModel):
         description="If Finviz returns at least this many names, skip merging static_seed / tier lists.",
     )
 
-    enable_finviz_query_momentum: bool = True
-    enable_finviz_query_setup: bool = True
-    enable_finviz_query_wider: bool = True
+    # 2026-08-04: enable_finviz_query_momentum / _setup / _wider KALDIRILDI.
+    # Üç sorgu 2026-07-18 recall ölçümünde %0.5-2 marjinal katkı verdiği için
+    # kapatılmıştı; kodu da silindi. Alanları burada bırakmak "ölü ayar" olurdu.
+    # NOT: eski JSON/DB yamaları bu anahtarları taşıyabilir → model extra="forbid"
+    # olduğu için doğrulama patlar. load_settings kademeli geri çekilme yapıyor
+    # (DB katmanını atıp dosyayla devam eder) ve _prune_removed_keys aşağıdaki
+    # listeyi sessizce temizler.
 
     post_filter_price_min: float = Field(default=3.0, ge=0.5, le=500.0)
     post_filter_price_max: float = Field(default=200.0, ge=1.0, le=50000.0)
 
+    # 2026-08-04: rank_weight_* artık SIRALAMAYA GİRMİYOR. Composite skor tek
+    # ölçüte indirildi (dolar-hacim — measure_price_band.py kesişim testi:
+    # likit +3.31% / illikit -2.14%). Alanlar geriye dönük uyumluluk için
+    # duruyor (eski JSON/DB yamaları taşıyor) ama etkisi YOK; UI'dan da
+    # kaldırıldı ki kullanıcı boşuna çevirmesin.
     rank_weight_rvol: float = Field(default=0.30, ge=0.0, le=1.0)
     rank_weight_change: float = Field(default=0.25, ge=0.0, le=1.0)
     rank_weight_volume: float = Field(default=0.25, ge=0.0, le=1.0)

@@ -407,54 +407,14 @@ class SmallCapUniverse:
             frames: List[pd.DataFrame] = []
 
             # ============================================================
-            # QUERY 1: MOMENTUM HUNTERS - Today's movers with tight float
+            # QUERY 1/2/3 (MOMENTUM HUNTERS / SETUP BUILDERS / WIDER NET)
+            # SİLİNDİ — 2026-08-04. 2026-07-18 recall ölçümü
+            # (scripts/measure_universe_recall.py) üçünün de marjinal katkısını
+            # %0.5-2 bulmuştu ve settings üzerinden KAPATILMIŞLARDI. Ama kod
+            # 73 satır olarak durmaya devam ediyordu: kapalı, ölü, ama okuyanı
+            # "burada 6 sorgu var" diye yanıltan bir yük.
+            # Yeniden gerekirse git geçmişinde (7ad152f öncesi) duruyor.
             # ============================================================
-            if self._us.enable_finviz_query_momentum:
-                q1_filters = {
-                    'Market Cap.': 'Small ($300mln to $2bln)',
-                    'Float': 'Under 100M',
-                    'Price': 'Over $7',
-                    'Country': 'USA',
-                    'Relative Volume': 'Over 1.5',
-                    'Volatility': 'Week - Over 5%',
-                    'Average Volume': 'Over 500K',
-                }
-                df1 = self._run_finviz_query(q1_filters, "MOMENTUM HUNTERS")
-                if len(df1) > 0:
-                    frames.append(df1)
-
-            # ============================================================
-            # QUERY 2: SETUP BUILDERS - High volume, not overbought
-            # ============================================================
-            if self._us.enable_finviz_query_setup:
-                q2_filters = {
-                    'Market Cap.': 'Small ($300mln to $2bln)',
-                    'Float': 'Under 100M',
-                    'Price': 'Over $7',
-                    'Country': 'USA',
-                    'Average Volume': 'Over 750K',
-                    'RSI (14)': 'Not Overbought (<60)',
-                    'Volatility': 'Week - Over 3%',
-                }
-                df2 = self._run_finviz_query(q2_filters, "SETUP BUILDERS")
-                if len(df2) > 0:
-                    frames.append(df2)
-
-            # ============================================================
-            # QUERY 3: WIDER NET - Larger float, strong volume
-            # ============================================================
-            if self._us.enable_finviz_query_wider:
-                q3_filters = {
-                    'Market Cap.': 'Small ($300mln to $2bln)',
-                    'Price': 'Over $7',
-                    'Country': 'USA',
-                    'Relative Volume': 'Over 2',
-                    'Average Volume': 'Over 1M',
-                    'Volatility': 'Week - Over 5%',
-                }
-                df3 = self._run_finviz_query(q3_filters, "WIDER NET")
-                if len(df3) > 0:
-                    frames.append(df3)
 
             # ============================================================
             # QUERY 4 (EARLY SETUP, RSI<=40) KALDIRILDI — 2026-07-18 recall

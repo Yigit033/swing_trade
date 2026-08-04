@@ -235,6 +235,38 @@ def default_settings() -> SmallCapSettings:
     return SmallCapSettings()
 
 
+# ── Koddan KALDIRILMIŞ ayar anahtarları ──────────────────────────────────
+# Model extra="forbid" olduğu için, bir alan koddan kaldırıldığında eski
+# JSON/DB yamalarında kalan anahtar doğrulamayı PATLATIR ve (kademeli geri
+# çekilmeye rağmen) kalibrasyon kaybı riski doğar. Bu liste o anahtarları
+# yükleme sırasında SESSİZCE ama LOGLANARAK atar.
+# Biçim: "bolum.alan" (üst seviye alanlar için sadece "alan").
+_REMOVED_KEYS = {
+    # 2026-08-04: Q1/Q2/Q3 Finviz sorguları silindi (recall ölçümü: %0.5-2 katkı)
+    "universe_scan.enable_finviz_query_momentum",
+    "universe_scan.enable_finviz_query_setup",
+    "universe_scan.enable_finviz_query_wider",
+}
+
+
+def _prune_removed_keys(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Koddan kaldırılmış anahtarları at (yerinde değiştirmez)."""
+    out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in data.items()}
+    dropped = []
+    for dotted in _REMOVED_KEYS:
+        if "." in dotted:
+            sec, key = dotted.split(".", 1)
+            if isinstance(out.get(sec), dict) and key in out[sec]:
+                out[sec].pop(key, None)
+                dropped.append(dotted)
+        elif dotted in out:
+            out.pop(dotted, None)
+            dropped.append(dotted)
+    if dropped:
+        logger.info("Kaldırılmış ayar anahtarları yok sayıldı: %s", ", ".join(sorted(dropped)))
+    return out
+
+
 def _db_overlay() -> Dict[str, Any]:
     """
     Kalıcı (DB) kullanıcı yamasını getir. DB yok/erişilemiyorsa {}.
@@ -268,7 +300,7 @@ def load_settings(path: Optional[Path] = None) -> SmallCapSettings:
             raw = json.loads(p.read_text(encoding="utf-8"))
             if not isinstance(raw, dict):
                 raise ValueError("settings file must be a JSON object")
-            base = _deep_merge(base, raw)
+            base = _deep_merge(base, _prune_removed_keys(raw))
         except Exception as e:
             logger.error("Failed to load %s: %s — using defaults", p, e)
     else:
@@ -279,7 +311,7 @@ def load_settings(path: Optional[Path] = None) -> SmallCapSettings:
     if path is None:
         overlay = _db_overlay()
         if overlay:
-            base = _deep_merge(base, overlay)
+            base = _deep_merge(base, _prune_removed_keys(overlay))
 
     try:
         return SmallCapSettings.model_validate(base)
