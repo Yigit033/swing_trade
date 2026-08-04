@@ -495,7 +495,6 @@ const SETTINGS_NAV_GROUPS: { id: SettingsNavGroupId; label: string; scrollToId: 
 const HASH_TO_NAV_GROUP: Partial<Record<string, SettingsNavGroupId>> = {
     "settings-ayar-rehberi-giris": "filters",
     "settings-section-sinyal-filtresi": "filters",
-    "settings-section-tarama-gecitleri": "filters",
     "settings-section-swing-hazirlik": "filters",
     "settings-section-backtest-giris-yurutme": "filters",
     "settings-section-evren-filtreleri": "universe",
@@ -1334,52 +1333,10 @@ export default function SettingsPage() {
                 />
             </Section>
 
-            <Section
-                id="settings-section-tarama-gecitleri"
-                title="Tarama geçitleri"
-                help="Tip S/C/B/A için ek güvenlik: aşırı 5 günlük getiri, ekstrem RSI, ‘geç giriş’ eşikleri. FOMO ve çok geç koşuya katılmayı kesmek için. Az aday kalıyorsa önce sinyal filtresine, çok ‘tepeden’ giriş varsa buraya bakın."
-            >
-                <FieldNum
-                    label="Parabol 5g getiri > %"
-                    hint="5 günlük getiri bu eşiği aşarsa parabolik / aşırı momentum sayılır (tip kurallarına bağlı)."
-                    value={nn(["scan_gates", "parabolic_five_day_return_gt"], 70)}
-                    onChange={(v) => sn(["scan_gates", "parabolic_five_day_return_gt"], v)}
-                    min={10}
-                    max={200}
-                />
-                <FieldNum
-                    label="Ekstrem 5g getiri > %"
-                    hint="Çok uçmuş trend; ilgili tip için ek koruma eşiği."
-                    value={nn(["scan_gates", "extreme_five_day_return_gt"], 60)}
-                    onChange={(v) => sn(["scan_gates", "extreme_five_day_return_gt"], v)}
-                    min={10}
-                    max={200}
-                />
-                <FieldNum
-                    label="Ekstrem RSI >"
-                    hint="RSI bu üstündeyse ‘çok ısınmış’ kabul edilir (tip bazlı geçit)."
-                    value={nn(["scan_gates", "extreme_rsi_gt"], 85)}
-                    onChange={(v) => sn(["scan_gates", "extreme_rsi_gt"], v)}
-                    min={50}
-                    max={100}
-                />
-                <FieldNum
-                    label="Geç giriş: 5g toplam > %"
-                    hint="5g toplam getiri bu kadar yüksekse + RSI aşağıdaki eşikteyse geç giriş sayılır."
-                    value={nn(["scan_gates", "late_entry_five_day_total_gt"], 30)}
-                    onChange={(v) => sn(["scan_gates", "late_entry_five_day_total_gt"], v)}
-                    min={0}
-                    max={100}
-                />
-                <FieldNum
-                    label="Geç giriş: RSI >"
-                    hint="Yukarıdaki 5g koşuluyla birlikte; geç FOMO girişlerini kesmek için."
-                    value={nn(["scan_gates", "late_entry_rsi_gt"], 65)}
-                    onChange={(v) => sn(["scan_gates", "late_entry_rsi_gt"], v)}
-                    min={40}
-                    max={95}
-                />
-            </Section>
+            {/* 2026-08-04: "Tarama geçitleri" bölümü KALDIRILDI. İçindeki 5 alanın
+                hepsi silinen ayarlardı: parabolic/extreme_* hiçbir kod tarafından
+                okunmuyordu (%100 ölü), late_entry_* ise ölçüldü ve ΔEV 0.00 çıktı
+                (hiç ateşlenmiyordu — measure_gate_value.py / GATE_AUDIT.md). */}
 
             <Section
                 id="settings-section-risk-hedefleri-rejim"
@@ -1631,67 +1588,10 @@ export default function SettingsPage() {
                     min={1}
                     max={50000}
                 />
-                <FieldNum
-                    label="Sıralama ağırlığı: rel. volume"
-                    hint="Dört ağırlığın toplamı 1.0 olmalı (±0.02)."
-                    value={nn(["universe_scan", "rank_weight_rvol"], 0.3)}
-                    onChange={(v) => sn(["universe_scan", "rank_weight_rvol"], v)}
-                    step="0.01"
-                    min={0}
-                    max={1}
-                />
-                <FieldNum
-                    label="Sıralama ağırlığı: günlük değişim"
-                    value={nn(["universe_scan", "rank_weight_change"], 0.25)}
-                    onChange={(v) => sn(["universe_scan", "rank_weight_change"], v)}
-                    step="0.01"
-                    min={0}
-                    max={1}
-                />
-                <FieldNum
-                    label="Sıralama ağırlığı: hacim"
-                    value={nn(["universe_scan", "rank_weight_volume"], 0.25)}
-                    onChange={(v) => sn(["universe_scan", "rank_weight_volume"], v)}
-                    step="0.01"
-                    min={0}
-                    max={1}
-                />
-                <FieldNum
-                    label="Sıralama ağırlığı: piyasa değeri şeridi"
-                    value={nn(["universe_scan", "rank_weight_mcap"], 0.2)}
-                    onChange={(v) => sn(["universe_scan", "rank_weight_mcap"], v)}
-                    step="0.01"
-                    min={0}
-                    max={1}
-                />
-                <FieldNum
-                    label="Chase cezası: değişim > % (yüksek)"
-                    value={nn(["universe_scan", "chase_penalty_change_pct_high"], 15)}
-                    onChange={(v) => sn(["universe_scan", "chase_penalty_change_pct_high"], v)}
-                    min={5}
-                    max={50}
-                />
-                <FieldNum
-                    label="Chase cezası: değişim > % (orta)"
-                    value={nn(["universe_scan", "chase_penalty_change_pct_mid"], 10)}
-                    onChange={(v) => sn(["universe_scan", "chase_penalty_change_pct_mid"], v)}
-                    min={1}
-                    max={40}
-                />
-                <FieldNum
-                    label="Chase ceza puanı (yüksek)"
-                    value={nn(["universe_scan", "chase_penalty_points_high"], 50)}
-                    onChange={(v) => sn(["universe_scan", "chase_penalty_points_high"], Math.round(v))}
-                    min={0}
-                    max={100}
-                />
-                <FieldNum
-                    label="Chase ceza puanı (orta)"
-                    value={nn(["universe_scan", "chase_penalty_points_mid"], 25)}
-                    onChange={(v) => sn(["universe_scan", "chase_penalty_points_mid"], Math.round(v))}
-                    min={0}
-                    max={100}
-                />
+                {/* 2026-08-04: 4 sıralama ağırlığı + 4 kovalama-cezası alanı
+                    KALDIRILDI. Composite sıralama tek ölçüte indi (dolar-hacim);
+                    ağırlıkların hiçbiri ölçülmemişti ve tavan 15/15 taramada
+                    bağlamadığı için etkisi de doğrulanamıyordu. */}
             </Section>
 
             <Section

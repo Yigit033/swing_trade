@@ -607,7 +607,17 @@ class SmallCapBacktester:
             risk_px = entry_price - sl
             reward_t1 = t1 - entry_price
             reward_t2 = t2 - entry_price
-            min_rr = self.settings.min_rr_type_c if swing_type == 'C' else self.settings.min_rr_at_entry
+            # 2026-08-04 PARİTE: canlı motor (engine.scan_stock) R:R minimumunu
+            # REJİME göre alıyor (regime_thresholds.bull/caution/bear_min_rr).
+            # Burada `min_rr_at_entry` kullanmak backtest'i canlıdan ayırırdı —
+            # tam olarak bu turda düzelttiğimiz hata sınıfı (T1 parite kırığı).
+            _rt = self.settings.regime_thresholds
+            _regime_rr = {
+                "BULL": _rt.bull_min_rr,
+                "CAUTION": _rt.caution_min_rr,
+                "BEAR": _rt.bear_min_rr,
+            }
+            min_rr = _regime_rr.get(regime_str, self.settings.min_rr_at_entry)
             if risk_px <= 0 or reward_t2 / risk_px < min_rr:
                 self._diag["entry_skip_rr"] += 1
                 logger.debug(

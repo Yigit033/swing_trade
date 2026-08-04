@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./venv/Scripts/python.exe -c ' *)",
+      "Bash(./venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('swing_trader/small_cap/smallcap_backtest.py',encoding='utf-8'\\).read\\(\\)\\); print\\('sozdizimi OK'\\)\")",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; & \"c:\\\\active_projects\\\\swing_trade\\\\venv\\\\Scripts\\\\python.exe\" -m pytest \"c:\\\\active_projects\\\\swing_trade\\\\swing_trader\\\\tests\" \"c:\\\\active_projects\\\\swing_trade\\\\api\\\\tests\" \"c:\\\\active_projects\\\\swing_trade\\\\tests\" -q 2>&1 | Select-Object -Last 22)",
+      "Bash(./venv/Scripts/python.exe -m pytest swing_trader/tests/test_smallcap_settings_config.py::test_default_matches_known_engine_constants -q)",
+      "PowerShell(cd \"c:\\\\active_projects\\\\swing_trade\\\\frontend\"; npx tsc --noEmit 2>&1 | Select-Object -Last 8; cd \"c:\\\\active_projects\\\\swing_trade\"; $env:PYTHONIOENCODING=\"utf-8\"; & \"c:\\\\active_projects\\\\swing_trade\\\\venv\\\\Scripts\\\\python.exe\" -m pytest \"c:\\\\active_projects\\\\swing_trade\\\\swing_trader\\\\tests\" \"c:\\\\active_projects\\\\swing_trade\\\\api\\\\tests\" \"c:\\\\active_projects\\\\swing_trade\\\\tests\" -q 2>&1 | Select-Object -Last 5)"
+    ]
+  }
+}

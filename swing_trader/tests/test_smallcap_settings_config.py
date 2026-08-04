@@ -20,14 +20,21 @@ from swing_trader.small_cap.settings_config import (
 def test_default_matches_known_engine_constants():
     d = default_settings()
     assert d.schema_version == 3
-    assert d.scan_gates.late_entry_rsi_gt == 65
+    # 2026-08-04: late_entry_* / parabolic_* / extreme_* SİLİNDİ (ölü ayar +
+    # ΔEV 0.00 ölçümü). Kalan iki scan_gate ÖLÇÜLDÜ ve işe yarıyor:
+    assert d.scan_gates.reject_stage3 is True
+    assert d.scan_gates.reject_stage4 is True
     assert d.swing.type_c.min_score == 10
     assert d.risk_targets.min_reward_risk_multiple_t1 == 1.5
     assert d.universe_filters.min_market_cap == 250_000_000
     assert d.universe_scan.max_scan_tickers == 260
     assert d.universe_scan.use_finviz is True
     assert d.universe_scan.min_finviz_tickers_skip_static_merge == 30
-    assert d.universe_scan.rank_weight_rvol == 0.30
+    # 2026-08-04: rank_weight_* / chase_penalty_* SİLİNDİ (composite sıralama
+    # tek ölçüte indi — dolar-hacim). Rejim R:R'leri koddan ayara taşındı:
+    assert d.regime_thresholds.bull_min_rr == 1.0
+    assert d.regime_thresholds.caution_min_rr == 1.5
+    assert d.regime_thresholds.bear_min_rr == 2.0
     assert d.backtest_type_quality.type_c_bear == 82
     assert len(d.scoring_tuning.volume_surge_tiers) == 8
     assert len(d.scoring_tuning.atr_percent_tiers) == 7
@@ -113,12 +120,21 @@ def test_empty_scoring_tier_lists_rejected():
             apply_settings_patch({"scoring_tuning": {"volume_surge_tiers": []}}, path=p)
 
 
-def test_universe_scan_weight_sum_validation():
+def test_universe_scan_price_band_validation():
+    """
+    2026-08-04: "rank ağırlıkları 1.0 olmalı" kuralı KALDIRILDI (ağırlıklar silindi).
+    Kalan tek tutarlılık kuralı fiyat bandı: maks > min olmalı.
+    """
+    base = default_settings().model_dump(mode="json")
     with pytest.raises(ValidationError):
         SmallCapSettings.model_validate(
             {
-                **default_settings().model_dump(mode="json"),
-                "universe_scan": {"rank_weight_rvol": 0.5, "rank_weight_change": 0.5},
+                **base,
+                "universe_scan": {
+                    **base["universe_scan"],
+                    "post_filter_price_min": 200.0,
+                    "post_filter_price_max": 7.0,
+                },
             }
         )
 

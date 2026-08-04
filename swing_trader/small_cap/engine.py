@@ -638,26 +638,10 @@ class SmallCapEngine:
                 _bump_scan_reject(reject_counts, "rsi_gate")
                 return None
 
-            # V4: Hard overextension gate — reject late entries (except squeeze candidates)
-            overext_details = overext.get("details", {})
-            five_day_total = overext_details.get("five_day_total", five_day_return)
-            # GATE DENETİMİ (2026-08-04): DORMANT — ΔEV 0.00, hiç ateşlenmiyor.
-            # Sebep yapısal: VCE muafiyeti + Weinstein Stage 3/4 reddi + swing
-            # onayı bu vakaları zaten eliyor. SİLİNMEDİ çünkü 3. pathway
-            # eklenirse popülasyon değişir ve koruyucu hale gelebilir; maliyeti
-            # sıfır, faydası opsiyon değeri (GATE_AUDIT.md).
+            # GEÇ GİRİŞ KAPISI SİLİNDİ — 2026-08-04 (measure_gate_value.py):
+            # ΔEV tam 0.00, hiç ateşlenmiyordu. VCE muafiyeti + Weinstein Stage
+            # 3/4 reddi + swing onayı bu vakaları zaten eliyordu.
             sg = self.settings.scan_gates
-            if (
-                five_day_total > sg.late_entry_five_day_total_gt
-                and rsi > sg.late_entry_rsi_gt
-                and swing_type != "S"
-                and not _is_vce  # v13: VCE measured edge includes these cases
-            ):
-                logger.debug(
-                    f"{ticker}: Late entry rejected — 5d={five_day_total:+.0f}%, RSI={rsi:.0f}"
-                )
-                _bump_scan_reject(reject_counts, "late_entry")
-                return None
 
             # ================================================================
             # V5.0: OBV DISTRIBUTION HARD GATE — Smart Money Filter
@@ -696,34 +680,10 @@ class SmallCapEngine:
                     _bump_scan_reject(reject_counts, "trend_phase_weak")
                     return None
 
-            # ================================================================
-            # DISTRIBUTION DAY HARD GATE
-            # High-volume red day = institutions exiting, not entering.
-            # If stock is down >5% today with 2x+ volume AND this is not
-            # a pullback entry (which has its own logic) → reject.
-            # Type S exempt: squeeze mechanics can show high-vol red days
-            # before the actual squeeze fires.
-            # ================================================================
-            _dist_change_pct = 0.0
-            if len(df) >= 2:
-                _dist_change_pct = (
-                    float(df['Close'].iloc[-1]) / float(df['Close'].iloc[-2]) - 1
-                ) * 100
-            # GATE DENETİMİ (2026-08-04): DORMANT — ΔEV 0.00, hiç ateşlenmiyor.
-            # Sebep: VCE ve RVOL thrust İKİSİ DE yeşil kapanış şartı koyuyor,
-            # "hacimli düşüş günü" tetiği hiç geçemiyor. Bkz. GATE_AUDIT.md.
-            if (
-                _dist_change_pct < sg.distribution_day_max_change_pct
-                and volume_surge >= sg.distribution_day_min_vol
-                and not pullback_data.get('detected', False)
-                and swing_type != 'S'
-            ):
-                logger.debug(
-                    f"{ticker}: Distribution day ({_dist_change_pct:+.1f}%, "
-                    f"vol={volume_surge:.1f}x) — hard reject"
-                )
-                _bump_scan_reject(reject_counts, "distribution_day")
-                return None
+            # DAĞITIM GÜNÜ KAPISI SİLİNDİ — 2026-08-04 (measure_gate_value.py):
+            # ΔEV tam 0.00, hiç ateşlenmiyordu. Sebep yapısal: VCE ve RVOL thrust
+            # İKİSİ DE "yeşil kapanış" şartı koyuyor, dolayısıyla "hacimli düşüş
+            # günü" bir sinyal olarak buraya hiç ulaşamıyordu.
 
             # Inject swing_type into boosters so scoring uses correct RSI penalty bands
             boosters['swing_type'] = swing_type
@@ -981,7 +941,16 @@ class SmallCapEngine:
             # ================================================================
             rr_t2 = signal.get('risk_reward_t2', 0)
             # Regime-aware R:R minimum: BULL tolerates lower R:R; BEAR demands more margin.
-            _regime_rr = {"BULL": 1.0, "CAUTION": 1.5, "BEAR": 2.0}
+            # 2026-08-04: değerler koda gömülü DEĞİL artık — regime_thresholds'tan
+            # okunuyor. Eskiden `{"BULL":1.0,"CAUTION":1.5,"BEAR":2.0}` gömülüydü ve
+            # `min_rr_at_entry=1.8` ayarı yalnız BİLİNMEYEN rejimde devreye giriyordu:
+            # ayar 1.8 diyor, gerçek 1.0-2.0 uygulanıyordu (yanıltıcı ayar tuzağı).
+            _rt = self.settings.regime_thresholds
+            _regime_rr = {
+                "BULL": _rt.bull_min_rr,
+                "CAUTION": _rt.caution_min_rr,
+                "BEAR": _rt.bear_min_rr,
+            }
             min_rr = _regime_rr.get(regime, self.settings.min_rr_at_entry)
             if rr_t2 < min_rr and swing_type != 'S':
                 logger.debug(

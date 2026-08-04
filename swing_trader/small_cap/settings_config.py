@@ -73,6 +73,15 @@ class RegimeThresholds(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # 2026-08-04: rejime göre R:R minimumları BURAYA taşındı. Eskiden engine.py
+    # içinde `_regime_rr = {"BULL": 1.0, "CAUTION": 1.5, "BEAR": 2.0}` diye
+    # koda gömülüydü ve `min_rr_at_entry=1.8` ayarı YALNIZ bilinmeyen rejimde
+    # devreye giriyordu — yani ayar "1.8" diyor, gerçek uygulanan 1.0-2.0
+    # arasıydı. Klasik "ölü/yanıltıcı ayar" tuzağı. Artık tek kaynak burada.
+    bull_min_rr: float = Field(default=1.0, ge=0.0, le=10.0)
+    caution_min_rr: float = Field(default=1.5, ge=0.0, le=10.0)
+    bear_min_rr: float = Field(default=2.0, ge=0.0, le=10.0)
+
     # BULL floor — eskiden yoktu (asıl "değersiz sinyal gösterme" kaynağı buydu)
     bull_min_quality: int = Field(default=78, ge=50, le=100)
     bull_top_n_max: int = Field(default=10, ge=1, le=50)
@@ -246,6 +255,25 @@ _REMOVED_KEYS = {
     "universe_scan.enable_finviz_query_momentum",
     "universe_scan.enable_finviz_query_setup",
     "universe_scan.enable_finviz_query_wider",
+    # 2026-08-04: composite sıralama tek ölçüte indi (dolar-hacim) → ağırlıklar
+    # ve kovalama cezası silindi
+    "universe_scan.rank_weight_rvol",
+    "universe_scan.rank_weight_change",
+    "universe_scan.rank_weight_volume",
+    "universe_scan.rank_weight_mcap",
+    "universe_scan.chase_penalty_change_pct_high",
+    "universe_scan.chase_penalty_change_pct_mid",
+    "universe_scan.chase_penalty_points_high",
+    "universe_scan.chase_penalty_points_mid",
+    # 2026-08-04: hiçbir kodun okumadığı ayarlar (grep ile doğrulandı)
+    "scan_gates.parabolic_five_day_return_gt",
+    "scan_gates.extreme_five_day_return_gt",
+    "scan_gates.extreme_rsi_gt",
+    # 2026-08-04: gate ölçüldü, ΔEV 0.00 — hiç ateşlenmiyordu, silindi
+    "scan_gates.late_entry_five_day_total_gt",
+    "scan_gates.late_entry_rsi_gt",
+    "scan_gates.distribution_day_min_vol",
+    "scan_gates.distribution_day_max_change_pct",
 }
 
 

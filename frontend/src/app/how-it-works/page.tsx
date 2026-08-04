@@ -276,9 +276,6 @@ export default function HowItWorksPage() {
                                 <SettingsSectionLink id="settings-section-evren-filtreleri">Evren filtreleri</SettingsSectionLink> — bar verisiyle elenen mcap/hacim/fiyat/float.
                             </li>
                             <li style={{ marginBottom: 8 }}>
-                                <SettingsSectionLink id="settings-section-tarama-gecitleri">Tarama geçitleri</SettingsSectionLink> — parabol / ekstrem / geç giriş eşikleri çok sıkıysa aday azalır.
-                            </li>
-                            <li style={{ marginBottom: 8 }}>
                                 <SettingsSectionLink id="settings-section-sinyal-filtresi">Sinyal filtresi</SettingsSectionLink> — max RSI, volume surge, min ATR%.
                             </li>
                             <li style={{ marginBottom: 8 }}>
@@ -298,8 +295,7 @@ export default function HowItWorksPage() {
                     >
                         <ul style={{ margin: 0, paddingLeft: 18 }}>
                             <li style={{ marginBottom: 8 }}>
-                                Giriş: <SettingsSectionLink id="settings-section-tarama-gecitleri">Tarama geçitleri</SettingsSectionLink>,{" "}
-                                <SettingsSectionLink id="settings-section-sinyal-filtresi">Sinyal filtresi</SettingsSectionLink>,{" "}
+                                Giriş: <SettingsSectionLink id="settings-section-sinyal-filtresi">Sinyal filtresi</SettingsSectionLink>,{" "}
                                 <SettingsSectionLink id="settings-section-swing-hazirlik">Swing hazırlık / aşırı uzama (sinyal)</SettingsSectionLink>.
                             </li>
                             <li style={{ marginBottom: 8 }}>
@@ -323,9 +319,6 @@ export default function HowItWorksPage() {
                         focus="Erken / geç giriş ve trend uyumu."
                     >
                         <ul style={{ margin: 0, paddingLeft: 18 }}>
-                            <li style={{ marginBottom: 8 }}>
-                                <SettingsSectionLink id="settings-section-tarama-gecitleri">Tarama geçitleri</SettingsSectionLink> — geç giriş ve parabol satırları.
-                            </li>
                             <li style={{ marginBottom: 8 }}>
                                 <SettingsSectionLink id="settings-section-swing-hazirlik">Swing hazırlık / aşırı uzama (sinyal)</SettingsSectionLink> — MA20 ve 5g aşırı uzama.
                             </li>
@@ -360,8 +353,7 @@ export default function HowItWorksPage() {
                             </li>
                             <li style={{ marginBottom: 0 }}>
                                 Scanner’da görünen <code style={{ fontSize: "0.76rem" }}>regime_multiplier</code> cezası: önce{" "}
-                                <SettingsSectionLink id="settings-section-sinyal-filtresi">Sinyal filtresi</SettingsSectionLink> /{" "}
-                                <SettingsSectionLink id="settings-section-tarama-gecitleri">tarama geçitleri</SettingsSectionLink>{" "}
+                                <SettingsSectionLink id="settings-section-sinyal-filtresi">Sinyal filtresi</SettingsSectionLink>{" "}
                                 sıkılaştırmak, min kaliteyi körü körüne düşürmekten çoğu zaman daha güvenli bir denemedir.
                             </li>
                         </ul>

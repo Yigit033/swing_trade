@@ -71,15 +71,12 @@
     "caution_confirmed_min_quality": 82,
     "caution_confirmed_top_n_max": 3,
     "caution_other_min_quality": 80,
-    "caution_other_top_n_max": 4
+    "caution_other_top_n_max": 4,
+    "bull_min_rr": 1.0,
+    "caution_min_rr": 1.5,
+    "bear_min_rr": 2.0
   },
-  "scan_gates": {
-    "parabolic_five_day_return_gt": 70.0,
-    "extreme_five_day_return_gt": 60.0,
-    "extreme_rsi_gt": 85.0,
-    "late_entry_five_day_total_gt": 30.0,
-    "late_entry_rsi_gt": 65.0
-  },
+  "scan_gates": {},
   "swing": {
     "parabolic": {
       "five_day_gt": 70.0,
@@ -220,15 +217,7 @@
     "cache_duration_minutes": 60,
     "min_finviz_tickers_skip_static_merge": 30,
     "post_filter_price_min": 7.0,
-    "post_filter_price_max": 200.0,
-    "rank_weight_rvol": 0.3,
-    "rank_weight_change": 0.25,
-    "rank_weight_volume": 0.25,
-    "rank_weight_mcap": 0.2,
-    "chase_penalty_change_pct_high": 15.0,
-    "chase_penalty_change_pct_mid": 10.0,
-    "chase_penalty_points_high": 50,
-    "chase_penalty_points_mid": 25
+    "post_filter_price_max": 200.0
   },
   "signal_confirmation": {
     "ma20_max_distance_below_pct": 0.0,

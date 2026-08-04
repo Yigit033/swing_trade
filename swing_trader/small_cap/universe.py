@@ -244,148 +244,43 @@ class SmallCapUniverse:
 
     def _calculate_composite_score(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Calculate composite momentum score using multiple factors.
+        Evren sıralama anahtarını hesapla: DOLAR-HACİM (fiyat × hacim).
 
-        PHILOSOPHY (v4.1 — "Early Entry" Rebalance):
-        A senior trader enters BEFORE the crowd, not after. The composite score
-        now penalizes stocks that are already extended and rewards stocks that
-        are setting up (high RVOL but modest price change = accumulation phase).
+        Sıralamanın tek işi, evren ``max_scan_tickers`` tavanını aştığında
+        hangi adayların taranacağına karar vermek. Tavan 15/15 taramada
+        bağlamadı (cut=0) ama evren 39 → 172'ye çıktı, yani yakında bağlayacak.
+        O yüzden sıralamanın SAVUNULABİLİR olması gerekiyor.
 
-        COMPOSITE SCORE = (
-            RVOL_Score         (rank_weight_rvol)   — abnormal volume = early institutional interest
-            Change_Score       (rank_weight_change)  — today's move, with hard chasing penalties
-            Volume_Score       (rank_weight_volume)  — absolute liquidity floor
-            MCap_Score         (rank_weight_mcap)    — sweet spot $300M-$800M
-        )
-
-        KEY CHANGE vs v4.0:
-        - "Early Accumulation Bonus": high RVOL + modest change (+1% to +8%) = best setup
-          These are stocks being accumulated quietly before the move — highest priority.
-        - Change score penalizes > +10% harder (chasing zone).
-        - Source column is tracked so Setup-query stocks (RSI not overbought) get a
-          small early-entry bias in tie-breaking.
+        Neden dolar-hacim: measure_price_band.py kesişim testi fiyatı SABİT
+        tutup likiditeyi değiştirdiğinde likit grup +3.31% (WR %62), illikit
+        grup −2.14% (WR %44) verdi. Likidite elimizdeki en güçlü ayırıcı.
         """
-        import numpy as np
-
         # Parse columns
-        if 'Change' in df.columns:
-            df['change_pct'] = df['Change'].apply(self._parse_percent)
-        else:
-            df['change_pct'] = 0.0
-
         if 'Volume' in df.columns:
             df['vol_numeric'] = df['Volume'].apply(self._parse_volume)
         else:
             df['vol_numeric'] = 0.0
 
-        if 'Rel Volume' in df.columns:
-            df['rel_vol'] = pd.to_numeric(df['Rel Volume'], errors='coerce').fillna(1.0)
-        elif 'Relative Volume' in df.columns:
-            df['rel_vol'] = pd.to_numeric(df['Relative Volume'], errors='coerce').fillna(1.0)
-        else:
-            df['rel_vol'] = 1.0
-
-        if 'Market Cap' in df.columns:
-            df['mcap_numeric'] = df['Market Cap'].apply(self._parse_market_cap)
-        else:
-            df['mcap_numeric'] = 0.0
-
         # ============================================================
-        # COMPONENT 1: Relative Volume Score (RVOL weight)
-        # Scale: 1x=0, 1.5x=25, 2x=50, 3x=75, 5x+=100
+        # SIRALAMA ANAHTARI — dolar-hacim (fiyat × hacim)
         # ============================================================
-        df['rvol_score'] = np.clip((df['rel_vol'] - 1.0) / 4.0 * 100, 0, 100)
-
-        # ============================================================
-        # COMPONENT 2: Price Change Score (change weight)
-        # Sweet zone: +1% to +8% = early accumulation, not yet chased.
-        # > +10%: steep penalty (stock already pumped, late entry risk).
-        # Negative change on high RVOL = shakeout / accumulation (still ok).
-        # ============================================================
-        us = self._us
-        change_pct = df['change_pct']
-
-        # Base score: scaled by absolute change, up moves get 1.5x bias
-        change_abs = change_pct.abs()
-        up_bias = (change_pct > 0).astype(float) * 1.5 + 0.5
-        df['change_score'] = np.clip(change_abs * up_bias * 6, 0, 100)
-
-        # Chasing penalty: stocks that already moved big today get ranked lower
-        chase_penalty = np.where(
-            change_pct > us.chase_penalty_change_pct_high,   # default 15%
-            us.chase_penalty_points_high,                     # default -50 pts
-            np.where(
-                change_pct > us.chase_penalty_change_pct_mid,  # default 10%
-                us.chase_penalty_points_mid,                    # default -25 pts
-                0,
-            ),
-        )
-        df['change_score'] = np.clip(df['change_score'] - chase_penalty, 0, 100)
-
-        # ============================================================
-        # COMPONENT 3: Dollar Volume Score — REAL liquidity signal
-        # Price × Shares = actual money flowing into the stock.
-        # This correctly ranks a $4 stock with 10M shares ($40M DV)
-        # over a $20 stock with 200K shares ($4M DV).
-        # Log scale: $1M=29, $5M=50, $10M=59, $50M+=100
-        # ============================================================
+        # 2026-08-04 TEMİZLİK: eski 4-ağırlıklı composite skor (rvol .30 /
+        # change .25 / volume .25 / mcap .20) + kovalama cezası + erken-birikim
+        # bonusu SİLİNDİ (~90 satır). Hiçbir ağırlık ölçülmemişti ve etkisi de
+        # doğrulanamıyordu: tavan 15/15 taramada bağlamadı (cut=0). Ama evren
+        # 39 → 172'ye çıkmıştı (tavan 260) — doğrulanmamış bir karar "hangi
+        # hisseler taranacak" sorusuna cevap vermeye hazır bekliyordu.
+        #
+        # Tek ölçüt DOLAR-HACİM, gerekçesi ÖLÇÜLMÜŞ: measure_price_band.py
+        # kesişim testi (fiyat SABİT, likidite değişken) likit grupta +3.31%
+        # WR %62 / illikit grupta −2.14% WR %44 verdi. Likidite elimizdeki en
+        # güçlü ayırıcı; tavan bağladığında en likit adayları korumak
+        # savunulabilir tek sıralama.
         if 'Price' in df.columns:
             df['price_numeric'] = pd.to_numeric(df['Price'], errors='coerce').fillna(15.0)
         else:
             df['price_numeric'] = 15.0
         df['dollar_vol_numeric'] = df['vol_numeric'] * df['price_numeric']
-        df['vol_score'] = np.clip(
-            np.log10(df['dollar_vol_numeric'].clip(lower=1)) / np.log10(50_000_000) * 100,
-            0, 100
-        )
-
-        # ============================================================
-        # COMPONENT 4: Market Cap Sweet Spot (mcap weight)
-        # $300M-$800M: 100 (explosion potential), $800M-$1.5B: 70, $1.5B-$2.5B: 40
-        # ============================================================
-        mcap_m = df['mcap_numeric'] / 1_000_000
-        df['mcap_score'] = np.where(
-            mcap_m <= 800, 100,
-            np.where(mcap_m <= 1500, 70,
-                     np.where(mcap_m <= 2500, 40, 20))
-        )
-
-        # ============================================================
-        # EARLY ACCUMULATION BONUS (v4.1 — new)
-        # High RVOL (> 1.5x) + modest positive change (+1% to +8%)
-        # = institutional accumulation before the crowd notices.
-        # This is exactly the Type C setup we want at the top of the list.
-        # Bonus: +15 pts — enough to break ties in favor of early-entry setups.
-        # ============================================================
-        early_accumulation = (
-            (df['rel_vol'] >= 1.5) &
-            (df['change_pct'] >= 1.0) &
-            (df['change_pct'] <= 8.0)
-        )
-        df['early_bonus'] = np.where(early_accumulation, 15, 0)
-
-        # ============================================================
-        # SIRALAMA ANAHTARI — 2026-08-04'te BASİTLEŞTİRİLDİ
-        # ============================================================
-        # ESKİ: 4 ağırlıklı composite (rvol .30 / change .25 / volume .25 /
-        # mcap .20) + kovalama cezası + erken-birikim bonusu.
-        # SORUN: bu ağırlıkların HİÇBİRİ ölçülmemişti ve sıralama 15/15
-        # taramada tavanı hiç kesmediği için etkisi de doğrulanamıyordu
-        # (universe_cut_count = 0). Yani doğrulanmamış bir karar, sessizce
-        # "hangi hisseler taranacak" sorusuna cevap vermeye hazır bekliyordu.
-        # Evren 39 → 172'ye çıktı (tavan 260) — yakında devreye girecekti.
-        #
-        # YENİ: tek ölçüt = DOLAR-HACİM (fiyat × hacim). Sebebi ölçülmüş:
-        # measure_price_band.py kesişim testi, fiyat sabit tutulup likidite
-        # değiştirildiğinde likit grup +3.31% / illikit grup -2.14% verdi —
-        # likidite, elimizdeki EN GÜÇLÜ ayırıcı. Tavan bağladığında en likit
-        # adayları taramak, doğrulanmamış 4 ağırlığa göre sıralamaktan daha
-        # savunulabilir. Ayrıca tek satır: anlaşılır, test edilebilir.
-        #
-        # Diğer bileşenler (rvol_score, change_score, mcap_score, early_bonus)
-        # telemetri/gösterim için HESAPLANMAYA DEVAM EDİYOR ama sıralamaya
-        # girmiyor — silmek yerine etkisiz bırakıldı ki eski tarama kayıtları
-        # okunabilir kalsın.
         df['composite_score'] = df['dollar_vol_numeric'].astype(float)
 
         return df

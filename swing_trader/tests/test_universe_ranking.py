@@ -80,16 +80,26 @@ def test_ranking_ignores_market_cap(univ):
     assert scores["SMALL"] == pytest.approx(scores["BIG"])
 
 
-def test_telemetry_columns_still_computed(univ):
+def test_dead_score_components_are_gone(univ):
     """
-    Eski bileşenler telemetri için hesaplanmaya devam etmeli — silmek yerine
-    etkisiz bıraktık ki eski tarama kayıtları ve gösterim bozulmasın.
+    2026-08-04: eski composite bileşenleri (rvol_score / change_score /
+    mcap_score / early_bonus / vol_score) SİLİNDİ — hiçbiri ölçülmemişti ve
+    sıralamaya girmiyorlardı. "Telemetri için tutalım" da yeterli gerekçe
+    değildi: okunmayan kolon, okuyanı yanıltan yüktür.
     """
     df = _df([("A", 20.0, 1_000_000, "3.0%", 2.0, "500M")])
     out = univ._calculate_composite_score(df.copy())
     for col in ("rvol_score", "change_score", "vol_score", "mcap_score",
-                "early_bonus", "dollar_vol_numeric"):
-        assert col in out.columns, f"{col} telemetri kolonu kayboldu"
+                "early_bonus", "rel_vol", "mcap_numeric", "change_pct"):
+        assert col not in out.columns, f"{col} hâlâ hesaplanıyor (silinmeliydi)"
+
+
+def test_only_needed_columns_remain(univ):
+    """Sıralama için gereken minimum kolon seti."""
+    df = _df([("A", 20.0, 1_000_000, "3.0%", 2.0, "500M")])
+    out = univ._calculate_composite_score(df.copy())
+    for col in ("vol_numeric", "price_numeric", "dollar_vol_numeric", "composite_score"):
+        assert col in out.columns, f"{col} kayboldu"
 
 
 # ── Tavan davranışı ──────────────────────────────────────────────────────

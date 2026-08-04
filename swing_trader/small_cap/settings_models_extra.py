@@ -102,15 +102,19 @@ def _default_float_millions_bands() -> List[ScoringFloatBand]:
 class ScanStockGatesSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    parabolic_five_day_return_gt: float = Field(default=70.0, ge=10, le=200)
-    extreme_five_day_return_gt: float = Field(default=60.0, ge=10, le=200)
-    extreme_rsi_gt: float = Field(default=85.0, ge=50, le=100)
-    late_entry_five_day_total_gt: float = Field(default=30.0, ge=0, le=100)
-    late_entry_rsi_gt: float = Field(default=65.0, ge=40, le=95)
+    # 2026-08-04 TEMİZLİK — aşağıdaki alanlar SİLİNDİ:
+    #   parabolic_five_day_return_gt / extreme_five_day_return_gt / extreme_rsi_gt
+    #     → HİÇBİR KOD OKUMUYORDU (%100 ölü ayar; grep ile doğrulandı)
+    #   late_entry_five_day_total_gt / late_entry_rsi_gt
+    #     → gate ölçüldü, ΔEV tam 0.00, hiç ateşlenmiyordu (measure_gate_value.py);
+    #       VCE muafiyeti + Weinstein + swing onayı bu vakaları zaten eliyordu
+    #   distribution_day_min_vol / distribution_day_max_change_pct
+    #     → gate ölçüldü, ΔEV 0.00; VCE ve RVOL İKİSİ DE yeşil kapanış şartı
+    #       koyduğu için "hacimli düşüş günü" bir sinyal olarak hiç oluşamıyordu
+    # Kalan iki alan ÖLÇÜLDÜ ve İŞE YARIYOR: Weinstein reddi ΔEV −0.98
+    # (eklediği 18 sinyalin EV'si −2.10%). Bkz. GATE_AUDIT.md.
     reject_stage3: bool = Field(default=True, description="Hard reject Weinstein Stage 3 (distribution) — Type S exempt")
     reject_stage4: bool = Field(default=True, description="Hard reject Weinstein Stage 4 (decline) — all types")
-    distribution_day_min_vol: float = Field(default=2.0, ge=1.0, le=5.0, description="Volume surge threshold to flag a high-volume down day as distribution")
-    distribution_day_max_change_pct: float = Field(default=-5.0, le=0.0, ge=-30.0, description="Daily change threshold: stock down more than this % = distribution day")
 
 
 class SwingParabolicSettings(BaseModel):
@@ -321,46 +325,19 @@ class UniverseScanSettings(BaseModel):
     post_filter_price_min: float = Field(default=3.0, ge=0.5, le=500.0)
     post_filter_price_max: float = Field(default=200.0, ge=1.0, le=50000.0)
 
-    # 2026-08-04: rank_weight_* artık SIRALAMAYA GİRMİYOR. Composite skor tek
-    # ölçüte indirildi (dolar-hacim — measure_price_band.py kesişim testi:
-    # likit +3.31% / illikit -2.14%). Alanlar geriye dönük uyumluluk için
-    # duruyor (eski JSON/DB yamaları taşıyor) ama etkisi YOK; UI'dan da
-    # kaldırıldı ki kullanıcı boşuna çevirmesin.
-    rank_weight_rvol: float = Field(default=0.30, ge=0.0, le=1.0)
-    rank_weight_change: float = Field(default=0.25, ge=0.0, le=1.0)
-    rank_weight_volume: float = Field(default=0.25, ge=0.0, le=1.0)
-    rank_weight_mcap: float = Field(default=0.20, ge=0.0, le=1.0)
-
-    chase_penalty_change_pct_high: float = Field(default=15.0, ge=5.0, le=50.0)
-    chase_penalty_change_pct_mid: float = Field(default=10.0, ge=1.0, le=40.0)
-    chase_penalty_points_high: int = Field(default=50, ge=0, le=100)
-    chase_penalty_points_mid: int = Field(default=25, ge=0, le=100)
+    # 2026-08-04 TEMİZLİK — rank_weight_* ve chase_penalty_* SİLİNDİ.
+    # Composite sıralama tek ölçüte indirildi (dolar-hacim; gerekçe ölçülmüş:
+    # measure_price_band.py kesişim testi, fiyat SABİT/likidite değişken →
+    # likit +3.31% WR62 / illikit −2.14% WR44). 4 ağırlık + kovalama cezası +
+    # erken-birikim bonusunun HİÇBİRİ ölçülmemişti ve tavan 15/15 taramada
+    # bağlamadığı için etkisi de doğrulanamıyordu.
 
     @model_validator(mode="after")
     def _validate_universe_scan(self) -> "UniverseScanSettings":
-        # NOT (2026-07-18): "en az bir flag açık olmalı" kuralı kaldırıldı.
-        # v13.3'ten beri VCE breakout-day (Q5/Q5b) ve 20D NEW HIGH (Q6/Q6b)
-        # sorguları KOŞULSUZ çalışır — üç flag da kapalıyken evren yine dolar.
-        # Recall ölçümü (scripts/measure_universe_recall.py): Q1-Q3 doğrulanmış
-        # 408 VCE sinyalinin yalnızca %0.5-2'sini yakalıyordu → kapatıldı.
-        # Eski kural, tüm flag'ler kapatılınca settings YÜKLEMESİNİ bozup
-        # sessizce default'lara düşürüyordu (kalibrasyon kaybı riski).
-        wsum = (
-            self.rank_weight_rvol
-            + self.rank_weight_change
-            + self.rank_weight_volume
-            + self.rank_weight_mcap
-        )
-        if abs(wsum - 1.0) > 0.02:
-            raise ValueError(
-                f"Rank weights must sum to 1.0 (±0.02); got {wsum:.4f}"
-            )
+        # 2026-08-04: rank-weight toplamı ve kovalama-cezası tutarlılık kuralları
+        # kaldırıldı — dayandıkları alanlar silindi (sıralama tek ölçüte indi).
         if self.post_filter_price_max <= self.post_filter_price_min:
             raise ValueError("post_filter_price_max must be > post_filter_price_min")
-        if self.chase_penalty_change_pct_mid >= self.chase_penalty_change_pct_high:
-            raise ValueError(
-                "chase_penalty_change_pct_mid must be < chase_penalty_change_pct_high"
-            )
         return self
 
 
