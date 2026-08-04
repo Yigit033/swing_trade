@@ -35,7 +35,10 @@ _SWING_TRADER_ROOT = Path(__file__).resolve().parent.parent
 _PROJECT_ROOT = _SWING_TRADER_ROOT.parent
 DEFAULT_SETTINGS_PATH = _PROJECT_ROOT / "data" / "smallcap_settings.json"
 
-_SWING_KEYS = frozenset({"C", "A", "B", "S"})
+# Type S (short squeeze) 2026-08-04'te kaldırıldı — girdisi (short-interest)
+# geçmişe dönük mevcut olmadığı için hiç doğrulanamamıştı ve katalizör
+# modülü silinince ulaşılamaz hale geldi.
+_SWING_KEYS = frozenset({"C", "A", "B"})
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -104,7 +107,7 @@ class SmallCapSettings(BaseModel):
         default=70,
         ge=30,
         le=95,
-        description="Hard reject in scan_stock when RSI above this (Type S exempt).",
+        description="Hard reject in scan_stock when RSI above this (VCE exempt — ölçüldü).",
     )
     volume_surge_trigger: float = Field(
         default=2.0,
@@ -151,15 +154,15 @@ class SmallCapSettings(BaseModel):
     max_stop_percent_fallback: float = Field(default=0.15, ge=0.03, le=0.3)
     max_holding_days: int = Field(default=20, ge=1, le=60)
     max_stop_by_type: Dict[str, float] = Field(
-        default_factory=lambda: {"C": 0.14, "A": 0.15, "B": 0.16, "S": 0.18}
+        default_factory=lambda: {"C": 0.14, "A": 0.15, "B": 0.16}
     )
     type_position_caps: Dict[str, float] = Field(
-        default_factory=lambda: {"C": 0.25, "A": 0.25, "B": 0.20, "S": 0.15}
+        default_factory=lambda: {"C": 0.25, "A": 0.25, "B": 0.20}
     )
 
     # --- Targets (ATR-based T1/T2) ---
     type_atr_multipliers: Dict[str, float] = Field(
-        default_factory=lambda: {"S": 2.5, "B": 2.0, "A": 1.8, "C": 1.5}
+        default_factory=lambda: {"B": 2.0, "A": 1.8, "C": 1.5}
     )
     t2_atr_ratio: float = Field(default=2.0, ge=1.0, le=4.0)
     # v13.4: T2 caps raised so the trailing stop — not a fixed cap — decides
@@ -167,7 +170,6 @@ class SmallCapSettings(BaseModel):
     # EV drag (it guillotined the runners that pay for the losers).
     type_target_caps: Dict[str, TypeTargetCaps] = Field(
         default_factory=lambda: {
-            "S": TypeTargetCaps(t1_max_pct=0.12, t2_max_pct=0.65),
             "B": TypeTargetCaps(t1_max_pct=0.10, t2_max_pct=0.55),
             "C": TypeTargetCaps(t1_max_pct=0.08, t2_max_pct=0.45),
             "A": TypeTargetCaps(t1_max_pct=0.10, t2_max_pct=0.55),
@@ -278,6 +280,10 @@ _REMOVED_KEYS = {
     "regime_thresholds.bull_min_rr",
     "regime_thresholds.caution_min_rr",
     "regime_thresholds.bear_min_rr",
+    # 2026-08-04: Type S (short squeeze) kaldırıldı — girdisi (short-interest)
+    # geçmişe dönük yok, hiç doğrulanamamıştı; katalizör modülü silinince
+    # sınıflandırma dalı ulaşılamaz hale geldi
+    "swing.type_s",
 }
 
 

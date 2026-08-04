@@ -113,7 +113,7 @@ class ScanStockGatesSettings(BaseModel):
     #       koyduğu için "hacimli düşüş günü" bir sinyal olarak hiç oluşamıyordu
     # Kalan iki alan ÖLÇÜLDÜ ve İŞE YARIYOR: Weinstein reddi ΔEV −0.98
     # (eklediği 18 sinyalin EV'si −2.10%). Bkz. GATE_AUDIT.md.
-    reject_stage3: bool = Field(default=True, description="Hard reject Weinstein Stage 3 (distribution) — Type S exempt")
+    reject_stage3: bool = Field(default=True, description="Hard reject Weinstein Stage 3 (distribution) — ΔEV −0.98 ölçüldü")
     reject_stage4: bool = Field(default=True, description="Hard reject Weinstein Stage 4 (decline) — all types")
 
 
@@ -124,29 +124,6 @@ class SwingParabolicSettings(BaseModel):
     five_day_extreme_gt: float = 60
     rsi_extreme_gt: float = 85
     hold_short: tuple[int, int] = (1, 2)
-
-
-class SwingTypeSSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    primary_si_min: float = 20
-    primary_dtc_min: float = 5
-    primary_vol_min: float = 4.0
-    primary_5d_min: float = 15
-    primary_5d_max: float = 60
-    primary_rsi_min: float = 60
-    primary_rsi_max: float = 80
-    primary_hold_min: int = 1
-    primary_hold_max: int = 4
-    secondary_si_min: float = 15
-    secondary_dtc_min: float = 3
-    secondary_vol_min: float = 3.0
-    secondary_5d_min: float = 10
-    secondary_5d_max: float = 40
-    secondary_rsi_min: float = 55
-    secondary_rsi_max: float = 75
-    secondary_hold_min: int = 2
-    secondary_hold_max: int = 4
 
 
 class SwingTypeCSettings(BaseModel):
@@ -224,7 +201,6 @@ class SwingEngineSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     parabolic: SwingParabolicSettings = Field(default_factory=SwingParabolicSettings)
-    type_s: SwingTypeSSettings = Field(default_factory=SwingTypeSSettings)
     type_c: SwingTypeCSettings = Field(default_factory=SwingTypeCSettings)
     type_b: SwingTypeBSettings = Field(default_factory=SwingTypeBSettings)
     type_a: SwingTypeASettings = Field(default_factory=SwingTypeASettings)

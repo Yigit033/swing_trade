@@ -16,8 +16,6 @@ from .signals import SmallCapSignals
 from .scoring import SmallCapScoring
 from .risk import SmallCapRisk
 from .universe import SmallCapUniverse
-from .sector_rs import SectorRS, SECTOR_ETF_MAP
-from .catalysts import CatalystDetector
 from .narrative import generate_signal_narrative
 from .technical_levels import calculate_technical_levels
 from .regime_logic import rs_bonus_vs_spy
@@ -70,10 +68,6 @@ class SmallCapEngine:
         self.risk = SmallCapRisk(config, self.settings)
         self.universe_provider = SmallCapUniverse(config, self.settings)
 
-        # Wire Tiingo key into SectorRS so ETF fallback works when Yahoo is rate-limited
-        tiingo_key = (self.config.get('api_keys') or {}).get('tiingo', '')
-        SectorRS.set_tiingo_key(tiingo_key)
-
         logger.info("SmallCapEngine initialized (momentum breakout engine)")
     
     def _classify_swing_type(
@@ -84,8 +78,6 @@ class SmallCapEngine:
         higher_lows: bool,
         close_position: float = 0.5,
         ma20_distance: float = 0.0,
-        short_interest: float = 0.0,
-        days_to_cover: float = 0.0,
         has_catalyst: bool = False,
         rsi_divergence: bool = False,
         macd_bullish: bool = False
@@ -125,7 +117,6 @@ class SmallCapEngine:
         """
         
         sp = self.settings.swing.parabolic
-        ts = self.settings.swing.type_s
         tc = self.settings.swing.type_c
         tb = self.settings.swing.type_b
         ta = self.settings.swing.type_a
@@ -147,38 +138,14 @@ class SmallCapEngine:
                 f"⚠️ EXTREME: 5d={five_day_return:+.0f}%, RSI={rsi:.0f} - VERY SHORT!",
             )
 
-        # ============================================================
-        # TYPE S CHECK - Short Squeeze (PRIORITY 1)
-        # ============================================================
-        if (
-            short_interest >= ts.primary_si_min
-            and days_to_cover >= ts.primary_dtc_min
-            and volume_surge >= ts.primary_vol_min
-        ):
-            if (
-                ts.primary_5d_min <= five_day_return <= ts.primary_5d_max
-                and ts.primary_rsi_min <= rsi <= ts.primary_rsi_max
-            ):
-                return (
-                    "S",
-                    (ts.primary_hold_min, ts.primary_hold_max),
-                    f"🔥 SQUEEZE: SI={short_interest:.0f}%, DTC={days_to_cover:.0f}, Vol={volume_surge:.1f}x",
-                )
-
-        if (
-            short_interest >= ts.secondary_si_min
-            and days_to_cover >= ts.secondary_dtc_min
-            and volume_surge >= ts.secondary_vol_min
-        ):
-            if (
-                ts.secondary_5d_min <= five_day_return <= ts.secondary_5d_max
-                and ts.secondary_rsi_min <= rsi <= ts.secondary_rsi_max
-            ):
-                return (
-                    "S",
-                    (ts.secondary_hold_min, ts.secondary_hold_max),
-                    f"💥 Squeeze Setup: SI={short_interest:.0f}%, 5d={five_day_return:+.0f}%",
-                )
+        # TYPE S (SHORT SQUEEZE) KALDIRILDI — 2026-08-04.
+        # Sınıflandırma short_interest + days_to_cover istiyordu; bu veriler
+        # katalizör modülünden geliyordu ve o modül aynı gün skordan çıkarıldı
+        # (geçmişe dönük veri olmadığı için backtest'te HER ZAMAN 0'dı → hiçbir
+        # ölçümde Type S oluşamamıştı, yani hiç doğrulanmamıştı). Girdi sıfır
+        # olunca dal ulaşılamaz hale geldi → ölü kod olarak silindi.
+        # Yan etki: Type S'e tanınan gate muafiyetleri de anlamsızlaştı ve
+        # kaldırıldı (RSI, Weinstein Stage 3, kalite eşiği).
 
         # ============================================================
         # TYPE C CHECK - Early Stage Breakout (PRIORITY 2 - Best R/R)
@@ -310,81 +277,6 @@ class SmallCapEngine:
 
         return ("A", hold_days, "🐢 Continuation: " + ", ".join(type_a_reasons[:2]))
     
-    def _compute_sector_rankings(self) -> Dict[str, int]:
-        """
-        Rank all sector ETFs by weighted composite return (5d×50% + 10d×30% + 20d×20%).
-
-        Called ONCE per scan_universe() to avoid repeated API calls per ticker.
-        Returns: {etf_symbol: rank} where rank 1 = strongest sector.
-        SPY is excluded since it's the benchmark, not a sector.
-        """
-        etfs = list({v for v in SECTOR_ETF_MAP.values() if v != 'SPY'})
-        etf_scores: Dict[str, float] = {}
-        for etf in etfs:
-            try:
-                returns = SectorRS._get_multi_period_return(etf)
-                r5 = returns.get('5d') or 0.0
-                r10 = returns.get('10d') or 0.0
-                r20 = returns.get('20d') or 0.0
-                etf_scores[etf] = r5 * 0.50 + r10 * 0.30 + r20 * 0.20
-            except Exception:
-                etf_scores[etf] = 0.0
-
-        sorted_etfs = sorted(etf_scores, key=lambda e: etf_scores[e], reverse=True)
-        rankings = {etf: rank + 1 for rank, etf in enumerate(sorted_etfs)}
-        n = len(rankings)
-        top3 = " | ".join(
-            f"{e}({etf_scores[e]:+.1f}%)" for e in sorted_etfs[:3]
-        )
-        bot3 = " | ".join(
-            f"{e}({etf_scores[e]:+.1f}%)" for e in sorted_etfs[-3:]
-        )
-        logger.info(f"Sector rotation: {n} ETFs ranked — TOP: {top3} | BOT: {bot3}")
-        return rankings
-
-    def get_stock_info(self, ticker: str) -> Dict:
-        """Get stock info — yfinance primary, Finnhub fallback when rate-limited."""
-        try:
-            import yfinance as yf
-            stock = yf.Ticker(ticker)
-            info = stock.info
-            return {
-                'ticker': ticker,
-                'marketCap': info.get('marketCap', 0),
-                'floatShares': info.get('floatShares', 0),
-                'shortName': info.get('shortName', ticker),
-                'sector': info.get('sector', 'Unknown'),
-                'industry': info.get('industry', 'Unknown'),
-            }
-        except Exception:
-            pass  # fall through to Finnhub
-
-        # Finnhub profile fallback (marketCapitalization in millions)
-        finnhub_key = (self.config.get('api_keys') or {}).get('finnhub', '')
-        if finnhub_key:
-            try:
-                import requests
-                resp = requests.get(
-                    'https://finnhub.io/api/v1/stock/profile2',
-                    params={'symbol': ticker, 'token': finnhub_key},
-                    timeout=8,
-                )
-                if resp.status_code == 200:
-                    d = resp.json()
-                    mcap = d.get('marketCapitalization') or 0
-                    return {
-                        'ticker': ticker,
-                        'marketCap': int(mcap * 1_000_000),
-                        'floatShares': int((d.get('shareOutstanding') or 0) * 1_000_000),
-                        'shortName': d.get('name', ticker),
-                        'sector': d.get('finnhubIndustry', 'Unknown'),
-                        'industry': d.get('finnhubIndustry', 'Unknown'),
-                    }
-            except Exception as e:
-                logger.debug(f"Finnhub profile failed for {ticker}: {e}")
-
-        return {'ticker': ticker, 'marketCap': 0, 'floatShares': 0}
-    
     def scan_stock(
         self,
         ticker: str,
@@ -510,71 +402,35 @@ class SmallCapEngine:
             # ============================================================
             # SECTOR RS & CATALYST DATA (Senior Trader v2.1)
             # ============================================================
-            if backtest_mode:
-                if (
-                    spy_df_window is not None
-                    and len(spy_df_window) >= 6
-                    and "Close" in spy_df_window.columns
-                    and len(df) >= 6
-                ):
-                    sector_rs_data = rs_bonus_vs_spy(df["Close"], spy_df_window["Close"])
-                else:
-                    sector_rs_data = {
-                        "bonus": 0,
-                        "rs_score": 0.0,
-                        "is_leader": False,
-                        "ticker_5d": 0.0,
-                        "sector_5d": 0.0,
-                        "sector_etf": "SPY",
-                    }
-                boosters["sector_rs_bonus"] = sector_rs_data.get("bonus", 0)
-                boosters["sector_rs_score"] = sector_rs_data.get("rs_score", 0.0)
-                boosters["is_sector_leader"] = sector_rs_data.get("is_leader", False)
-                boosters["short_interest_bonus"] = 0
-                boosters["short_percent"] = 0.0
-                boosters["days_to_cover"] = 0.0
-                boosters["is_squeeze_candidate"] = False
-                boosters["insider_bonus"] = 0
-                boosters["has_insider_buying"] = False
-                boosters["news_bonus"] = 0
-                boosters["has_recent_news"] = False
-                boosters["total_catalyst_bonus"] = 0
+            # SEKTÖR GÖRELİ GÜCÜ — canlı ve backtest AYNI fonksiyonu kullanır.
+            # 2026-08-04 parite düzeltmesi: eskiden canlı SectorRS'in gerçek-ETF
+            # hesabını, backtest ise SPY proxy'sini kullanıyordu → aynı hisse iki
+            # yolda farklı skor alıyordu ve ölçüm canlıyı temsil etmiyordu.
+            if (
+                spy_df_window is not None
+                and len(spy_df_window) >= 6
+                and "Close" in spy_df_window.columns
+                and len(df) >= 6
+            ):
+                sector_rs_data = rs_bonus_vs_spy(df["Close"], spy_df_window["Close"])
             else:
-                sector_rs_data = SectorRS.calculate_sector_rs(ticker, sector, five_day_return_prelim)
-                boosters["sector_rs_bonus"] = sector_rs_data["bonus"]
-                boosters["sector_rs_score"] = sector_rs_data["rs_score"]
-                boosters["is_sector_leader"] = sector_rs_data["is_leader"]
-                catalyst_data = CatalystDetector.get_all_catalysts(ticker)
-                boosters["short_interest_bonus"] = catalyst_data["short_interest"]["bonus"]
-                boosters["short_percent"] = catalyst_data["short_interest"]["short_percent"]
-                boosters["days_to_cover"] = catalyst_data["short_interest"]["days_to_cover"]
-                boosters["is_squeeze_candidate"] = catalyst_data["short_interest"]["is_squeeze_candidate"]
-                boosters["insider_bonus"] = catalyst_data["insider"]["bonus"]
-                boosters["has_insider_buying"] = catalyst_data["insider"]["has_insider_buying"]
-                boosters["news_bonus"] = catalyst_data["news"]["bonus"]
-                boosters["has_recent_news"] = catalyst_data["news"]["has_recent_news"]
-                boosters["total_catalyst_bonus"] = catalyst_data["total_catalyst_bonus"]
-            
-            # ── SECTOR ROTATION RANK (computed once per scan_universe, reused here) ──
-            # Top 3 sectors → +5 pts (hot money flowing in)
-            # Bottom 3 sectors → -10 pts (sector rotation headwind)
-            # Skipped in backtest mode since _sector_rankings holds live data
-            sector_etf_sym = SECTOR_ETF_MAP.get(sector, 'SPY')
-            sector_rankings = getattr(self, '_sector_rankings', {})
-            sector_rank = sector_rankings.get(sector_etf_sym, 0)
-            total_ranked = len(sector_rankings)
-            if sector_rank > 0 and total_ranked > 0 and not backtest_mode:
-                if sector_rank <= 3:
-                    sector_rotation_bonus = 5
-                elif sector_rank >= total_ranked - 2:   # bottom 3
-                    sector_rotation_bonus = -10
-                else:
-                    sector_rotation_bonus = 0
-            else:
-                sector_rotation_bonus = 0
-                sector_rank = 0
-            boosters['sector_rotation_bonus'] = sector_rotation_bonus
-            boosters['sector_rank'] = sector_rank
+                sector_rs_data = {"bonus": 0, "rs_score": 0.0, "is_leader": False}
+            boosters["sector_rs_bonus"] = sector_rs_data.get("bonus", 0)
+            boosters["sector_rs_score"] = sector_rs_data.get("rs_score", 0.0)
+            boosters["is_sector_leader"] = sector_rs_data.get("is_leader", False)
+
+            # KATALİZÖR BONUSLARI KALDIRILDI — 2026-08-04. short-interest /
+            # insider / haber verisi geçmişe dönük mevcut olmadığı için bu
+            # bileşenler backtest'te HER ZAMAN 0'dı; canlıda ise skoru ortalama
+            # +5.8 puan şişiriyorlardı (29 canlı sinyalde ölçüldü, maks +17).
+            # Sonuç: canlı "Q80" eşiği ölçüm diliyle Q74 gibi davranıyordu.
+            # Doğrulanamaz bir bileşenin eşiği 6 puan kaydırması kabul edilemez.
+
+            # SEKTÖR ROTASYON BONUSU KALDIRILDI — 2026-08-04. Top-3 sektöre +5,
+            # bottom-3'e −10 veriyordu ama `not backtest_mode` şartıyla korumalıydı:
+            # yani backtest'te HER ZAMAN 0'dı, ölçümlerimize hiç girmedi. Canlıda
+            # ise skoru ±5-10 puan kaydırıyordu. Doğrulanamaz bileşen + parite
+            # kırığı → silindi (bkz. katalizör bonusları, aynı gerekçe).
 
             # RSI Divergence (already in signals but ensure it's in boosters)
             rsi_div = self.signals.detect_rsi_divergence(df, lookback=14)
@@ -608,7 +464,6 @@ class SmallCapEngine:
             # This way scoring penalties use the correct type-specific RSI bands.
             has_any_catalyst = (
                 boosters.get('has_recent_news', False) or
-                boosters.get('is_squeeze_candidate', False) or
                 boosters.get('has_insider_buying', False) or
                 boosters.get('total_catalyst_bonus', 0) > 0
             )
@@ -616,8 +471,6 @@ class SmallCapEngine:
                 five_day_return, rsi, volume_surge, higher_lows,
                 close_position=close_position,
                 ma20_distance=ma20_distance,
-                short_interest=boosters.get('short_percent', 0),
-                days_to_cover=boosters.get('days_to_cover', 0),
                 has_catalyst=has_any_catalyst,
                 rsi_divergence=boosters.get('rsi_divergence', False),
                 macd_bullish=boosters.get('macd_bullish', False)
@@ -633,7 +486,7 @@ class SmallCapEngine:
             # signals. RSI still feeds scoring penalties for ranking.
             max_rsi = self.settings.max_entry_rsi
             _is_vce = trigger_details.get('trigger_pathway') == 'vce_breakout'
-            if rsi > max_rsi and swing_type != 'S' and not _is_vce:
+            if rsi > max_rsi and not _is_vce:
                 logger.debug(f"{ticker}: RSI {rsi:.0f} > {max_rsi} — rejected (overbought, not squeeze)")
                 _bump_scan_reject(reject_counts, "rsi_gate")
                 return None
@@ -689,7 +542,7 @@ class SmallCapEngine:
                     )
                     _bump_scan_reject(reject_counts, "stage_rejected")
                     return None
-                if sg.reject_stage3 and _wstage == 3 and swing_type != 'S':
+                if sg.reject_stage3 and _wstage == 3:
                     logger.debug(
                         f"{ticker}: Weinstein Stage 3 (Distribution) — hard reject "
                         f"(type={swing_type})"
@@ -738,7 +591,7 @@ class SmallCapEngine:
                 "BEAR": _rt.bear_tentative_min_quality,
             }.get(regime, 0)  # UNKNOWN → 0 (rejim belirsiz, floor yok)
             # Type S (short squeeze) her rejimde muaf; diğerleri regime floor.
-            _type_min_q = 0 if swing_type == 'S' else _regime_floor
+            _type_min_q = _regime_floor
             if quality_score < _type_min_q:
                 # INFO level — surface quality scores in normal logs so we can see
                 # the distribution of "almost made it" stocks and tune the bar.
@@ -803,17 +656,12 @@ class SmallCapEngine:
                 'is_sector_leader': boosters.get('is_sector_leader', False),
                 
                 # Short Interest & Squeeze
-                'short_percent': round(boosters.get('short_percent', 0), 1),
-                'days_to_cover': round(boosters.get('days_to_cover', 0), 1),
                 'is_squeeze_candidate': boosters.get('is_squeeze_candidate', False),
                 'short_interest_bonus': boosters.get('short_interest_bonus', 0),
                 
                 # Insider & News
-                'has_insider_buying': boosters.get('has_insider_buying', False),
                 'insider_bonus': boosters.get('insider_bonus', 0),
-                'has_recent_news': boosters.get('has_recent_news', False),
                 'news_bonus': boosters.get('news_bonus', 0),
-                'total_catalyst_bonus': boosters.get('total_catalyst_bonus', 0),
                 
                 # RSI Divergence & MACD
                 'rsi_divergence': boosters.get('rsi_divergence', False),
@@ -845,8 +693,6 @@ class SmallCapEngine:
                 'pullback_bonus': boosters.get('pullback_bonus', 0),
 
                 # Sector Rotation (v6.0 — active sector filter)
-                'sector_rank': boosters.get('sector_rank', 0),
-                'sector_rotation_bonus': boosters.get('sector_rotation_bonus', 0),
 
                 # Filter/trigger details
                 'filter_results': filter_results,
@@ -972,13 +818,6 @@ class SmallCapEngine:
         # v4.0: Detect market regime ONCE for all stocks
         market_regime = self.signals.detect_market_regime()
         self._last_regime = market_regime  # expose for callers (e.g. scanner API)
-
-        # v6.0: Compute sector rotation rankings ONCE (avoids N×11 API calls)
-        try:
-            self._sector_rankings = self._compute_sector_rankings()
-        except Exception as _e:
-            logger.warning(f"Sector rankings unavailable: {_e}")
-            self._sector_rankings = {}
 
         current_regime = market_regime.get('regime', '')
 

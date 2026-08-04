@@ -104,11 +104,12 @@ CONFIRM_TARGET_R = 2.0         # Target = entry + R × this (was 3.0 — too gre
 # yok ediyordu. cap%15 bandı EV/WR artışının çoğunu yakalar, stop3.0/cap%20'nin
 # geniş kuyruk riskinden (%5 en kötü −19~−22) kaçınır. Chandelier trail zaten
 # kârı kilitliyor; bu cap yalnız BAŞLANGIÇ stop'un ne kadar nefes alacağını belirler.
+# Type S (squeeze) 2026-08-04'te kaldırıldı — girdisi (short-interest) geçmişe
+# dönük yok, hiç doğrulanamamıştı; katalizör modülü silinince oluşamaz hale geldi.
 MAX_STOP_BY_TYPE = {
     'C': 0.14,   # Early entry — lower volatility expected
     'A': 0.15,   # Continuation
     'B': 0.16,   # Momentum
-    'S': 0.18,   # Squeeze — wider swings normal
 }
 MAX_STOP_DEFAULT = 0.15
 

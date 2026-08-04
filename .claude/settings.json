@@ -15,7 +15,12 @@
       "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe scripts/measure_remaining_gates.py)",
       "PowerShell(\"--- olcum durumu ---\")",
       "Bash(./venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('swing_trader/small_cap/engine.py',encoding='utf-8'\\).read\\(\\)\\); print\\('sozdizimi OK'\\)\")",
-      "PowerShell(cd \"c:\\\\active_projects\\\\swing_trade\"; $env:PYTHONIOENCODING=\"utf-8\"; & \".\\\\venv\\\\Scripts\\\\python.exe\" -m pytest swing_trader/tests api/tests tests -q 2>&1 | Select-Object -Last 12)"
+      "PowerShell(cd \"c:\\\\active_projects\\\\swing_trade\"; $env:PYTHONIOENCODING=\"utf-8\"; & \".\\\\venv\\\\Scripts\\\\python.exe\" -m pytest swing_trader/tests api/tests tests -q 2>&1 | Select-Object -Last 12)",
+      "PowerShell(cd \"c:\\\\active_projects\\\\swing_trade\"; $env:PYTHONIOENCODING=\"utf-8\"; & \".\\\\venv\\\\Scripts\\\\python.exe\" \"C:\\\\Users\\\\YIIT~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--active-projects-swing-trade\\\\0670cd7a-b438-4082-8a3a-ae8d8bad9b9a\\\\scratchpad\\\\bonus_parity.py\")",
+      "Bash(./venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('swing_trader/small_cap/engine.py',encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "PowerShell(cd \"c:\\\\active_projects\\\\swing_trade\"; $env:PYTHONIOENCODING=\"utf-8\"; & \".\\\\venv\\\\Scripts\\\\python.exe\" -m pytest swing_trader/tests api/tests tests -q 2>&1 | Select-Object -Last 16)",
+      "PowerShell(cd \"c:\\\\active_projects\\\\swing_trade\"; $env:PYTHONIOENCODING=\"utf-8\"; & \".\\\\venv\\\\Scripts\\\\python.exe\" -m pytest swing_trader/tests api/tests tests -q 2>&1 | Select-Object -Last 8)",
+      "Bash(./venv/Scripts/python.exe -m pytest swing_trader/tests/test_smallcap_settings_config.py::test_default_matches_known_engine_constants)"
     ]
   }
 }

@@ -43,7 +43,9 @@ def test_default_matches_known_engine_constants():
     # 2026-07-26: exit ölçümü sonrası geniş stop (bkz. exit_lab_vce_rvol.py)
     assert d.stop_atr_multiplier == 2.5
     assert d.max_stop_by_type["C"] == 0.14
-    assert d.type_atr_multipliers["S"] == 2.5
+    # Type S 2026-08-04'te kaldırıldı (girdisi geçmişe dönük yok, hiç doğrulanamadı)
+    assert set(d.type_atr_multipliers) == {"A", "B", "C"}
+    assert d.type_atr_multipliers["B"] == 2.0
     assert d.partial_at_t1_fraction == 0.33   # ölçüldü: monotonik, +0.42 puan
     # 2026-07-27: eşikler kanıta göre yükseltildi (measure_score_edge.py)
     assert d.regime_thresholds.bear_confirmed_min_quality == 82

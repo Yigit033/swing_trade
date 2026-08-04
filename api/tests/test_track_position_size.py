@@ -78,13 +78,17 @@ def test_larger_portfolio_allows_larger_size():
     assert big * 48.89 <= 100_000 * 0.25 + 50.0
 
 
-def test_type_s_gets_tighter_cap_than_type_a():
-    """Tip tavanları farklı (S %15 < A %25) — tipe duyarlılık korunuyor."""
+def test_type_b_gets_tighter_cap_than_type_a():
+    """
+    Tip tavanları farklı (B %20 < A/C %25) — tipe duyarlılık korunuyor.
+    (Eski test Type S kullanıyordu; Type S 2026-08-04'te kaldırıldı — girdisi
+    olan short-interest geçmişe dönük mevcut olmadığı için hiç doğrulanamamıştı.)
+    """
     a = _authoritative_position_size(
         _req(position_size=99999, swing_type="A", entry_price=10.0, stop_loss=9.99))
-    s = _authoritative_position_size(
-        _req(position_size=99999, swing_type="S", entry_price=10.0, stop_loss=9.99))
-    assert s < a
+    b = _authoritative_position_size(
+        _req(position_size=99999, swing_type="B", entry_price=10.0, stop_loss=9.99))
+    assert b < a
 
 
 # ── Tutarsız girdi ───────────────────────────────────────────────────────

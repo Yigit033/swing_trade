@@ -375,27 +375,31 @@ class SmallCapScoring:
             elif 0 < five_day_return < st.bonus_very_early_hi:
                 bonus += st.bonus_very_early_pts
             
+            # Sektör göreli gücü. rs_bonus_vs_spy ile hesaplanır — canlıda da
+            # backtest'te de AYNI fonksiyon (2026-08-04 parite düzeltmesi;
+            # eskiden canlı SectorRS'in gerçek ETF hesabını, backtest SPY
+            # proxy'sini kullanıyordu → aynı hisse iki yolda farklı skor alıyordu).
+            bonus += boosters.get('sector_rs_bonus', 0)
+
             # ============================================================
-            # SECTOR RS BONUS (NEW - Senior Trader v2.1)
+            # KATALİZÖR BONUSLARI KALDIRILDI — 2026-08-04
             # ============================================================
-            sector_rs_bonus = boosters.get('sector_rs_bonus', 0)
-            bonus += sector_rs_bonus  # Max +12 for sector leader
-            
-            # ============================================================
-            # CATALYST BONUSES (NEW - Senior Trader v2.1)
-            # ============================================================
-            # Short Interest
-            short_interest_bonus = boosters.get('short_interest_bonus', 0)
-            bonus += short_interest_bonus  # Max +10 for squeeze candidate
-            
-            # Insider Buying
-            insider_bonus = boosters.get('insider_bonus', 0)
-            bonus += insider_bonus  # Max +8 for >$1M insider buying
-            
-            # News Activity
-            news_bonus = boosters.get('news_bonus', 0)
-            bonus += news_bonus  # Max +5 for high news activity
-            
+            # short_interest (+10) / insider (+8) / news (+5) / sektör rotasyonu
+            # (+5/−10) bonusları skordan ÇIKARILDI. Sebep ölçüldü:
+            #
+            # Bu dört bileşen backtest_mode'da HER ZAMAN 0 (geçmişe dönük
+            # short-interest / insider / haber verisi yok). Yani kalite eşiği
+            # dahil BÜTÜN ölçümlerimiz bonussuz skorlarla yapıldı, canlı ise
+            # şişirilmiş skor kullanıyordu. Canlı 29 sinyalde ölçüldü:
+            #     ortalama şişme +5.8 puan (maks +17)
+            # → canlı "Q80" eşiği ölçüm diliyle fiilen Q74 gibi davranıyordu.
+            #   Ölçülen EV: Q80 +2.41% ama Q73 yalnız +1.18%.
+            #
+            # Doğrulanamayan (geçmiş verisi olmayan) bir bileşenin eşiği 6 puan
+            # kaydırması, sistemin en pahalı sessiz hatasıydı. Bonuslar
+            # silinince canlı skor == ölçülen skor olur ve Q80 gerçekten Q80'dir.
+            # Bileşenler kanıtlanamadığı için değil, KANITLANAMAZ oldukları için
+            # çıkarıldı: point-in-time veri olmadan asla doğrulanamazlar.
             if boosters.get('rsi_divergence'):
                 bonus += st.bonus_rsi_divergence
 
