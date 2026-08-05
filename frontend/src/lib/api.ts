@@ -111,7 +111,9 @@ export interface Signal {
     target_1: number;
     target_2?: number;
     target: number;
-    quality_score: number;
+    quality_score: number;              // HAM skor — baraj bu skora uygulanır
+    rank_score?: number;                // ham + VCE işaretleri — sıralama ölçütü
+    rank_bonus?: number;                // 0 | 5 | 8 | 13
     original_quality_score?: number;
     swing_type?: string;
     swing_type_label?: string;

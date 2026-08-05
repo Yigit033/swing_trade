@@ -379,6 +379,64 @@ Kanıt: **test paketi 250 sn → 59 sn**.
 
 ---
 
+## 6. tur — SIRALAMA/BARAJ AYRIMI, uygulandı (2026-08-05)
+
+4. turda bulunan açık sorun kapatıldı. Sorun: `+8` premium-VCE ve `+5`
+tight-coil tek bir `quality_score`'a ekleniyordu, o skor da hem **sıralamada**
+hem **barajda** kullanılıyordu. Sonuç: 34 sinyal yalnız bu ekleme sayesinde
+Q80'in üstüne taşınıyordu ve o 34'ün EV'si **+0.89%** (taban +4.19%) — baraj
+onlar için fiilen Q72 gibi davranıyordu.
+
+### Neden "EV arttı" tek başına yeterli kanıt değildi
+
+Atılan 34 işlem **zarar ettirmiyor**, +0.89% kazanıyor. Barajı yükseltmek işlem
+başı ortalamayı her zaman artırır ama toplamı düşürebilir:
+
+| Sermaye SINIRSIZ | işlem | EV | **toplam** |
+|---|---|---|---|
+| mevcut | 105 | +4.00% | **+420%** |
+| ayrıştırılmış | 66 | +5.09% | +336% |
+
+Yani slot bolsa mevcut kurgu kazanır. Karar sermaye kısıtına bağlı.
+
+### Para ölçümü — slot kısıtlı portföy
+
+`scripts/measure_threshold_money.py` (21 ay, 0.19 puan/işlem maliyet dahil,
+slot doluysa sinyal kaçırılır):
+
+| Eşzamanlı slot | Mevcut | Ayrıştırılmış | Fark |
+|---|---|---|---|
+| 2 | +28.8% | **+107.9%** | +79.1 |
+| 3 | +53.7% | **+104.1%** | +50.4 |
+| **4** | +47.5% | **+76.0%** | **+28.6** |
+| **5** | +39.3% | **+57.5%** | **+18.2** |
+| 8 | +39.2% | **+50.6%** | +11.4 |
+| 12 | **+32.6%** | +31.8% | −0.8 |
+
+Canlıda tip pozisyon tavanı %20-25 → **4-5 eşzamanlı pozisyon** sığıyor;
+risk-bazlı boyutlandırma (%1.5 risk / ~%13 stop) en iyi durumda ~8 slot verir.
+Her üç senaryoda da ayrıştırma kazanıyor. Mevcut kurgu ancak 12+ slotta
+(imkânsız) başabaş geliyor.
+
+**Sebep:** zayıf işlem iyi bir işlemin slotunu kapatıyor — fırsat maliyeti
++0.89%'lik brüt kazancı fazlasıyla yiyor.
+
+### Uygulama
+
+```
+quality_score   HAM skor        → baraj (motor rejim tabanı + API eff_min) + gösterim
+rank_score      ham + işaretler → YALNIZ sıralama
+rank_bonus      0 | 5 | 8 | 13  → UI'da "sıralamada +8/+5" olarak görünür
+```
+
+Bilgi çöpe atılmadı: aynı sinyal sayısında `rank_score` ile sıralamak ham skorla
+sıralamaktan **+6.26% vs +5.28%** daha iyi (canlı motorla doğrulandı).
+
+Kilit test: `test_rank_vs_gate_split.py` — `quality_score +=` geri gelirse,
+baraj rank_score'a kayarsa veya sıralama işaretleri bırakırsa kırılır.
+
+---
+
 ## Ölçülmemiş kalanlar (sonraki tur)
 
 | Katman | Not |

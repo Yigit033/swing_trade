@@ -156,8 +156,8 @@ function SignalCard({ s, onTrack, tracking }: { s: Signal; onTrack: (s: Signal) 
     if (s.high_rvol) boosters.push("High relative volume");
     if (s.gap_continuation) boosters.push("Gap continuation");
     if (s.rsi_divergence) boosters.push("RSI divergence");
-    if (s.vce_premium) boosters.push("Premium VCE (hacim onaylı + güçlü kapanış)");
-    if (s.vce_tight_coil) boosters.push("Sıkı yay (ATR baz seviyenin %65 altına sıkışmış)");
+    if (s.vce_premium) boosters.push("Premium VCE (hacim onaylı + güçlü kapanış) — sıralamada +8");
+    if (s.vce_tight_coil) boosters.push("Sıkı yay (ATR baz seviyenin %65 altına sıkışmış) — sıralamada +5");
     if (s.obv_accumulation) boosters.push("OBV accumulation (smart money)");
     if (s.obv_distribution) boosters.push("OBV distribution warning");
 

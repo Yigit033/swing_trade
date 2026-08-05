@@ -519,26 +519,43 @@ class SmallCapEngine:
                 df, volume_surge, atr_percent, float_shares, boosters
             )
 
-            # v13.3: Premium-VCE bonus — a squeeze breakout that ALSO has volume
-            # confirmation (>=1.5x) and a strong close (upper 40%) measured at a
-            # markedly higher per-signal edge (+4.84% vs +2.42% R10). It is no
-            # longer a HARD gate (that starved frequency), but it earns +8 quality
-            # so the best setups rank to the top of the list.
+            # ================================================================
+            # VCE İŞARETLERİ = YALNIZ SIRALAMA (baraja karışmaz) — 2026-08-05
+            # ================================================================
+            # premium-VCE (+8) ve tight-coil (+5) ölçülmüş gerçek bilgi taşıyor:
+            # aynı sinyal sayısında bonuslu skorla sıralamak bonussuzdan DAHA İYİ
+            # sonuç veriyor (n=71'de EV +6.33% vs +5.77%). Yani sıralama özelliği
+            # olarak DEĞERLİ.
+            #
+            # AMA eskiden `quality_score`'a ekleniyordu ve o skor hem sıralamada
+            # hem BARAJDA kullanılıyor. Sonuç: 34 sinyal yalnız bu ekleme
+            # sayesinde Q80'in üstüne TAŞINIYORDU ve o 34'ün EV'si +0.89%
+            # (taban +4.19%) — yani baraj onlar için fiilen Q72 gibi davranıyordu.
+            #
+            # Para ölçümü (scripts/measure_threshold_money.py, 21 ay, maliyet
+            # dahil, slot-kısıtlı portföy — canlıda tip tavanı %20-25 olduğu için
+            # 4-5 eşzamanlı pozisyon sığıyor):
+            #     slot 3 : mevcut +53.7%  →  ayrıştırılmış +104.1%   (+50.4 puan)
+            #     slot 4 : mevcut +47.5%  →  ayrıştırılmış  +76.0%   (+28.6 puan)
+            #     slot 5 : mevcut +39.3%  →  ayrıştırılmış  +57.5%   (+18.2 puan)
+            #     slot 8 : mevcut +39.2%  →  ayrıştırılmış  +50.6%   (+11.4 puan)
+            # Sermaye sınırsız olsaydı mevcut kurgu kazanırdı (atılan işlemler
+            # zarar ettirmiyor, +0.89% kazanıyor) — ama sermaye DAR: zayıf işlem
+            # iyi bir işlemin slotunu kapatıyor. Fırsat maliyeti kârı yiyor.
+            #
+            # Çözüm: bilgiyi KORU, ama doğru yere koy.
+            #   quality_score → HAM skor: baraj + gösterim (tek eşik anlamı)
+            #   rank_score    → skor + işaretler: yalnız SIRALAMA
             _vce_metrics = (trigger_details or {}).get('vce_metrics', {})
+            _rank_bonus = 0
             if _vce_metrics.get('is_premium'):
-                quality_score += 8
+                _rank_bonus += 8
                 boosters['vce_premium'] = True
-
-            # v13.5: Tight-coil bonus. A deeper squeeze (ATR compressed to <65%
-            # of baseline) is the ONE selection feature that survived
-            # out-of-sample testing (R10 +1.92% vs +1.31% base, n=128 test).
-            # RS/ATR/combination filters were rejected — they looked great
-            # in-sample (+17.7%) but went NEGATIVE out-of-sample (overfit).
-            # Used as a ranking nudge, not a hard gate, so frequency is intact.
             _sq = _vce_metrics.get('squeeze_ratio', 1.0)
             if 0 < _sq < 0.65:
-                quality_score += 5
+                _rank_bonus += 5
                 boosters['vce_tight_coil'] = True
+            rank_score = quality_score + _rank_bonus
 
             # Regime-aware quality floor — 2026-07-27 REVİZE: tek kaynak.
             # Eskiden burada ayrı bir "base 70 + {BULL:-10,CAUTION:0,BEAR:+5}"
@@ -583,7 +600,9 @@ class SmallCapEngine:
                 # kaynağı UI'da ve forward-return telemetrisinde görünür olsun.
                 'trigger_pathway': trigger_details.get('trigger_pathway', 'vce_breakout'),
                 'trigger_reason': trigger_details.get('trigger_reason', ''),
-                'quality_score': round(quality_score, 1),
+                'quality_score': round(quality_score, 1),        # HAM — baraj + gösterim
+                'rank_score': round(rank_score, 1),              # +VCE işaretleri — yalnız sıralama
+                'rank_bonus': _rank_bonus,
                 'entry_price': round(entry_price, 2),
                 
                 # SWING TYPE (OPTIMIZED)
@@ -780,8 +799,11 @@ class SmallCapEngine:
                     signal = self.risk.add_risk_management(signal, df, portfolio_value, regime=current_regime)
                 signals.append(signal)
 
-        # Sort by quality score (highest first)
-        signals.sort(key=lambda x: x.get('quality_score', 0), reverse=True)
+        # SIRALAMA rank_score ile (ham skor + VCE işaretleri). Baraj ise ham
+        # skora uygulanıyor — bkz. scan_stock'taki 2026-08-05 ayrıştırması.
+        # Eşitlikte ham skor ikincil ölçüt.
+        signals.sort(key=lambda x: (x.get('rank_score', 0), x.get('quality_score', 0)),
+                     reverse=True)
 
         self._last_scan_reject_counts = reject_counts
         no_signal = scanned - len(signals)
