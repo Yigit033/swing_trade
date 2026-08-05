@@ -20,9 +20,66 @@ _jobs: dict[str, dict[str, Any]] = {}
 _scan_slot_lock = threading.Lock()
 _active_scan_job_id: Optional[str] = None
 
+# ── ASILI KALAN İŞ BEKÇİSİ (2026-08-05) ──────────────────────────────────
+# Canlı arıza: bir tarama %84'te ("Running momentum engine…") saatlerce takıldı.
+# İstisna DEĞİLDİ — worker try/except/finally ile sarılı, istisna olsa "failed"
+# olurdu. Thread bir ağ çağrısında (yfinance/Finviz) süresiz asılı kalmıştı ve
+# hiçbir katmanda timeout yoktu. Sonuç ürünü kullanılamaz hale getiriyor:
+# `create_exclusive_scan_job` tek slotu koruduğu için kullanıcı MAKİNE YENİDEN
+# BAŞLAYANA KADAR bir daha tarama yapamıyor. Telefondaki "arka planda çalışıyor"
+# kartı da bu yüzden hiç kaybolmuyordu.
+#
+# Kök nedeni tek tek avlamak yerine (asılma her ağ çağrısında olabilir) genel
+# bir bekçi: iş İLERLEME KAYDETMEDEN bu süreyi aşarsa başarısız sayılır ve slot
+# serbest bırakılır. Normal tarama saniyeler arayla ilerleme yazar, dolayısıyla
+# meşru bir işi kesme riski yok.
+STALE_JOB_SECONDS = 600     # 10 dk ilerleme yoksa asılı kabul et
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _monotonic() -> float:
+    import time
+
+    return time.monotonic()
+
+
+def _reclaim_stale_scan_slot() -> Optional[str]:
+    """
+    Aktif iş ilerleme kaydetmeden STALE_JOB_SECONDS'ı aştıysa onu 'failed'
+    işaretle ve slotu bırak. Reclaim edilen job_id'yi döndürür.
+
+    Not: `_scan_slot_lock` TUTULMADAN çağrılmalı — kendi kilidini alır.
+    """
+    global _active_scan_job_id
+    with _scan_slot_lock:
+        jid = _active_scan_job_id
+        if jid is None:
+            return None
+        with _lock:
+            j = _jobs.get(jid)
+            if not j or j.get("status") not in ("queued", "running"):
+                _active_scan_job_id = None      # tutarsız durum — slotu bırak
+                return jid
+            last = j.get("last_progress_at")
+            if last is None or (_monotonic() - last) < STALE_JOB_SECONDS:
+                return None
+            idle = int(_monotonic() - last)
+            j.update(
+                status="failed",
+                phase="error",
+                message=(
+                    f"Tarama {idle // 60} dakikadır ilerlemedi — asılı kabul edilip "
+                    "iptal edildi (büyük olasılıkla veri sağlayıcı yanıt vermedi). "
+                    "Yeniden tarama başlatabilirsiniz."
+                ),
+                error="stalled",
+            )
+        _active_scan_job_id = None
+        logger.warning("Asılı tarama işi geri alındı: %s (%d sn ilerleme yok)", jid, idle)
+        return jid
 
 
 def _prune_old_jobs() -> None:
@@ -44,6 +101,7 @@ def create_exclusive_scan_job() -> Optional[str]:
     Busy ise None döner.
     """
     global _active_scan_job_id
+    _reclaim_stale_scan_slot()          # asılı iş varsa slotu kurtar
     with _scan_slot_lock:
         if _active_scan_job_id is not None:
             return None
@@ -57,6 +115,7 @@ def create_exclusive_scan_job() -> Optional[str]:
                 "result": None,
                 "error": None,
                 "created_at": _utc_now(),
+                "last_progress_at": _monotonic(),
             }
             _prune_old_jobs()
         _active_scan_job_id = job_id
@@ -65,11 +124,23 @@ def create_exclusive_scan_job() -> Optional[str]:
 
 def update_job(job_id: str, **kwargs: Any) -> None:
     with _lock:
-        if job_id in _jobs:
-            _jobs[job_id].update(kwargs)
+        j = _jobs.get(job_id)
+        if j is None:
+            return
+        # Bekçi tarafından asılı ilan edilmiş bir iş, sonradan uyanan zombi
+        # thread tarafından "completed"a çevrilemez — kullanıcı çoktan yeni
+        # tarama başlatmış olabilir, eski sonucu geri getirmek yanıltıcı olur.
+        if j.get("error") == "stalled":
+            return
+        j.update(kwargs)
+        # Bekçinin ölçtüğü şey: son İLERLEME anı
+        j["last_progress_at"] = _monotonic()
 
 
 def get_job_public(job_id: str) -> Optional[dict[str, Any]]:
+    # Kullanıcı zaten saniyede bir sorguyor — bekçiyi buraya bağlamak, asılı bir
+    # işin ekranda sonsuza kadar "çalışıyor" görünmesini engeller.
+    _reclaim_stale_scan_slot()
     with _lock:
         j = _jobs.get(job_id)
         if not j:

@@ -243,3 +243,137 @@ def test_explicit_path_never_uses_cache(tmp_path, monkeypatch):
     assert sc.load_settings(path=p).max_holding_days == 11, (
         "açık path önbellekten dönmüş — izole dosya okuması bozulur"
     )
+
+
+# ── CANLI ARIZA: "TÜM KATMANLAR GEÇERSİZ" (2026-08-05) ───────────────────
+# fly.io logu: her ayar yüklemesinde 5 + 63 doğrulama hatası ve ardından
+# "TÜM KATMANLAR GEÇERSİZ — kod varsayılanlarına düşüldü (kalibrasyon KAYIP)".
+# Yani canlı ürün ölçülmüş ayarlarla DEĞİL, kod varsayılanlarıyla çalışıyordu —
+# kullanıcının UI'dan açtığı auto-scan dahil her şey sessizce sıfırlanmıştı.
+#
+# Üç ayrı kusur birleşince oluşuyordu:
+#   1. _prune_removed_keys yalnız İKİ seviye derinlik destekliyordu; üç seviyeli
+#      "swing.type_b.catalyst_pts" hiç temizlenmiyordu.
+#   2. Kaldırılan Type S, tip-anahtarlı sözlüklerin DEĞERİ içinde duruyordu
+#      (max_stop_by_type: {...,'S':0.18}); bu bir ayar ADI olmadığı için
+#      _REMOVED_KEYS ile ifade edilemiyordu.
+#   3. Kademeli geri çekilme yolu dosya katmanını prune ETMEDEN birleştiriyordu,
+#      yani kurtarma mekanizması tam ihtiyaç anında kendisi patlıyordu.
+
+LIVE_STALE_PATCH = {
+    "max_stop_by_type": {"C": 0.14, "A": 0.15, "B": 0.16, "S": 0.18},
+    "type_position_caps": {"C": 0.25, "A": 0.25, "B": 0.20, "S": 0.15},
+    "type_atr_multipliers": {"B": 2.0, "A": 1.8, "C": 1.5, "S": 2.5},
+    "type_target_caps": {
+        "B": {"t1_max_pct": 0.10, "t2_max_pct": 0.55},
+        "C": {"t1_max_pct": 0.08, "t2_max_pct": 0.45},
+        "A": {"t1_max_pct": 0.10, "t2_max_pct": 0.55},
+        "S": {"t1_max_pct": 0.12, "t2_max_pct": 0.65},
+    },
+    "swing": {"type_b": {"catalyst_pts": 1}},
+    "scoring_tuning": {"bonus_high_rvol": 3, "pen_spread_risk": 12},
+    "min_rr_at_entry": 1.8,
+    "min_volume_surge_soft": 1.5,
+}
+
+
+def test_three_level_dotted_key_is_pruned():
+    """`swing.type_b.catalyst_pts` — iki seviyelik prune bunu kaçırıyordu."""
+    out = sc._prune_removed_keys({"swing": {"type_b": {"catalyst_pts": 1, "min_score": 6}}})
+    assert "catalyst_pts" not in out["swing"]["type_b"]
+    assert out["swing"]["type_b"]["min_score"] == 6, "komşu alanlar korunmalı"
+
+
+def test_removed_swing_type_pruned_from_type_keyed_dicts():
+    """Type S, ayar DEĞERİNİN içindeydi — dotted path ile temizlenemez."""
+    out = sc._prune_removed_keys(LIVE_STALE_PATCH)
+    for field in ("max_stop_by_type", "type_position_caps",
+                  "type_atr_multipliers", "type_target_caps"):
+        assert "S" not in out[field], f"{field} içinde ölü tip 'S' kalmış"
+        assert set(out[field]) == {"A", "B", "C"}
+
+
+def test_live_stale_patch_loads_without_losing_calibration(monkeypatch):
+    """
+    ASIL REGRESYON: canlıdaki bayat yama ile ayarlar YÜKLENMELİ ve kalibrasyon
+    korunmalı. Kod varsayılanlarına düşerse ölçülmüş her parametre kaybolur.
+    """
+    monkeypatch.setattr(sc, "_db_overlay", lambda: dict(LIVE_STALE_PATCH))
+    sc.invalidate_settings_cache()
+    s = sc.load_settings()
+
+    assert set(s.max_stop_by_type) == {"A", "B", "C"}
+    assert s.partial_at_t1_fraction == 0.33, "ölçülmüş T1 oranı kayıp"
+    assert s.regime_thresholds.bull_min_quality == 78, "ölçülmüş BULL eşiği kayıp"
+    assert s.scoring_tuning.bonus_cap == 30
+
+
+def test_user_toggle_survives_stale_patch(monkeypatch):
+    """
+    Bayat yamanın yanında kullanıcının GERÇEK ayarı da olmalı ve korunmalı —
+    canlıda auto-scan tam bu yüzden sessizce kapanıyordu.
+    """
+    patch = dict(LIVE_STALE_PATCH)
+    patch["auto_scan"] = {"enabled": True}
+    monkeypatch.setattr(sc, "_db_overlay", lambda: dict(patch))
+    sc.invalidate_settings_cache()
+    assert sc.load_settings().auto_scan.enabled is True
+
+
+def test_fallback_path_also_prunes(monkeypatch, tmp_path):
+    """
+    Geri çekilme yolu ham dosyayı birleştirmemeli. DB yaması bozuk + dosya
+    katmanı bayat olduğunda bile ölçülmüş dosya değeri korunmalı.
+    """
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps({
+        "max_holding_days": 17,                 # ölçülmüş, korunmalı
+        "min_rr_at_entry": 1.8,                 # kaldırılmış, prune edilmeli
+        "swing": {"type_b": {"catalyst_pts": 1}},
+        "max_stop_by_type": {"C": 0.14, "A": 0.15, "B": 0.16, "S": 0.18},
+    }), encoding="utf-8")
+    monkeypatch.setattr(sc, "DEFAULT_SETTINGS_PATH", p)
+    monkeypatch.setattr(sc, "_db_overlay", lambda: {"bu_alan_yok_artik": 123})
+    sc.invalidate_settings_cache()
+
+    s = sc.load_settings()
+    assert s.max_holding_days == 17, (
+        "geri çekilme dosya katmanını kurtaramadı — kalibrasyon kod "
+        "varsayılanlarına düştü (canlıdaki arızanın aynısı)"
+    )
+
+
+def test_every_removed_key_path_is_reachable():
+    """
+    _REMOVED_KEYS'e yazılan her yol GERÇEKTEN temizlenebilir olmalı. Yanlış
+    derinlikte yazılmış bir yol sessizce hiçbir şey yapmaz (asıl tuzak buydu).
+    """
+    # Derinden yüzeye kur: _REMOVED_KEYS hem "backtest_exit_trailing" (yaprak)
+    # hem "backtest_exit_trailing.time_stop_min_days" (çocuk) içeriyor; önce
+    # çocukları yazmazsak üst düğüm skaler olur ve sonda çocuk yazılamaz.
+    probe = {}
+    for dotted in sorted(sc._REMOVED_KEYS, key=lambda d: -d.count(".")):
+        parts = dotted.split(".")
+        node = probe
+        ok = True
+        for p in parts[:-1]:
+            nxt = node.setdefault(p, {})
+            if not isinstance(nxt, dict):
+                ok = False
+                break
+            node = nxt
+        if ok and not isinstance(node.get(parts[-1]), dict):
+            node[parts[-1]] = 1
+    out = sc._prune_removed_keys(probe)
+
+    leftovers = []
+    for dotted in sc._REMOVED_KEYS:
+        parts = dotted.split(".")
+        node = out
+        for p in parts[:-1]:
+            node = node.get(p) if isinstance(node, dict) else None
+            if node is None:
+                break
+        if isinstance(node, dict) and parts[-1] in node:
+            leftovers.append(dotted)
+    assert not leftovers, f"prune edilemeyen yollar: {leftovers}"

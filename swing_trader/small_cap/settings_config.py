@@ -352,19 +352,69 @@ _REMOVED_KEYS = {
 }
 
 
+# Tip-anahtarlı sözlüklerden (max_stop_by_type, type_position_caps,
+# type_atr_multipliers, type_target_caps) kaldırılmış swing tipleri.
+# Bunlar ayar ADI değil, ayar DEĞERİNİN içindeki anahtarlar — dotted path ile
+# temizlenemezler, ayrı ele alınmaları gerekir.
+_REMOVED_TYPE_KEYS = frozenset({"S"})   # Type S 2026-08-04'te kaldırıldı
+
+_TYPE_KEYED_SETTINGS = (
+    "max_stop_by_type",
+    "type_position_caps",
+    "type_atr_multipliers",
+    "type_target_caps",
+)
+
+
+def _deep_copy_dicts(v: Any) -> Any:
+    if isinstance(v, dict):
+        return {k: _deep_copy_dicts(x) for k, x in v.items()}
+    return v
+
+
 def _prune_removed_keys(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Koddan kaldırılmış anahtarları at (yerinde değiştirmez)."""
-    out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in data.items()}
+    """
+    Koddan kaldırılmış anahtarları at (yerinde değiştirmez).
+
+    İKİ AYRI TEMİZLİK — 2026-08-05'te canlıda ikisi de eksikti ve sonuç
+    "TÜM KATMANLAR GEÇERSİZ — kalibrasyon KAYIP" oldu, yani ürün ölçülmüş
+    ayarlarla değil kod varsayılanlarıyla çalışmaya başladı:
+
+      1. Nokta yollu anahtarlar — eskiden yalnız İKİ seviye destekleniyordu
+         (`split(".", 1)` ile "sec"/"key"). Üç seviyeli
+         `swing.type_b.catalyst_pts` bu yüzden HİÇ temizlenmiyordu ve her
+         yüklemede doğrulamayı patlatıyordu. Artık rastgele derinlik.
+
+      2. Tip-anahtarlı sözlüklerdeki ölü tipler — `max_stop_by_type` gibi
+         alanların DEĞERİ içinde `"S"` duruyordu. Bunlar ayar adı olmadığı için
+         `_REMOVED_KEYS` ile ifade edilemez; validator de `extra="forbid"`
+         mantığıyla reddediyordu. Artık ayrıca temizleniyor.
+    """
+    out = {k: _deep_copy_dicts(v) for k, v in data.items()}
     dropped = []
+
+    # 1) Rastgele derinlikte nokta yollu anahtarlar
     for dotted in _REMOVED_KEYS:
-        if "." in dotted:
-            sec, key = dotted.split(".", 1)
-            if isinstance(out.get(sec), dict) and key in out[sec]:
-                out[sec].pop(key, None)
-                dropped.append(dotted)
-        elif dotted in out:
-            out.pop(dotted, None)
+        parts = dotted.split(".")
+        node = out
+        for p in parts[:-1]:
+            node = node.get(p) if isinstance(node, dict) else None
+            if not isinstance(node, dict):
+                node = None
+                break
+        if isinstance(node, dict) and parts[-1] in node:
+            node.pop(parts[-1], None)
             dropped.append(dotted)
+
+    # 2) Tip-anahtarlı sözlüklerden kaldırılmış swing tipleri
+    for field in _TYPE_KEYED_SETTINGS:
+        v = out.get(field)
+        if isinstance(v, dict):
+            for t in list(v):
+                if t in _REMOVED_TYPE_KEYS:
+                    v.pop(t, None)
+                    dropped.append(f"{field}[{t}]")
+
     if dropped:
         logger.info("Kaldırılmış ayar anahtarları yok sayıldı: %s", ", ".join(sorted(dropped)))
     return out
@@ -466,7 +516,13 @@ def load_settings(path: Optional[Path] = None) -> SmallCapSettings:
                 if p.exists():
                     raw = json.loads(p.read_text(encoding="utf-8"))
                     if isinstance(raw, dict):
-                        file_only = _deep_merge(file_only, raw)
+                        # PRUNE ŞART — 2026-08-05: burada eksikti. Ana yol
+                        # temizliyordu ama geri çekilme yolu HAM dosyayı
+                        # birleştiriyordu, dolayısıyla dosya katmanı da
+                        # patlıyor ve sistem doğrudan kod varsayılanlarına
+                        # düşüyordu. Yani "kademeli geri çekilme" tam da
+                        # ihtiyaç duyulan anda çalışmıyordu.
+                        file_only = _deep_merge(file_only, _prune_removed_keys(raw))
                 s = SmallCapSettings.model_validate(file_only)
                 logger.error(
                     "DB ayar yaması geçersiz — YOK SAYILDI, dosya katmanıyla devam "
