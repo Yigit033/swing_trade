@@ -104,6 +104,9 @@ class SignalNarrative:
             macd_bullish = signal.get('macd_bullish', False)
             rsi_divergence = signal.get('rsi_divergence', False)
             higher_lows = signal.get('higher_lows', False)
+            # Skoru gercekten kaydiran iki VCE isareti (+8 / +5)
+            vce_premium = signal.get('vce_premium', False)
+            vce_tight_coil = signal.get('vce_tight_coil', False)
             
             return cls._generate_turkish(
                 ticker, entry, stop, target_1, target_2,
@@ -111,7 +114,8 @@ class SignalNarrative:
                 quality, swing_type, volume_surge, atr_percent, rsi,
                 five_day_return, float_millions, sector_rs,
                 is_sector_leader, hold_min, hold_max,
-                tech_levels, macd_bullish, rsi_divergence, higher_lows
+                tech_levels, macd_bullish, rsi_divergence, higher_lows,
+                vce_premium, vce_tight_coil
             )
             
         except Exception as e:
@@ -130,7 +134,8 @@ class SignalNarrative:
         quality, swing_type, volume_surge, atr_percent, rsi,
         five_day_return, float_millions, sector_rs,
         is_sector_leader, hold_min, hold_max,
-        tech_levels, macd_bullish, rsi_divergence, higher_lows
+        tech_levels, macd_bullish, rsi_divergence, higher_lows,
+        vce_premium=False, vce_tight_coil=False
     ) -> Dict:
         """Generate professional Turkish narrative (Cuma Çevik style)."""
         
@@ -266,16 +271,27 @@ class SignalNarrative:
             extra_parts.append(f"👑 **Sektör lideri** (+{sector_rs:.0f} RS)")
         elif sector_rs > 10:
             extra_parts.append(f"Sektör performansı: +{sector_rs:.0f}")
-        
+
+        # VCE kalite işaretleri — skoru gerçekten kaydıran iki şey. Kullanıcının
+        # "bu neden listenin başında?" sorusunun cevabı bunlar, o yüzden burada.
+        if vce_premium:
+            extra_parts.append(
+                "⭐ **Premium sıkışma** — kırılım hacim onaylı (≥1.5x) ve "
+                "kapanış günün üst %40'ında (+8 kalite)"
+            )
+        if vce_tight_coil:
+            extra_parts.append(
+                "🌀 **Sıkı yay** — oynaklık baz seviyenin %65 altına sıkışmış; "
+                "bu, dışörneklemde ayakta kalan tek seçim özelliği (+5 kalite)"
+            )
+
         extra_text = " | ".join(extra_parts) if extra_parts else ""
         
         # ── SECTION 5: ÖNERİ VE UYARILAR ──
         rec_parts = []
         rec_parts.append(f"⏱️ **{hold_min}-{hold_max} gün** hold önerisi")
         
-        if swing_type == 'S':
-            rec_parts.append("⚡ Hızlı hareketlere hazır ol, ani düşüşler olabilir")
-        elif swing_type == 'B':
+        if swing_type == 'B':
             rec_parts.append("🏃 Momentum tarafında kal, trailing stop ile kâr koru")
         elif swing_type == 'C':
             rec_parts.append("🎯 Erken girişin avantajını kullan, sabırlı ol")

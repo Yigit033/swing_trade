@@ -66,7 +66,7 @@ def find_resistance_levels(df: pd.DataFrame, current_price: float, max_levels: i
     
     Uses pivot highs from last 60 bars to identify key overhead resistance.
     
-    Returns list of dicts: {'price': float, 'distance_pct': float, 'strength': str}
+    Returns list of dicts: {'price': float, 'distance_pct': float}
     """
     try:
         pivot_highs = find_pivot_highs(df, lookback=3)
@@ -79,7 +79,6 @@ def find_resistance_levels(df: pd.DataFrame, current_price: float, max_levels: i
                 resistances.append({
                     'price': round(price, 2),
                     'distance_pct': round(distance_pct, 1),
-                    'bar_index': idx
                 })
         
         # Sort by distance (closest first)
@@ -89,11 +88,6 @@ def find_resistance_levels(df: pd.DataFrame, current_price: float, max_levels: i
         clustered = []
         for r in resistances:
             if not clustered or abs(r['price'] - clustered[-1]['price']) / clustered[-1]['price'] > 0.02:
-                # Determine strength based on how many times this level was tested
-                r['strength'] = 'güçlü' if any(
-                    abs(r['price'] - other['price']) / r['price'] < 0.02 
-                    for other in resistances if other != r
-                ) else 'orta'
                 clustered.append(r)
         
         return clustered[:max_levels]
@@ -120,7 +114,6 @@ def find_support_levels(df: pd.DataFrame, current_price: float, max_levels: int 
                 supports.append({
                     'price': round(price, 2),
                     'distance_pct': round(distance_pct, 1),
-                    'bar_index': idx
                 })
         
         # Sort by distance (closest first, least negative)
@@ -150,15 +143,13 @@ def detect_trendline_break(df: pd.DataFrame, current_price: float) -> Dict:
     4. If current price > projected trendline → break detected
     
     Returns dict: {
-        'detected': bool,
-        'trendline_price': float (projected value at current bar),
         'break_pct': float (how far above trendline),
-        'description': str
+        'description': str ('düşen_trend_kırıldı' | 'yükselen_trend' | '')
     }
+    `detected` ve `trendline_price` alanları 2026-08-05'te kaldırıldı —
+    tek tüketici narrative.py ve o yalnız bu ikisini okuyor.
     """
     result = {
-        'detected': False,
-        'trendline_price': 0.0,
         'break_pct': 0.0,
         'description': ''
     }
@@ -210,12 +201,9 @@ def detect_trendline_break(df: pd.DataFrame, current_price: float) -> Dict:
         bars_from_p2 = current_bar - idx2
         projected_price = price2 + (slope * bars_from_p2)
         
-        result['trendline_price'] = round(projected_price, 2)
-        
         # Check if price broke above the projected trendline
         if current_price > projected_price and projected_price > 0:
             break_pct = ((current_price / projected_price) - 1) * 100
-            result['detected'] = True
             result['break_pct'] = round(break_pct, 1)
             result['description'] = 'düşen_trend_kırıldı'
         else:
@@ -294,11 +282,12 @@ def calculate_technical_levels(df: pd.DataFrame, current_price: float,
         volume_surge: Volume surge multiplier
     
     Returns:
-        Dict with resistance_levels, support_levels, trendline, volume_pattern
+        Dict with resistance_levels, nearest_resistance(_pct),
+        nearest_support(_pct), trendline, volume_pattern.
+        Tek tüketicisi narrative.py (Cuma Çevik tarzı açıklama).
     """
     result = {
         'resistance_levels': [],
-        'support_levels': [],
         'nearest_resistance': None,
         'nearest_resistance_pct': 0.0,
         'nearest_support': None,
@@ -314,9 +303,9 @@ def calculate_technical_levels(df: pd.DataFrame, current_price: float,
         result['nearest_resistance'] = resistances[0]['price']
         result['nearest_resistance_pct'] = resistances[0]['distance_pct']
     
-    # Find support levels
+    # Find support levels — yalnız en yakını tüketiliyor (narrative.py);
+    # tam liste 2026-08-05'te çıktıdan kaldırıldı (okuyanı yoktu).
     supports = find_support_levels(df, current_price)
-    result['support_levels'] = supports
     if supports:
         result['nearest_support'] = supports[0]['price']
         result['nearest_support_pct'] = supports[0]['distance_pct']
