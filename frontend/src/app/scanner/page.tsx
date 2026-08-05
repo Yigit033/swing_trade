@@ -156,9 +156,8 @@ function SignalCard({ s, onTrack, tracking }: { s: Signal; onTrack: (s: Signal) 
     if (s.high_rvol) boosters.push("High relative volume");
     if (s.gap_continuation) boosters.push("Gap continuation");
     if (s.rsi_divergence) boosters.push("RSI divergence");
-    if (s.has_recent_news) boosters.push("Recent news catalyst");
-    if (s.has_insider_buying) boosters.push("Insider buying detected");
-    if (s.is_squeeze_candidate) boosters.push(`Squeeze candidate (SI: ${s.short_percent?.toFixed(1)}%)`);
+    if (s.vce_premium) boosters.push("Premium VCE (hacim onaylı + güçlü kapanış)");
+    if (s.vce_tight_coil) boosters.push("Sıkı yay (ATR baz seviyenin %65 altına sıkışmış)");
     if (s.obv_accumulation) boosters.push("OBV accumulation (smart money)");
     if (s.obv_distribution) boosters.push("OBV distribution warning");
 
@@ -275,16 +274,13 @@ function SignalCard({ s, onTrack, tracking }: { s: Signal; onTrack: (s: Signal) 
                     </div>
 
                     {/* Extras: Sector RS, Catalyst */}
-                    {(s.sector_rs_score != null && s.sector_rs_score > 0 || s.total_catalyst_bonus != null && s.total_catalyst_bonus > 0) && (
+                    {s.sector_rs_score != null && s.sector_rs_score > 0 && (
                         <div style={{
                             display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16,
                             fontSize: "0.82rem", color: "var(--text-secondary)",
                         }}>
                             {s.sector_rs_score != null && s.sector_rs_score > 0 && (
                                 <span>⚡ <strong>Ekstra:</strong> Sektör performansı: +{s.sector_rs_score.toFixed(0)}{s.is_sector_leader ? " (Lider!)" : ""}</span>
-                            )}
-                            {s.total_catalyst_bonus != null && s.total_catalyst_bonus > 0 && (
-                                <span>📰 <strong>Katalist bonus:</strong> +{s.total_catalyst_bonus.toFixed(0)}</span>
                             )}
                         </div>
                     )}

@@ -331,6 +331,10 @@ _REMOVED_KEYS = {
     # ölçüldü: Q80'de tek bir sinyal etkileniyor, TRAIN/OOS yönü tutarsız
     # (6-8% bandı TRAIN +9.09% / OOS −9.63%) → tek işleme eğri uydurma olurdu.
     "scoring_tuning.pen_spread_risk",
+    # 2026-08-05: katalizör modülü 2026-08-04'te silindi; has_catalyst artık
+    # HER ZAMAN False, dolayısıyla Type B skoruna eklenen bu puan hiç
+    # uygulanmıyordu (ölü ayar).
+    "swing.type_b.catalyst_pts",
 }
 
 

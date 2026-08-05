@@ -135,16 +135,12 @@ export interface Signal {
     high_rvol?: boolean;
     gap_continuation?: boolean;
     higher_highs?: boolean;
-    // Sector & Catalyst
+    // Göreli güç (SPY'a karşı)
     sector_rs_score?: number;
-    sector_rs_bonus?: number;
     is_sector_leader?: boolean;
-    short_percent?: number;
-    days_to_cover?: number;
-    is_squeeze_candidate?: boolean;
-    has_insider_buying?: boolean;
-    has_recent_news?: boolean;
-    total_catalyst_bonus?: number;
+    // VCE kalite işaretleri (skoru gerçekten kaydıran iki ekleme)
+    vce_premium?: boolean;
+    vce_tight_coil?: boolean;
     rsi_divergence?: boolean;
     macd_bullish?: boolean;
     // OBV Trend (v3.0)

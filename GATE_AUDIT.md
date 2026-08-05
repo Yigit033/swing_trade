@@ -208,11 +208,95 @@ iddiası doğru sebepten doğruydu.
 
 ---
 
+## 4. tur — TAVAN DIŞI EKLEMELER + ÖLÜ ÇIKTI TEMİZLİĞİ (2026-08-05)
+
+### `+8` premium-VCE ve `+5` tight-coil — tavana tabi DEĞİL
+
+3. turda skorun içindeki 35 değiştirici ölçüldü. Ama iki ekleme
+`calculate_quality_score` **dışında**, engine.py'de skora doğrudan biniyor —
+yani bonus tavanına takılmıyor, gerçekten eşiği kaydırıyor. Hiç ölçülmemişti.
+Harness: `scripts/measure_post_cap_bonuses.py` (123 sinyal / 21 ay).
+
+**İlk sonuç yanıltıcıydı** — kayda geçsin: bayrakları `signal_lab.json`'daki
+`vce_premium` / `vce_tight_coil` alanlarından okudum, "ikisi de hiç ateşlemiyor"
+çıktı. Yanlıştı: engine bu bayrakları `boosters`'a yazıyor ama **sinyal
+sözlüğüne hiç koymuyordu**, dolayısıyla okunan değer hep False'tu. Bayrak
+yokluğunu "özellik çalışmıyor" diye okumak yanlış atıf. Doğru kaynak
+`trigger_details.vce_metrics`. (Bayraklar artık sinyal sözlüğüne de yazılıyor.)
+
+Doğru ölçümle:
+
+| Kurgu | n | EV | WR | TRAIN | OOS |
+|---|---|---|---|---|---|
+| MEVCUT (+8, +5) | 105 | +4.19% | 60% | +4.86% | +3.60% |
+| premium YOK | 71 | +5.77% | 69% | +8.09% | +3.75% |
+| coil YOK | 100 | +4.21% | 59% | +4.90% | +3.64% |
+
+İlk bakışta "+8'i sil, EV +1.58 artıyor" gibi duruyor. **Ama bu çeldirici:**
+eklemeyi kaldırmak barajı da yükseltiyor ve *herhangi* bir baraj yükseltmesi
+EV'yi artırır. Doğru soru: aynı sinyal sayısına **düz eşik yükseltmesiyle**
+inince ne oluyor?
+
+| n=71'de | EV |
+|---|---|
+| premium YOK (Q80'de) | +5.77% |
+| **düz eşik yükseltmesi (+8 dahil skorla)** | **+6.33%** |
+
+Bonuslu skor, bonussuz skordan **daha iyi sıralıyor**. Yani +8 gerçek bilgi
+taşıyor — mis-rank etmiyor. **İkisi de KALIYOR.**
+
+### Ama asıl bulgu: doğru bilgi yanlış yerde kullanılıyor
+
++8, 34 sinyali Q80'in üstüne **taşıyor** ve o 34'ün EV'si **+0.89% / WR %41**
+(taban +4.19% / %60). Yani ekleme bir *sıralama* özelliği olarak iyi, bir
+*baraj* özelliği olarak kötü. Eşik eğrisi (bonuslar dahil):
+
+| Eşik | n | sinyal/ay | EV | WR | TRAIN | OOS |
+|---|---|---|---|---|---|---|
+| Q78 | 123 | 5.9 | +3.87% | 60% | +4.63% | +3.22% |
+| Q80 | 105 | 5.0 | +4.19% | 60% | +4.86% | +3.60% |
+| **Q82** | 87 | 4.1 | +5.30% | 66% | +6.14% | **+4.59%** |
+| Q84 | 69 | 3.3 | +6.52% | 72% | +8.97% | +4.40% |
+| Q86 | 52 | 2.5 | +7.54% | 73% | +10.92% | +4.41% |
+| Q88 | 36 | 1.7 | +8.34% | 75% | +10.76% | +5.31% |
+
+TRAIN monoton tırmanıyor (aşırı uyum imzası) ama **OOS Q82'de tepe yapıp
+düzleşiyor**. Toplam getiri (EV × sinyal/ay, OOS) ise neredeyse sabit:
+Q80 → 18.0, Q82 → 18.8, Q84 → 14.5, Q86 → 11.0.
+
+**Karar: eşik DEĞİŞTİRİLMEDİ.** Q80 ile Q82 arasında toplam getiri farkı ölçüm
+gürültüsü içinde (18.0 vs 18.8) ve bağlayıcı kısıt frekans (canlıda ayda
+0.6-4 sinyal görülüyor). Barajı yükseltmek işlem başı EV'yi güzelleştirir ama
+toplam kazancı artırmaz — sadece daha az işlem yapar. Eğri buraya kayda geçti;
+frekans 5+/ay'a çıkarsa Q82 ilk aday.
+
+### Ölü çıktı temizliği
+
+Ölçüm sırasında görüldü ki motorun ürettiği birçok alan hiç okunmuyordu:
+
+| Silinen | Satır | Neden |
+|---|---|---|
+| `signals.detect_pullback_setup` | 157 | 3 çıktısını kimse okumuyordu; v13'te "skorlama bağlamı" diye bırakılmıştı ama skor bonus bloğu sabitlenince son tüketici de gitti. Kendi yorumu ölçümü zaten kaydediyor: R5 edge +0.29%, t=0.65 (anlamsız). **Her taranan hissede boşuna koşuyordu.** |
+| `patterns.detect_vcp` | 107 | 5 çıktısının hiçbiri okunmuyordu |
+| `trend_quality` composite skoru | 49 | `trend_strength` (0-100) hesaplanıyor, kimse okumuyor; `higher_highs_count` de öyle |
+| Weinstein `bonus` (+10/+3/−3/−10) | 6 | Gate `stage`'i okuyor, bonusu kimse okumuyor |
+| `rs_bonus_vs_spy` kademeleri | 18 | `bonus`/`sector_etf`/`ticker_5d`/`sector_5d` ölü. Fonksiyon `relative_strength_vs_spy` olarak yeniden adlandırıldı — canlı olan iki alanı (`rs_score`, `is_leader`) döndürüyor |
+| `has_catalyst` dalı (Type B) | 11 | Katalizör modülü 2026-08-04'te silinince her zaman False oldu; `swing.type_b.catalyst_pts` ölü ayardı |
+| 17 ölü signal-dict anahtarı | ~25 | vcp_* (5), weinstein telemetri (5), pullback_* (3), insider/news/short_interest/rsi_div_confidence (4) |
+| Ölü UI dalları | ~20 | "Katalist bonus", "Squeeze (SI %)", "Insider", "News" — üreticileri silinmişti, hep boş görünüyordu |
+
+Yerine **eklenen**: `vce_premium` ve `vce_tight_coil` artık sinyal sözlüğünde ve
+UI'da görünüyor ("Premium VCE", "Sıkı yay") — skoru gerçekten kaydıran iki
+işaret artık kullanıcıya da görünür.
+
+---
+
 ## Ölçülmemiş kalanlar (sonraki tur)
 
 | Katman | Not |
 |---|---|
 | Bonus tavanının kendisi (30) | Tavanı kaldırıp bonusların ayırt etmesini sağlamak ölçülmeli — eşik rekalibrasyonu gerektirir |
+| Q82 eşiği | Eğri ölçüldü (yukarıda); frekans kısıtı nedeniyle bilinçli ertelendi |
 | Tip sınıflaması (C/A/B) | Boyut/stop/hedef tavanı belirliyor, sinyal üretmiyor |
 | Rejim tespiti | Eşiği belirliyor; eşik ölçüldü, rejim mantığı ölçülmedi |
 | Cooldown 5 gün · Ticker 2-zarar | Portföy seviyesi |

@@ -173,7 +173,6 @@ class SwingTypeBSettings(BaseModel):
     vol_25_pts: int = 2
     close_pos_min: float = 0.75
     close_pos_pts: int = 2
-    catalyst_pts: int = 1
     min_score: int = 6
     gate_vol_min: float = 3.5
     vol_surge_secondary_min: float = 2.5

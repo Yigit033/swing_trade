@@ -11,7 +11,8 @@ Components:
 4. Higher Highs / Higher Lows — Is the price structure constructive?
 5. Golden/Death Cross — MA20 vs MA50 relationship
 
-Returns a TrendQuality dict with pass/fail gates + trend_strength score (0-100).
+scoring.score_trend_quality (skorun %20'si) ve signals.py'nin swing onay
+kapisi bu ciktilari okur.
 """
 
 import logging
@@ -53,17 +54,14 @@ def calculate_trend_quality(
     Returns
     -------
     dict with keys:
-        - trend_strength (int 0-100)
         - ma20_slope_ok (bool) : True if MA20 rising
         - ma50_ok (bool) : True if not too far below MA50
         - rejection_candle (bool) : True if a bull trap candle detected
         - golden_cross (bool) : True if MA20 > MA50
         - higher_lows_count (int) : count of higher lows in lookback
-        - higher_highs_count (int)
         - details (dict) : raw values for debugging
     """
     result = {
-        "trend_strength": 0,
         "ma20_slope_ok": False,
         "ma20_slope_value": 0.0,
         "ma50_ok": True,       # Default True — benefit of doubt if not enough data
@@ -72,7 +70,6 @@ def calculate_trend_quality(
         "rejection_details": {},
         "golden_cross": False,
         "higher_lows_count": 0,
-        "higher_highs_count": 0,
         "trend_phase": "unknown",   # accumulation, markup, distribution, markdown
         "details": {},
     }
@@ -176,19 +173,12 @@ def calculate_trend_quality(
         lookback = min(higher_lows_lookback, n)
         if lookback >= 4:
             recent_lows = low.iloc[-lookback:].values
-            recent_highs = high.iloc[-lookback:].values
 
             hl_count = sum(
                 1 for i in range(1, len(recent_lows))
                 if recent_lows[i] > recent_lows[i - 1]
             )
-            hh_count = sum(
-                1 for i in range(1, len(recent_highs))
-                if recent_highs[i] > recent_highs[i - 1]
-            )
-
             result["higher_lows_count"] = hl_count
-            result["higher_highs_count"] = hh_count
 
         # ================================================================
         # 5. TREND PHASE DETECTION (Wyckoff-inspired)
@@ -212,55 +202,6 @@ def calculate_trend_quality(
 
             result["details"]["vol_expanding"] = vol_expanding
             result["details"]["price_rising"] = price_rising
-
-        # ================================================================
-        # 6. COMPOSITE TREND STRENGTH SCORE (0-100)
-        # ================================================================
-        score = 0
-
-        # MA20 slope: +20 if rising
-        if result["ma20_slope_ok"]:
-            score += 20
-            # Extra points for strong slope
-            if result["ma20_slope_value"] > 1.0:
-                score += 5
-            elif result["ma20_slope_value"] > 0.5:
-                score += 3
-
-        # MA50 relationship: +20 if above
-        if result.get("ma50_distance_pct", 0) > 0:
-            score += 20
-        elif result["ma50_ok"]:
-            score += 10  # Below but within tolerance
-
-        # Golden Cross: +10
-        if result["golden_cross"]:
-            score += 10
-
-        # No rejection candle: +15
-        if not result["rejection_candle"]:
-            score += 15
-
-        # Higher lows pattern: up to +15
-        hl_pct = result["higher_lows_count"] / max(higher_lows_lookback - 1, 1)
-        score += min(15, int(hl_pct * 15))
-
-        # Higher highs: up to +10
-        hh_pct = result["higher_highs_count"] / max(higher_lows_lookback - 1, 1)
-        score += min(10, int(hh_pct * 10))
-
-        # Trend phase bonus
-        phase = result["trend_phase"]
-        if phase == "markup":
-            score += 10
-        elif phase == "late_markup":
-            score += 5
-        elif phase == "distribution":
-            score -= 10
-        elif phase == "markdown":
-            score -= 15
-
-        result["trend_strength"] = max(0, min(100, score))
 
         return result
 

@@ -117,7 +117,6 @@
       "vol_25_pts": 2,
       "close_pos_min": 0.75,
       "close_pos_pts": 2,
-      "catalyst_pts": 1,
       "min_score": 6,
       "gate_vol_min": 3.5,
       "vol_surge_secondary_min": 2.5,

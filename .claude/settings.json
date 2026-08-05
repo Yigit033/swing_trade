@@ -36,7 +36,12 @@
       "Bash(./venv/Scripts/python.exe \"C:/Users/YIIT~1/AppData/Local/Temp/claude/c--active-projects-swing-trade/0670cd7a-b438-4082-8a3a-ae8d8bad9b9a/scratchpad/rank_check.py\")",
       "Bash(echo \"tsc exit=$?\")",
       "Bash(./venv/Scripts/python.exe -m pytest swing_trader/tests/test_no_dead_settings.py api/tests/test_settings_api_integration.py swing_trader/tests/test_smallcap_settings_config.py -q)",
-      "Bash(./venv/Scripts/python.exe -m pytest swing_trader/tests/test_score_modifiers_measured.py -q)"
+      "Bash(./venv/Scripts/python.exe -m pytest swing_trader/tests/test_score_modifiers_measured.py -q)",
+      "Bash(./venv/Scripts/python.exe \"C:/Users/YIIT~1/AppData/Local/Temp/claude/c--active-projects-swing-trade/0670cd7a-b438-4082-8a3a-ae8d8bad9b9a/scratchpad/dead_signal_keys.py\")",
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe scripts/measure_post_cap_bonuses.py)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(./venv/Scripts/python.exe \"C:/Users/YIIT~1/AppData/Local/Temp/claude/c--active-projects-swing-trade/0670cd7a-b438-4082-8a3a-ae8d8bad9b9a/scratchpad/dead_settings_sweep.py\")",
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe \"C:/Users/YIIT~1/AppData/Local/Temp/claude/c--active-projects-swing-trade/0670cd7a-b438-4082-8a3a-ae8d8bad9b9a/scratchpad/cleanup_dead_code.py\")"
     ]
   }
 }

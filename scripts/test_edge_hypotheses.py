@@ -18,7 +18,6 @@ logging.basicConfig(level=logging.ERROR)
 import numpy as np
 import pandas as pd
 
-from swing_trader.small_cap.patterns import detect_vcp
 
 HORIZONS = [3, 5, 10]
 MFE_WINDOW = 10
@@ -50,17 +49,6 @@ def add_indicators(df):
 
 
 # ── HİPOTEZLER: (df, t) -> bool. Hepsi sadece t ve öncesini kullanır. ──
-def h_vcp_breakout(df, t):
-    """VCP tespit + bugün 20-gün pivota kırılım."""
-    if t < 35:
-        return False
-    vcp = detect_vcp(df.iloc[:t + 1])
-    if not vcp['detected']:
-        return False
-    c = float(df['Close'].iloc[t]); hi20_prev = float(df['hi20'].iloc[t - 1])
-    return c > hi20_prev > 0
-
-
 def h_pullback_uptrend(df, t):
     """Uptrend (Close>MA50, MA50 yükseliyor) + RSI<45 pullback + bugün yeşil."""
     c = float(df['Close'].iloc[t]); cp = float(df['Close'].iloc[t - 1])
@@ -117,7 +105,6 @@ def h_volsqueeze_breakout(df, t):
 
 
 HYPOTHESES = {
-    'VCP_breakout': h_vcp_breakout,
     'pullback_uptrend': h_pullback_uptrend,
     'tight_base_breakout': h_tight_base_breakout,
     'oversold_bounce': h_oversold_bounce,

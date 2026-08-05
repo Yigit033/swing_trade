@@ -2878,13 +2878,9 @@ export default function SettingsPage() {
                         onChange={(v) => sn(["swing", "type_b", "close_pos_pts"], Math.round(v))}
                         max={10}
                     />
-                    <FieldNum
-                        label="Katalizör puan"
-                        hint="Haber/hikâye (katalizör) varsa küçük ek puan."
-                        value={nn(["swing", "type_b", "catalyst_pts"], 1)}
-                        onChange={(v) => sn(["swing", "type_b", "catalyst_pts"], Math.round(v))}
-                        max={10}
-                    />
+                    {/* "Katalizör puan" 2026-08-05'te kaldırıldı: katalizör modülü
+                        2026-08-04'te silinince has_catalyst her zaman False oldu, yani
+                        bu puan hiç uygulanmıyordu — ayarlanabilir ama etkisiz (ölü ayar). */}
                     <FieldNum
                         label="Min skor"
                         hint="Tip B etiketi için toplam skor eşiği."

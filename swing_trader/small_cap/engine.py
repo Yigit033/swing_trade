@@ -18,9 +18,9 @@ from .risk import SmallCapRisk
 from .universe import SmallCapUniverse
 from .narrative import generate_signal_narrative
 from .technical_levels import calculate_technical_levels
-from .regime_logic import rs_bonus_vs_spy
+from .regime_logic import relative_strength_vs_spy
 from .settings_config import load_settings
-from .patterns import detect_vcp, detect_weinstein_stage
+from .patterns import detect_weinstein_stage
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,6 @@ class SmallCapEngine:
         higher_lows: bool,
         close_position: float = 0.5,
         ma20_distance: float = 0.0,
-        has_catalyst: bool = False,
         rsi_divergence: bool = False,
         macd_bullish: bool = False
     ) -> tuple:
@@ -223,11 +222,8 @@ class SmallCapEngine:
         if close_position >= tb.close_pos_min:
             type_b_score += tb.close_pos_pts
 
-        if has_catalyst:
-            type_b_score += tb.catalyst_pts
-
         if type_b_score >= tb.min_score:
-            has_safety = has_catalyst or rsi <= tb.gate_rsi_safe_max
+            has_safety = rsi <= tb.gate_rsi_safe_max
             if volume_surge < tb.gate_vol_min or not has_safety:
                 pass
             else:
@@ -238,11 +234,10 @@ class SmallCapEngine:
                 else:
                     hold_days = tb.hold_default
 
-                cat_str = "Cat:✓" if has_catalyst else "Vol-driven"
                 return (
                     "B",
                     hold_days,
-                    f"🚀 Momentum: 5d={five_day_return:+.0f}%, RSI={rsi:.0f}, {cat_str}",
+                    f"🚀 Momentum: 5d={five_day_return:+.0f}%, RSI={rsi:.0f}, Vol-driven",
                 )
 
         # ============================================================
@@ -345,13 +340,6 @@ class SmallCapEngine:
                 _bump_scan_reject(reject_counts, "filter_failed")
                 return None
             
-            # Step 1b: Pullback-to-MA20 setup detection.
-            # v13: pullback is a SCORING CONTEXT only — it no longer bypasses the
-            # trigger gate. Edge measurement showed pullback entries have no
-            # statistically significant forward edge (R5 edge +0.29%, t=0.65);
-            # only the VCE squeeze-breakout pathway generates signals now.
-            pullback_data = self.signals.detect_pullback_setup(df)
-
             # Step 2: Check signal triggers (v13: VCE squeeze-breakout is primary)
             triggered, trigger_details = self.signals.check_all_triggers(df)
 
@@ -362,11 +350,6 @@ class SmallCapEngine:
 
             # Step 3: Get boosters (includes swing confirmation)
             boosters = self.signals.check_boosters(df)
-
-            # Inject pullback data into boosters immediately so gates below can use it
-            boosters['pullback_detected'] = pullback_data['detected']
-            boosters['pullback_quality'] = pullback_data.get('quality', '')
-            boosters['pullback_bonus'] = pullback_data.get('bonus', 0)
 
             # Step 3.5: SWING CONFIRMATION GATE (NEW)
             # Must pass 5-day momentum > 0 AND Close > MA20
@@ -412,10 +395,9 @@ class SmallCapEngine:
                 and "Close" in spy_df_window.columns
                 and len(df) >= 6
             ):
-                sector_rs_data = rs_bonus_vs_spy(df["Close"], spy_df_window["Close"])
+                sector_rs_data = relative_strength_vs_spy(df["Close"], spy_df_window["Close"])
             else:
-                sector_rs_data = {"bonus": 0, "rs_score": 0.0, "is_leader": False}
-            boosters["sector_rs_bonus"] = sector_rs_data.get("bonus", 0)
+                sector_rs_data = {"rs_score": 0.0, "is_leader": False}
             boosters["sector_rs_score"] = sector_rs_data.get("rs_score", 0.0)
             boosters["is_sector_leader"] = sector_rs_data.get("is_leader", False)
 
@@ -435,7 +417,6 @@ class SmallCapEngine:
             # RSI Divergence (already in signals but ensure it's in boosters)
             rsi_div = self.signals.detect_rsi_divergence(df, lookback=14)
             boosters['rsi_divergence'] = rsi_div['divergence_found']
-            boosters['rsi_divergence_confidence'] = rsi_div.get('confidence', 0)
             
             # MACD check
             macd_data = self.signals.calculate_macd(df)
@@ -462,16 +443,10 @@ class SmallCapEngine:
             
             # ── CLASSIFY SWING TYPE *BEFORE* SCORING ──
             # This way scoring penalties use the correct type-specific RSI bands.
-            has_any_catalyst = (
-                boosters.get('has_recent_news', False) or
-                boosters.get('has_insider_buying', False) or
-                boosters.get('total_catalyst_bonus', 0) > 0
-            )
             swing_type, hold_days, type_reason = self._classify_swing_type(
                 five_day_return, rsi, volume_surge, higher_lows,
                 close_position=close_position,
                 ma20_distance=ma20_distance,
-                has_catalyst=has_any_catalyst,
                 rsi_divergence=boosters.get('rsi_divergence', False),
                 macd_bullish=boosters.get('macd_bullish', False)
             )
@@ -504,21 +479,11 @@ class SmallCapEngine:
             # Inject swing_type into boosters so scoring uses correct RSI penalty bands
             boosters['swing_type'] = swing_type
 
-            # ================================================================
-            # VCP (Minervini) + Weinstein Stage Analysis
-            # ================================================================
-            vcp_data = detect_vcp(df)
+            # Weinstein Stage — YALNIZ hard gate icin. VCP (Minervini) tespiti
+            # 2026-08-05'te silindi: 5 ciktisini (detected/contractions/
+            # final_range_pct/volume_declining/bonus) hicbir kod okumuyordu —
+            # skor bonus blogu sabite indirilince son tuketicisi de kalmadi.
             stage_data = detect_weinstein_stage(df)
-            boosters['vcp_detected'] = vcp_data['detected']
-            boosters['vcp_contractions'] = vcp_data['contractions']
-            boosters['vcp_final_range_pct'] = vcp_data['final_range_pct']
-            boosters['vcp_volume_declining'] = vcp_data['volume_declining']
-            boosters['vcp_bonus'] = vcp_data['bonus']
-            boosters['weinstein_stage'] = stage_data['stage']
-            boosters['weinstein_stage_label'] = stage_data['stage_label']
-            boosters['weinstein_ma30'] = stage_data['ma30']
-            boosters['weinstein_ma30_rising'] = stage_data['ma30_rising']
-            boosters['weinstein_bonus'] = stage_data['bonus']
 
             # ================================================================
             # WEINSTEIN STAGE HARD GATE
@@ -652,20 +617,10 @@ class SmallCapEngine:
                 # ============================================================
                 # Sector Relative Strength
                 'sector_rs_score': round(boosters.get('sector_rs_score', 0), 1),
-                'sector_rs_bonus': boosters.get('sector_rs_bonus', 0),
                 'is_sector_leader': boosters.get('is_sector_leader', False),
-                
-                # Short Interest & Squeeze
-                'is_squeeze_candidate': boosters.get('is_squeeze_candidate', False),
-                'short_interest_bonus': boosters.get('short_interest_bonus', 0),
-                
-                # Insider & News
-                'insider_bonus': boosters.get('insider_bonus', 0),
-                'news_bonus': boosters.get('news_bonus', 0),
                 
                 # RSI Divergence & MACD
                 'rsi_divergence': boosters.get('rsi_divergence', False),
-                'rsi_divergence_confidence': boosters.get('rsi_divergence_confidence', 0),
                 'macd_bullish': boosters.get('macd_bullish', False),
 
                 # OBV Trend (v3.0)
@@ -673,26 +628,12 @@ class SmallCapEngine:
                 'obv_distribution': boosters.get('obv_distribution', False),
                 'obv_bonus': boosters.get('obv_bonus', 0),
 
-                # VCP Pattern (Minervini)
-                'vcp_detected': boosters.get('vcp_detected', False),
-                'vcp_contractions': boosters.get('vcp_contractions', 0),
-                'vcp_final_range_pct': boosters.get('vcp_final_range_pct', 0.0),
-                'vcp_volume_declining': boosters.get('vcp_volume_declining', False),
-                'vcp_bonus': boosters.get('vcp_bonus', 0),
-
-                # Weinstein Stage
-                'weinstein_stage': boosters.get('weinstein_stage', 0),
-                'weinstein_stage_label': boosters.get('weinstein_stage_label', 'Unknown'),
-                'weinstein_ma30': boosters.get('weinstein_ma30', 0.0),
-                'weinstein_ma30_rising': boosters.get('weinstein_ma30_rising', False),
-                'weinstein_bonus': boosters.get('weinstein_bonus', 0),
-
-                # Pullback Entry (v6.0 — high win-rate setup)
-                'pullback_detected': boosters.get('pullback_detected', False),
-                'pullback_quality': boosters.get('pullback_quality', ''),
-                'pullback_bonus': boosters.get('pullback_bonus', 0),
-
-                # Sector Rotation (v6.0 — active sector filter)
+                # VCE kalite isaretleri — skoru gercekten kaydiran iki ekleme.
+                # 2026-08-05: bunlar boosters'a yaziliyordu ama sinyal sozlugune
+                # HIC girmiyordu; ne UI gosterebiliyor ne olcum okuyabiliyordu
+                # (olcum harness'i False okuyup "hic atesle miyor" sandi).
+                'vce_premium': boosters.get('vce_premium', False),
+                'vce_tight_coil': boosters.get('vce_tight_coil', False),
 
                 # Filter/trigger details
                 'filter_results': filter_results,

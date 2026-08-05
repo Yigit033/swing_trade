@@ -107,19 +107,18 @@ def regime_from_spy_close(close: pd.Series, vix_last: Optional[float] = None) ->
         return regime_unknown(str(e))
 
 
-def rs_bonus_vs_spy(stock_close: pd.Series, spy_close: pd.Series) -> Dict:
+def relative_strength_vs_spy(stock_close: pd.Series, spy_close: pd.Series) -> Dict:
     """
-    Sector-style RS bonus using only aligned historical closes (backtest / point-in-time).
-    Tier thresholds match SectorRS.calculate_sector_rs.
+    5 günlük göreli güç: hissenin getirisi eksi SPY'ın getirisi.
+
+    2026-08-05: eskiden bir de kademeli `bonus` (+12/+8/+4/−5) üretiyordu ve
+    adı `rs_bonus_vs_spy`'dı. O bonus skorun bonus bloğuna gidiyordu; blok
+    sabite indirilince (tavan %100 bağlıyordu, GATE_AUDIT.md "3. tur") bonusun
+    tek tüketicisi kalmadı. `sector_etf` / `ticker_5d` / `sector_5d` alanlarını
+    da hiçbir kod okumuyordu. Kalan iki alan gerçekten kullanılıyor:
+    `rs_score` (narrative + tarayıcı UI) ve `is_leader` (UI'da "Lider!" etiketi).
     """
-    out: Dict = {
-        "sector_etf": "SPY",
-        "ticker_5d": 0.0,
-        "sector_5d": 0.0,
-        "rs_score": 0.0,
-        "is_leader": False,
-        "bonus": 0,
-    }
+    out: Dict = {"rs_score": 0.0, "is_leader": False}
     if stock_close is None or spy_close is None:
         return out
     try:
@@ -130,19 +129,9 @@ def rs_bonus_vs_spy(stock_close: pd.Series, spy_close: pd.Series) -> Dict:
         s5 = (float(sc.iloc[-1]) / float(sc.iloc[-6]) - 1.0) * 100.0
         sp5 = (float(sp.iloc[-1]) / float(sp.iloc[-6]) - 1.0) * 100.0
         rs = s5 - sp5
-        out["ticker_5d"] = round(s5, 2)
-        out["sector_5d"] = round(sp5, 2)
         out["rs_score"] = round(rs, 2)
-        if rs > 15:
-            out["is_leader"] = True
-            out["bonus"] = 12
-        elif rs > 10:
-            out["bonus"] = 8
-        elif rs > 5:
-            out["bonus"] = 4
-        elif rs < -10:
-            out["bonus"] = -5
+        out["is_leader"] = rs > 15
         return out
     except Exception as e:
-        logger.debug("rs_bonus_vs_spy: %s", e)
+        logger.debug("relative_strength_vs_spy: %s", e)
         return out

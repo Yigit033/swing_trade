@@ -28,12 +28,12 @@ function QualityPill({ score }: { score: number }) {
 }
 
 function SignalRow({ s }: { s: Signal }) {
+    // Katalizör alanları (haber/insider/short-interest) 2026-08-04'te silindi:
+    // geçmişe dönük veri yoktu, backtest'te hep 0'dı, canlıda skoru +5.8 şişiriyordu.
     const catalysts: string[] = [];
-    if (s.total_catalyst_bonus != null && s.total_catalyst_bonus > 0) catalysts.push(`Catalyst +${s.total_catalyst_bonus.toFixed(0)}`);
-    if (s.is_sector_leader) catalysts.push("Sector leader");
-    if (s.is_squeeze_candidate) catalysts.push(`Squeeze (SI ${s.short_percent?.toFixed(1)}%)`);
-    if (s.has_insider_buying) catalysts.push("Insider");
-    if (s.has_recent_news) catalysts.push("News");
+    if (s.is_sector_leader) catalysts.push("Sektör lideri");
+    if (s.vce_premium) catalysts.push("Premium VCE");
+    if (s.vce_tight_coil) catalysts.push("Sıkı yay");
     const extras = catalysts.length ? catalysts.join(" · ") : "—";
 
     return (
