@@ -4,7 +4,7 @@ Paper Trading Tracker - Position tracking and exit detection logic.
 V4 Improvements (over V3):
 - Stop at confirmation: 1.5 ATR with type-specific caps (was 1.0 ATR / flat 15%)
 - Target at confirmation: 2R (was 3R — unrealistic for swing timeframe)
-- Trailing stop: activates after 1 ATR gain, no half-hold gate (was 2 ATR + 50% hold)
+- Trailing stop: chandelier (peak − 3 ATR), activates after 1.5 ATR gain
 - Same-bar ordering: check stop BEFORE updating trail (was inverted)
 - Timeout uses trading days (was calendar days including weekends)
 - initial_stop updated to entry on T1 partial (was stale)
@@ -59,7 +59,13 @@ def _gap_limits() -> Tuple[float, float]:
         return 5.0, 7.0
 
 
-MAX_GAP_UP_PCT, MAX_GAP_DOWN_PCT = _gap_limits()
+# 2026-08-05: EskiDEN burada `MAX_GAP_UP_PCT, MAX_GAP_DOWN_PCT = _gap_limits()`
+# vardı — yani limitler MODÜL İMPORT ANINDA donuyordu. Sonuç, 2026-08-04'te
+# kapatılan tuzağın yarısının geri gelmesiydi: kullanıcı UI'dan gap limitini
+# değiştiriyor, ayar DB'ye yazılıyor, ama çalışan süreç import anındaki değeri
+# kullanmaya devam ediyordu (yeniden başlatmaya kadar hiçbir şey olmuyordu).
+# Artık her kontrolde ayardan okunuyor; load_settings 30 sn önbellekli olduğu
+# için maliyeti yok.
 
 
 # T1 KISMİ ORANI — 2026-08-04'te ölçüldü (scripts/measure_t1_fraction.py,
@@ -139,11 +145,15 @@ class PaperTradeTracker:
     - MANUAL: User manually closed
     - REJECTED: PENDING trade failed gap filter
     
-    V3 Logic:
-    - New signals start as PENDING
-    - Next day: confirm at Open price + gap filter
-    - Trailing stop activates after 50% hold time AND 2+ ATR gain
-    - Gap-down through stop → exit at Open (realistic slippage)
+    Akış (güncel):
+    - Yeni sinyal PENDING olarak açılır
+    - Ertesi gün: Open fiyatında onay + gap filtresi (ayardan: +5% / −7%)
+    - Chandelier trailing: giriş sonrası GÖRÜLEN EN YÜKSEK tepe − 3 ATR,
+      +1.5 ATR kâra ulaşıldıktan sonra devreye girer (monoton, yalnız yukarı)
+    - T1'de ayardan okunan oran kadar kısmi satış + stop başabaşa çekilir
+    - Stop, trail GÜNCELLEMESİNDEN ÖNCE kontrol edilir (aynı-bar sıralaması)
+    - Stop'un altında açılış → Open fiyatından çıkış (gerçekçi kayma)
+    - Timeout işlem günü sayar (takvim günü DEĞİL)
     """
     
     def __init__(self, storage: PaperTradeStorage = None):
@@ -458,7 +468,7 @@ class PaperTradeTracker:
             trade['status'] = 'OPEN'
 
             logger.info(
-                f"T1 partial exit {trade['ticker']}: sold 50% at ${exit_price:.2f}, "
+                f"T1 partial exit {trade['ticker']}: sold {_partial_pct:.0f}% at ${exit_price:.2f}, "
                 f"stop→breakeven ${trade['entry_price']:.2f}, new target T2 ${target_2:.2f}"
             )
 
@@ -472,20 +482,22 @@ class PaperTradeTracker:
             trade['exit_date'] = exit_date
             trade['notes'] = reason
 
-            # Calculate realized P/L (blended if partial exit exists)
-            partial_price = trade.get('partial_exit_price') or 0
-            if partial_price > 0:
-                half = trade['position_size'] // 2
-                rest = trade['position_size'] - half
-                pnl = half * (partial_price - trade['entry_price']) + rest * (exit_price - trade['entry_price'])
-                total_cost = trade['position_size'] * trade['entry_price']
-                pnl_pct = (pnl / total_cost) * 100 if total_cost > 0 else 0
-            else:
-                pnl = (exit_price - trade['entry_price']) * trade['position_size']
-                pnl_pct = ((exit_price / trade['entry_price']) - 1) * 100
-
-            trade['realized_pnl'] = round(pnl, 2)
-            trade['realized_pnl_pct'] = round(pnl_pct, 2)
+            # REALİZE P/L — tek kaynak: storage.close_trade().
+            #
+            # 2026-08-05 HATA: burada P/L İKİNCİ KEZ hesaplanıyordu ve kısmi
+            # satışı `position_size // 2` ile, yani %50 varsayımıyla bölüyordu.
+            # Oysa T1 kısmi oranı 2026-08-04'te ölçümle %33'e indirildi
+            # (measure_t1_fraction.py). storage.close_trade() DOĞRU hesaplıyor —
+            # kayıtlı `partial_exit_pct`'i okuyor — ama buradaki kopya sonucu
+            # bellek üstünde EZİYORDU ve API yanıtına yanlış sayı gidiyordu.
+            # Etki tek yönlü değil, YANILTICI yönde: T1 tutup kalanı düşen bir
+            # işlemde (giriş 100, T1 108, çıkış 95) doğru sonuç −0.71/hisse
+            # iken bu kopya +1.50/hisse gösteriyordu. Yani DB'de doğru,
+            # ekranda iyimser bir sayı vardı; sayfa yenilenince değişiyordu.
+            # Çözüm: ikinci hesabı sil, otoriteyi geri oku.
+            _fresh = self.storage.get_trade_by_id(trade_id, user_id) or {}
+            trade['realized_pnl'] = _fresh.get('realized_pnl', 0)
+            trade['realized_pnl_pct'] = _fresh.get('realized_pnl_pct', 0)
             trade['current_price'] = exit_price
             trade['unrealized_pnl'] = 0
             trade['unrealized_pnl_pct'] = 0
@@ -499,8 +511,28 @@ class PaperTradeTracker:
             if not math.isfinite(current_price):
                 logger.warning(f"{ticker}: son kapanış NaN/Inf — fiyat ve P&L güncellemesi atlandı")
             else:
-                pnl = (current_price - trade['entry_price']) * trade['position_size']
-                pnl_pct = ((current_price / trade['entry_price']) - 1) * 100
+                # T1 KISMİSİ SONRASI AÇIK İŞLEM — 2026-08-05 düzeltmesi.
+                # Eskiden burada TAM pozisyon büyüklüğü kullanılıyordu, ama T1'de
+                # payların %33'ü zaten satılmıştı (position_size orijinali tutar,
+                # storage.close_trade() de öyle varsayar). İki yönlü hataydı:
+                # kalan pozisyonun P/L'si %50 fazla gösteriliyor, T1'de kilitlenen
+                # kâr ise hiç sayılmıyordu. Artık ikisi ayrı ayrı doğru:
+                #   kilitli  = satılan pay × (T1 fiyatı − giriş)
+                #   açık risk = kalan pay  × (güncel   − giriş)
+                _size = trade['position_size']
+                _entry = trade['entry_price']
+                _ppx = trade.get('partial_exit_price') or 0
+                _ppct = trade.get('partial_exit_pct') or 0
+
+                if _ppx > 0 and _ppct > 0:
+                    _sold = int(_size * (_ppct / 100))
+                    _left = _size - _sold
+                    pnl = (_sold * (_ppx - _entry)) + (_left * (current_price - _entry))
+                else:
+                    pnl = (current_price - _entry) * _size
+
+                _cost = _size * _entry
+                pnl_pct = (pnl / _cost) * 100 if _cost > 0 else 0
 
                 trade['current_price'] = round(current_price, 2)
                 trade['unrealized_pnl'] = round(pnl, 2)
@@ -607,7 +639,7 @@ class PaperTradeTracker:
             'notes': (
                 f"PENDING — {confirm_date_str} açılışında onaylanacak. "
                 f"Sinyal fiyatı: ${signal_price:.2f} | "
-                f"Gap filtresi: -{MAX_GAP_DOWN_PCT}% / +{MAX_GAP_UP_PCT}%"
+                f"Gap filtresi: -{_gap_limits()[1]}% / +{_gap_limits()[0]}%"
             ),
             'trailing_stop': signal['stop_loss'],
             'initial_stop': signal['stop_loss'],
@@ -738,14 +770,15 @@ class PaperTradeTracker:
                 from datetime import timezone as _utctz
                 entry_date = _nyse_open.astimezone(_utctz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
                 
-                # Gap filter
+                # Gap filter — limitler her kontrolde ayardan okunur
+                max_gap_up, max_gap_down = _gap_limits()
                 gap_pct = ((open_price / signal_price) - 1) * 100
-                
-                if gap_pct > MAX_GAP_UP_PCT:
+
+                if gap_pct > max_gap_up:
                     # Gap-up too big — momentum exhausted, reject
                     self.storage.close_trade(
                         trade_id, signal_price, entry_date, 'REJECTED',
-                        f"REJECTED: Gap-up {gap_pct:+.1f}% > {MAX_GAP_UP_PCT}% limit",
+                        f"REJECTED: Gap-up {gap_pct:+.1f}% > {max_gap_up}% limit",
                         user_id
                     )
                     trade['confirm_status'] = 'rejected'
@@ -753,11 +786,11 @@ class PaperTradeTracker:
                     results.append(trade)
                     continue
                 
-                if gap_pct < -MAX_GAP_DOWN_PCT:
+                if gap_pct < -max_gap_down:
                     # Gap-down too big — bad news, reject
                     self.storage.close_trade(
                         trade_id, signal_price, entry_date, 'REJECTED',
-                        f"REJECTED: Gap-down {gap_pct:+.1f}% > {MAX_GAP_DOWN_PCT}% limit",
+                        f"REJECTED: Gap-down {gap_pct:+.1f}% > {max_gap_down}% limit",
                         user_id
                     )
                     trade['confirm_status'] = 'rejected'

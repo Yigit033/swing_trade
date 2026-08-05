@@ -510,7 +510,6 @@ const HASH_TO_NAV_GROUP: Partial<Record<string, SettingsNavGroupId>> = {
     "settings-section-backtest-dongu": "backtest",
     "settings-section-backtest-tip-kalitesi": "backtest",
     "settings-section-backtest-giris-ema-gap": "backtest",
-    "settings-section-backtest-cikis-trailing": "backtest",
 };
 
 /** Başlık + isteğe bağlı ? ile açılan kısa bölüm notu (tuning kılavuzu). */
@@ -1008,15 +1007,9 @@ export default function SettingsPage() {
                     min={1}
                     max={5}
                 />
-                <FieldNum
-                    label="Volume surge (soft min, ×)"
-                    hint="Mesaj / yumuşak uyarı için alt referans; tetikleyici kadar sert değildir."
-                    value={num("min_volume_surge_soft", 1.2)}
-                    onChange={(v) => setNum("min_volume_surge_soft", v)}
-                    step="0.1"
-                    min={1}
-                    max={3}
-                />
+                {/* "Volume surge (soft min)" 2026-08-05'te kaldırıldı: tek okuyucusu
+                    check_volume_surge() metoduydu ve o metot hiç çağrılmıyordu (ölü ayar).
+                    Gerçek hacim barajları: yukarıdaki tetik eşiği + VCE'nin zorunlu RVOL≥1.5x. */}
                 <FieldNum
                     label="Min ATR % (ondalık, örn. 0.03 = %3)"
                     hint="Filtre + tetikleyici"
@@ -1842,148 +1835,12 @@ export default function SettingsPage() {
                 />
             </Section>
 
-            <Section
-                id="settings-section-backtest-cikis-trailing"
-                title="Backtest çıkış (zaman stop / trailing)"
-                help="Zaman stop, tepeye göre trailing basamakları, breakeven ve kapanış sıkılaştırmaları. Erken stop veya geç çıkış şikâyeti varsa önce bir–iki parametre seçip backtest ile karşılaştırın."
-            >
-                <FieldNum
-                    label="Zaman stop min gün"
-                    hint="Pozisyon en az bu kadar gündür açıksa ve küçük zarar/zaman koşulu sağlanırsa çıkış."
-                    value={nn(["backtest_exit_trailing", "time_stop_min_days"], 5)}
-                    onChange={(v) => sn(["backtest_exit_trailing", "time_stop_min_days"], Math.round(v))}
-                    step={1}
-                    min={1}
-                    max={30}
-                />
-                <FieldNum
-                    label="Zaman stop min kayıp oranı"
-                    hint="Zaman stop ile çıkış için gereken minimum kayıp (çok kârdayken erken kesmez)."
-                    value={nn(["backtest_exit_trailing", "time_stop_min_loss_fraction"], 0.05)}
-                    onChange={(v) => sn(["backtest_exit_trailing", "time_stop_min_loss_fraction"], v)}
-                    step="0.01"
-                    min={0.01}
-                    max={0.5}
-                />
-                <FieldNum
-                    label="Trail eşik ATR (tepe 2.5)"
-                    hint="Tepe kazancı ≥ 2.5 ATR iken trailing kural seti için eşik."
-                    value={nn(["backtest_exit_trailing", "trail_peak_atr_25"], 2.5)}
-                    onChange={(v) => sn(["backtest_exit_trailing", "trail_peak_atr_25"], v)}
-                    step="0.1"
-                    min={0.5}
-                    max={10}
-                />
-                <FieldNum
-                    label="Trail high− ×ATR (2.5 basamak)"
-                    hint="Yüksek tepe bandında stop, high − bu ×ATR altına çekilir."
-                    value={nn(["backtest_exit_trailing", "trail_high_minus_atr_25"], 0.8)}
-                    onChange={(v) => sn(["backtest_exit_trailing", "trail_high_minus_atr_25"], v)}
-                    step="0.1"
-                    min={0}
-                    max={5}
-                />
-                <FieldNum
-                    label="Trail eşik ATR (tepe 2.0)"
-                    hint="Orta-yüksek tepe (2 ATR) basamağı."
-                    value={nn(["backtest_exit_trailing", "trail_peak_atr_20"], 2)}
-                    onChange={(v) => sn(["backtest_exit_trailing", "trail_peak_atr_20"], v)}
-                    step="0.1"
-                    min={0.5}
-                    max={10}
-                />
-                <FieldNum
-                    label="Trail peak_gain oranı (2.0)"
-                    hint="2 ATR basamağında tepe kazancının ne kadarı korunmaya çalışılır (kesir)."
-                    value={nn(["backtest_exit_trailing", "trail_peak_frac_20"], 0.5)}
-                    onChange={(v) => sn(["backtest_exit_trailing", "trail_peak_frac_20"], v)}
-                    step="0.05"
-                    min={0}
-                    max={1}
-                />
-                <FieldNum
-                    label="Trail eşik ATR (tepe 1.5)"
-                    hint="Daha alçak tepe bandı (1.5 ATR) için trailing."
-                    value={nn(["backtest_exit_trailing", "trail_peak_atr_15"], 1.5)}
-                    onChange={(v) => sn(["backtest_exit_trailing", "trail_peak_atr_15"], v)}
-                    step="0.1"
-                    min={0.5}
-                    max={10}
-                />
-                <FieldNum
-                    label="Trail peak_gain oranı (1.5)"
-                    hint="1.5 ATR bandında korunan kazanç oranı."
-                    value={nn(["backtest_exit_trailing", "trail_peak_frac_15"], 0.3)}
-                    onChange={(v) => sn(["backtest_exit_trailing", "trail_peak_frac_15"], v)}
-                    step="0.05"
-                    min={0}
-                    max={1}
-                />
-                <FieldNum
-                    label="Breakeven tepe ATR"
-                    hint="Fiyat bu kadar ATR kazanca ulaşınca stop girişe yaklaştırılır (breakeven)."
-                    value={nn(["backtest_exit_trailing", "breakeven_peak_atr"], 1.5)}
-                    onChange={(v) => sn(["backtest_exit_trailing", "breakeven_peak_atr"], v)}
-                    step="0.1"
-                    min={0.5}
-                    max={10}
-                />
-                <FieldNum
-                    label="Hafif koruma tepe ATR"
-                    hint="Daha erken hafif kâr kilidi için tepe ATR eşiği."
-                    value={nn(["backtest_exit_trailing", "light_protect_peak_atr"], 1)}
-                    onChange={(v) => sn(["backtest_exit_trailing", "light_protect_peak_atr"], v)}
-                    step="0.1"
-                    min={0.5}
-                    max={10}
-                />
-                <FieldNum
-                    label="Hafif koruma giriş altı ×ATR"
-                    hint="Hafif koruma stop’u girişin bu ×ATR altına inerse tetiklenir."
-                    value={nn(["backtest_exit_trailing", "light_protect_below_entry_atr"], 0.2)}
-                    onChange={(v) => sn(["backtest_exit_trailing", "light_protect_below_entry_atr"], v)}
-                    step="0.05"
-                    min={0}
-                    max={2}
-                />
-                <FieldNum
-                    label="Kapanış sıkılaştırma — kazanç ATR"
-                    hint="Gün sonu kapanışında kâr bu ATR’yi geçtiyse trail sıkılaştırması devreye girer."
-                    value={nn(["backtest_exit_trailing", "close_gain_atr_20"], 2)}
-                    onChange={(v) => sn(["backtest_exit_trailing", "close_gain_atr_20"], v)}
-                    step="0.1"
-                    min={0.5}
-                    max={10}
-                />
-                <FieldNum
-                    label="Kapanış trail ×ATR (2.0 basamak)"
-                    hint="Yukarıdaki kapanış kazancında high − trail ×ATR stop."
-                    value={nn(["backtest_exit_trailing", "close_trail_atr_20"], 1)}
-                    onChange={(v) => sn(["backtest_exit_trailing", "close_trail_atr_20"], v)}
-                    step="0.1"
-                    min={0}
-                    max={5}
-                />
-                <FieldNum
-                    label="Kapanış sıkılaştırma — kazanç ATR (1.5)"
-                    hint="Daha düşük kazanç eşiğinde ikinci kapanış trail basamağı."
-                    value={nn(["backtest_exit_trailing", "close_gain_atr_15"], 1.5)}
-                    onChange={(v) => sn(["backtest_exit_trailing", "close_gain_atr_15"], v)}
-                    step="0.1"
-                    min={0.5}
-                    max={10}
-                />
-                <FieldNum
-                    label="Kapanış trail ×ATR (1.5 basamak)"
-                    hint="1.5 ATR kapanış kazancı için trail mesafesi."
-                    value={nn(["backtest_exit_trailing", "close_trail_atr_15"], 1.2)}
-                    onChange={(v) => sn(["backtest_exit_trailing", "close_trail_atr_15"], v)}
-                    step="0.1"
-                    min={0}
-                    max={5}
-                />
-            </Section>
-
+            {/* "Backtest çıkış (zaman stop / trailing)" bölümü 2026-08-05'te kaldırıldı.
+                15 ayar vardı ve HEPSİ backtest'i canlıdan AYIRIYORDU: canlı tracker
+                chandelier trail (tepe − 3 ATR, +1.5 ATR'den sonra) kullanıyor, buradaki
+                kademeli merdiven canlıda hiç çalışmıyordu. Yani bu sliderlar backtest'i
+                canlıya daha çok DEĞİL, daha AZ benzetiyordu. Backtest artık canlı çıkışı
+                birebir uyguluyor; ayarlanacak bir şey yok. */}
             <details
                 id="settings-section-skorlama"
                 className="glass-card settings-section-details"

@@ -34,12 +34,6 @@ def get_paper_tracker():
 
 
 @lru_cache(maxsize=1)
-def get_paper_reporter():
-    from swing_trader.paper_trading.reporter import PaperTradeReporter
-    return PaperTradeReporter()
-
-
-@lru_cache(maxsize=1)
 def get_smallcap_engine():
     from swing_trader.small_cap import SmallCapEngine
     return SmallCapEngine(get_config())

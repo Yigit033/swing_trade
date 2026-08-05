@@ -96,20 +96,6 @@ async def signal_brief(body: SignalBriefRequest):
         }
 
 
-@router.get("/weekly-report")
-async def weekly_report():
-    """Generate weekly performance report."""
-    storage = get_paper_storage()
-    try:
-        from swing_trader.paper_trading.reporter import PaperTradeReporter
-        reporter = PaperTradeReporter(storage)
-        trades = storage.get_all_trades() or []
-        report = reporter.generate_weekly_report(trades)
-        return {"report": report}
-    except Exception as e:
-        logger.error(f"Weekly report error: {e}")
-        return {"report": f"Rapor üretilemedi: {e}"}
-
 
 @router.get("/weekly-report-ai")
 async def weekly_report_ai():

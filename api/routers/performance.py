@@ -136,18 +136,3 @@ def get_performance(user_id: Optional[str] = Depends(get_current_user_id)):
         "open_trades":   enriched_open,
     })
 
-
-@router.get("/weekly-report")
-def weekly_report():
-    storage = get_paper_storage()
-    trades = storage.get_all_trades() or []
-    try:
-        from swing_trader.paper_trading.reporter import PaperTradeReporter
-        reporter = PaperTradeReporter()
-        report = reporter.generate_weekly_report(trades)
-        return {"report": report}
-    except Exception as e:
-        closed = storage.get_closed_trades(limit=1000)
-        wins = [t for t in closed if is_win(t)]
-        wr = round(len(wins) / len(closed) * 100, 1) if closed else 0
-        return {"report": f"Rapor üretilemedi ({e}). Özet: {len(closed)} kapalı trade, %{wr} win rate."}

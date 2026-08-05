@@ -18,32 +18,38 @@ logger = logging.getLogger(__name__)
 
 class SmallCapSignals:
     """
-    Signal triggers for Small Cap Momentum Engine.
-    
-    SENIOR TRADER TRIGGERS (3-Tier):
-    
-    TIER 1 - MANDATORY:
-    - Volume surge >= 1.8x (was 1.5x)
-    - ATR% >= 3.5%
-    
-    TIER 2 - CATALYST BOOSTERS:
-    - Gap >= 3% + Volume 2x
-    - MACD bullish cross
-    - RSI bullish divergence (Game Changer!)
-    - Close > VWAP
-    
-    TIER 3 - TECHNICAL CONFLUENCE:
-    - MACD > Signal Line
-    - Close > VWAP
-    - Higher Highs (3 days)
+    Sinyal tetikleyicileri — small-cap swing motoru.
+
+    SİNYAL ÜRETEN İKİ YOL (check_all_triggers; başka yol YOK):
+
+      1. VCE — volatilite sıkışması → genişleme kırılımı  [BİRİNCİL]
+         ATR%(14) baz seviyenin (bar −20..−5) %80 altına sıkışmış
+         + kapanış önceki 20 günlük zirvenin üstünde
+         + yeşil kapanış + MA50 üstü
+         + ZORUNLU hacim barajı RVOL ≥ 1.5x (50g)
+         Ölçüm: R10 edge +5.2% (t=2.6), dışörneklemde doğrulandı.
+         Hacim barajı S5'te eklendi: EV +1.55% → +3.64% (PF 2.13).
+         NOT: min_atr_ok sert kapısı VCE'ye BİLEREK uygulanmaz — sıkışmış
+         hissenin ATR'si tanım gereği düşüktür, ATR≥%3 istemek kuralla çelişir.
+
+      2. RVOL thrust — anormal hacim itişi  [İKİNCİL, v14]
+         RVOL ≥ 2.5x (50g) + yeşil kapanış + MA20 üstü. Squeeze gerekmez.
+         VCE'nin yapısal olarak kaçırdığı ani hareketleri yakalar
+         (R10 edge +3.34%, t=2.87). Kapılardan MUAF DEĞİL.
+
+    ÖLÇÜLÜP ELENEN YOLLAR (geri eklemek için yeni kanıt gerekir):
+      volume_ignition / erken birikim   R5 edge −1.17% (t=−1.83)
+      technical_breakout (5-bar zirve)  ölçülebilir edge yok
+      trend_continuation                R5 edge +0.29% (t=0.65 — gürültü)
+      pullback-to-MA20                  R5 edge +0.29% (t=0.65); kodu da silindi
+
+    `check_breakout` / `check_continuation_setup` hâlâ hesaplanıyor ama
+    KARAR VERMİYOR: yalnız /lookup teşhis sayfasında "bu hisse neden geçmedi"
+    satırlarını besliyor.
     """
-    
-    # SENIOR TRADER SIGNAL CONSTANTS
-    MIN_VOLUME_SURGE = 1.2            # Default soft check; live from settings.min_volume_surge_soft
-    MIN_ATR_PERCENT_TRIGGER = 0.03    # Default; live from settings.min_atr_percent
+
     ATR_PERIOD = 10                   # 10-period ATR (faster)
-    GAP_THRESHOLD = 0.03              # 3% gap for catalyst boost
-    
+
     def __init__(self, config: Dict = None, settings: Optional["SmallCapSettings"] = None):
         """Initialize SmallCapSignals."""
         from .settings_config import load_settings
@@ -127,13 +133,12 @@ class SmallCapSignals:
     # ============================================================
     def calculate_macd(self, df: pd.DataFrame) -> Dict:
         """
-        Calculate MACD indicators.
-        Returns: {macd_line, signal_line, histogram, bullish_cross, above_zero}
+        MACD göstergeleri. Tüketici: engine.py — macd_bullish =
+        bullish_cross or (above_zero and expanding). Üç ham seri değeri
+        (macd_line/signal_line/histogram) çıktıdan kaldırıldı (2026-08-05):
+        hiçbir kod okumuyordu, yerel değişken olarak hesaplanmaya devam ediyor.
         """
         result = {
-            'macd_line': 0.0,
-            'signal_line': 0.0,
-            'histogram': 0.0,
             'bullish_cross': False,
             'above_zero': False,
             'expanding': False
@@ -158,11 +163,6 @@ class SmallCapSignals:
             # Histogram
             histogram = macd_line - signal_line
             
-            # Current values
-            result['macd_line'] = float(macd_line.iloc[-1])
-            result['signal_line'] = float(signal_line.iloc[-1])
-            result['histogram'] = float(histogram.iloc[-1])
-            
             # Bullish cross (MACD crosses above signal)
             if len(macd_line) >= 2:
                 prev_macd = macd_line.iloc[-2]
@@ -173,7 +173,7 @@ class SmallCapSignals:
                 result['bullish_cross'] = (prev_macd <= prev_signal) and (curr_macd > curr_signal)
             
             # Above zero line
-            result['above_zero'] = result['macd_line'] > 0
+            result['above_zero'] = float(macd_line.iloc[-1]) > 0
             
             # Histogram expanding (bullish)
             if len(histogram) >= 2:
@@ -198,13 +198,13 @@ class SmallCapSignals:
         3. Second RSI > First RSI (RSI)
         4. RSI diff >= 5 points
         
-        Returns: {divergence_found, rsi_diff, price_diff, confidence}
+        Returns: {divergence_found}
+        Tek tüketici engine.py (boosters['rsi_divergence']). rsi_diff /
+        price_diff / confidence 2026-08-05'te kaldırıldı — okuyanı yoktu
+        (confidence'ı okuyan tek yer skorun bonus bloğuydu, o sabitlendi).
         """
         result = {
             'divergence_found': False,
-            'rsi_diff': 0.0,
-            'price_diff': 0.0,
-            'confidence': 0,
             'type': None
         }
         
@@ -252,8 +252,6 @@ class SmallCapSignals:
             
             if price_lower and rsi_higher and rsi_diff >= 5:
                 result['divergence_found'] = True
-                result['rsi_diff'] = float(rsi_diff)
-                result['price_diff'] = float((second_low_price - first_low_price) / first_low_price * 100)
                 result['type'] = 'BULLISH'
                 
                 # Confidence scoring
@@ -281,91 +279,6 @@ class SmallCapSignals:
             return rsi
         except Exception:
             return None
-    
-    # ============================================================
-    # VWAP ANALYSIS
-    # ============================================================
-    def calculate_vwap_position(self, df: pd.DataFrame) -> Dict:
-        """
-        Calculate VWAP and position relative to it.
-        Note: True VWAP is intraday, this is an approximation using daily HLC.
-        
-        Returns: {vwap, close_vs_vwap, above_vwap, days_above_vwap}
-        """
-        result = {
-            'vwap': 0.0,
-            'close_vs_vwap': 0.0,
-            'above_vwap': False,
-            'days_above_vwap': 0
-        }
-        
-        if df is None or len(df) < 5:
-            return result
-        
-        try:
-            # Typical Price * Volume for VWAP approximation
-            typical_price = (df['High'] + df['Low'] + df['Close']) / 3
-            cumulative_tp_vol = (typical_price * df['Volume']).rolling(5).sum()
-            cumulative_vol = df['Volume'].rolling(5).sum()
-            
-            vwap = cumulative_tp_vol / cumulative_vol
-            
-            current_close = df['Close'].iloc[-1]
-            current_vwap = vwap.iloc[-1]
-            
-            result['vwap'] = float(current_vwap)
-            result['close_vs_vwap'] = float((current_close - current_vwap) / current_vwap * 100)
-            result['above_vwap'] = current_close > current_vwap
-            
-            # Count consecutive days above VWAP
-            days_above = 0
-            for i in range(-1, -min(6, len(df)), -1):
-                if df['Close'].iloc[i] > vwap.iloc[i]:
-                    days_above += 1
-                else:
-                    break
-            result['days_above_vwap'] = days_above
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error calculating VWAP: {e}")
-            return result
-    
-    # ============================================================
-    # GAP ANALYSIS
-    # ============================================================
-    def calculate_gap(self, df: pd.DataFrame) -> Dict:
-        """Calculate gap up/down percentage."""
-        result = {
-            'gap_percent': 0.0,
-            'gap_up': False,
-            'gap_held': False
-        }
-        
-        if df is None or len(df) < 2:
-            return result
-        
-        try:
-            prev_close = df['Close'].iloc[-2]
-            today_open = df['Open'].iloc[-1]
-            today_close = df['Close'].iloc[-1]
-            today_low = df['Low'].iloc[-1]
-            
-            gap_pct = (today_open - prev_close) / prev_close * 100
-            result['gap_percent'] = float(gap_pct)
-            result['gap_up'] = gap_pct >= self.GAP_THRESHOLD * 100  # 3%+
-            
-            # Gap held if close > open and low didn't fill gap
-            if result['gap_up']:
-                gap_fill_level = prev_close * 1.01  # 1% buffer
-                result['gap_held'] = today_low > gap_fill_level and today_close > today_open
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error calculating gap: {e}")
-            return result
     
     def check_breakout(self, df: pd.DataFrame) -> Tuple[bool, str]:
         """
@@ -437,13 +350,6 @@ class SmallCapSignals:
             logger.error(f"Error checking breakout: {e}")
             return False, str(e)
     
-    
-    def check_volume_surge(self, volume_surge: float) -> Tuple[bool, str]:
-        """Check if volume surge meets threshold."""
-        soft = self._settings.min_volume_surge_soft
-        if volume_surge >= soft:
-            return True, f"Volume surge {volume_surge:.1f}x >= {soft}x"
-        return False, f"Volume surge {volume_surge:.1f}x < {soft}x"
     
     def check_atr_percent(self, atr_pct: float) -> Tuple[bool, str]:
         """Check if ATR% meets signal trigger threshold."""
@@ -768,13 +674,11 @@ class SmallCapSignals:
             'passed': vce_passed,
             'reason': vce_reason,
             'metrics': vce_metrics,
-            'primary': True,
         }
         details['triggers']['rvol_thrust'] = {
             'passed': rvol_passed,
             'reason': rvol_reason,
             'metrics': rvol_metrics,
-            'primary': True,
         }
         details['triggers']['volume_surge'] = {
             'passed': volume_surge >= vol_need,
@@ -802,8 +706,6 @@ class SmallCapSignals:
         # ALWAYS store values for display (even if not triggered)
         details['volume_surge'] = volume_surge
         details['atr_percent'] = atr_pct
-        details['has_breakout'] = breakout_passed
-        details['has_continuation'] = continuation_passed
         details['vce_metrics'] = vce_metrics
         details['rvol_metrics'] = rvol_metrics
 
@@ -925,7 +827,7 @@ class SmallCapSignals:
             return False, {}
         
         try:
-            result = {'today_change': 0, 'max_single_day': 0, 'five_day_total': 0}
+            result = {'today_change': 0, 'five_day_total': 0}
             
             # Today's change
             today_change = (df['Close'].iloc[-1] / df['Close'].iloc[-2] - 1) * 100
@@ -937,7 +839,6 @@ class SmallCapSignals:
                 if i-1 >= -len(df):
                     day_change = abs((df['Close'].iloc[i] / df['Close'].iloc[i-1] - 1) * 100)
                     max_single_day = max(max_single_day, day_change)
-            result['max_single_day'] = max_single_day
             
             # 5-day total
             five_day_total = (df['Close'].iloc[-1] / df['Close'].iloc[-6] - 1) * 100
@@ -1091,8 +992,6 @@ class SmallCapSignals:
 
         Returns:
             {
-                'obv_slope': float,       # Normalized slope (-1 to +1)
-                'obv_rising': bool,       # OBV trending up
                 'accumulation': bool,     # OBV up + price flat/down = smart money
                 'distribution': bool,     # OBV down + price up = warning
                 'bonus': int              # Scoring bonus (-5 to +8)
@@ -1132,8 +1031,6 @@ class SmallCapSignals:
             avg_vol = np.mean(volume[-period:])
             normalized_slope = slope / avg_vol if avg_vol > 0 else 0
 
-            result['obv_slope'] = round(float(normalized_slope), 4)
-            result['obv_rising'] = normalized_slope > 0.05
 
             # Price trend over same period
             price_change = (close[-1] / close[-period] - 1) * 100

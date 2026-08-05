@@ -565,9 +565,13 @@ class PaperTradeStorage:
     ) -> bool:
         """Close a paper trade and calculate P/L.
 
-        v3.1: Blended PnL when partial exit exists.
-        If 50% was already sold at T1 (partial_exit_price), the final PnL
-        combines partial + remaining position performance.
+        Kısmi satış varsa harmanlanmış P/L.
+
+        Oran KAYITLI `partial_exit_pct`'ten okunur — o an geçerli ayardan
+        DEĞİL. Sebep: T1 ile nihai çıkış arasında kullanıcı oranı değiştirebilir;
+        gerçekleşmiş bir işlemin muhasebesi satıldığı andaki oranla yapılmalı.
+        Bu fonksiyon realize P/L'nin TEK otoritesidir (tracker 2026-08-05'te
+        buradaki hesabı kopyalayıp %50 varsayımıyla eziyordu — kaldırıldı).
         """
         try:
             trade = self.get_trade_by_id(trade_id, user_id)
@@ -580,7 +584,7 @@ class PaperTradeStorage:
 
             if partial_exit_price and partial_pct > 0:
                 # Blended PnL: partial sold at T1, remainder at final exit
-                partial_ratio = partial_pct / 100  # e.g. 0.50
+                partial_ratio = partial_pct / 100  # satış anındaki oran (ör. 0.33)
                 remaining_ratio = 1 - partial_ratio
                 partial_shares = int(position_size * partial_ratio)
                 remaining_shares = position_size - partial_shares

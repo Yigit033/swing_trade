@@ -28,8 +28,27 @@ def test_gap_limits_come_from_settings():
     from swing_trader.paper_trading import tracker as T
 
     s = load_settings()
-    assert T.MAX_GAP_UP_PCT == s.max_gap_up_pct
-    assert T.MAX_GAP_DOWN_PCT == s.max_gap_down_pct
+    assert T._gap_limits() == (s.max_gap_up_pct, s.max_gap_down_pct)
+
+
+def test_gap_limits_are_not_frozen_at_import():
+    """
+    2026-08-05: limitler `MAX_GAP_UP_PCT = _gap_limits()` şeklinde MODÜL
+    İMPORT ANINDA donuyordu — yani ölü-ayar tuzağının yarısı geri gelmişti.
+    Kullanıcı UI'dan değeri değiştiriyor, DB'ye yazılıyor, ama çalışan süreç
+    import anındaki değeri kullanmaya devam ediyordu. Modül seviyesinde
+    donmuş bir kopya bir daha OLUŞMAMALI.
+    """
+    from pathlib import Path
+    import re
+
+    src = (Path(__file__).resolve().parents[1] / "paper_trading" / "tracker.py").read_text(
+        encoding="utf-8"
+    )
+    code = "\n".join(l for l in src.splitlines() if not l.strip().startswith("#"))
+    assert not re.search(r"^MAX_GAP_(UP|DOWN)_PCT\s*[,=]", code, re.M), (
+        "gap limiti modül seviyesinde donduruluyor — çağrı anında okunmalı"
+    )
 
 
 def test_gap_limits_are_measured_values():

@@ -22,6 +22,19 @@ import pytest
 from swing_trader.small_cap import settings_config as sc
 
 
+@pytest.fixture(autouse=True)
+def _fresh_settings_cache():
+    """
+    load_settings 30 sn önbellekli (2026-08-05 — her çağrı JSON okuyup DB turu
+    atıyordu, ~2.5 sn; tracker'ın çıkış döngüsünde ve her sinyalde çağrılıyor).
+    Bu testler DB katmanını doğrudan değiştirdiği için önbelleği atlamaları
+    gerekir; aksi halde önceki testin değerini görürler.
+    """
+    sc.invalidate_settings_cache()
+    yield
+    sc.invalidate_settings_cache()
+
+
 @pytest.fixture
 def no_db(monkeypatch):
     """DB katmanını kapat — dosya-tek-kaynak davranışı."""
@@ -176,3 +189,57 @@ def test_invalid_file_and_db_falls_back_to_defaults(monkeypatch, tmp_path):
     monkeypatch.setattr(sc, "_db_overlay", lambda: {"baska_olmayan_alan": 2})
     s = sc.load_settings()          # fırlatmamalı
     assert s.max_holding_days == sc.SmallCapSettings().max_holding_days
+
+
+# ── Önbellek sözleşmesi (2026-08-05) ─────────────────────────────────────
+
+def test_cache_serves_repeat_reads_without_hitting_db(monkeypatch):
+    """
+    Önbellek gerçekten çalışmalı: TTL içinde ikinci okuma DB'ye GİTMEMELİ.
+    Bu, ölçülen performans sorununun düzeltildiğini bağlar — 5 çağrı 12.7 sn
+    sürüyordu, çünkü her çağrı JSON okuyup üstüne bir DB turu atıyordu ve bu
+    fonksiyon sıcak yollarda (her sinyal, her çıkış kontrolü) çağrılıyor.
+    """
+    calls = {"n": 0}
+
+    def _counting_overlay():
+        calls["n"] += 1
+        return {}
+
+    monkeypatch.setattr(sc, "_db_overlay", _counting_overlay)
+    sc.invalidate_settings_cache()
+
+    sc.load_settings()
+    sc.load_settings()
+    sc.load_settings()
+    assert calls["n"] == 1, f"DB {calls['n']} kez okundu — önbellek çalışmıyor"
+
+
+def test_invalidate_forces_fresh_read(monkeypatch):
+    """
+    UI'dan kayıt yapılınca ayar ANINDA uygulanmalı — önbellek gecikmesi
+    kullanıcıya "değiştirdim ama bir şey olmadı" yaşatmamalı.
+    """
+    store = {"patch": {}}
+    monkeypatch.setattr(sc, "_db_overlay", lambda: dict(store["patch"]))
+    sc.invalidate_settings_cache()
+
+    base = sc.load_settings().auto_scan.enabled
+    store["patch"] = {"auto_scan": {"enabled": not base}}
+
+    assert sc.load_settings().auto_scan.enabled is base, "önbellek beklendiği gibi tutmuyor"
+    sc.invalidate_settings_cache()
+    assert sc.load_settings().auto_scan.enabled is (not base), "invalidate sonrası taze okumadı"
+
+
+def test_explicit_path_never_uses_cache(tmp_path, monkeypatch):
+    """Açık `path` verilen çağrılar (testler, geçici dosyalar) önbelleğe girmez."""
+    monkeypatch.setattr(sc, "_db_overlay", lambda: {})
+    sc.invalidate_settings_cache()
+    sc.load_settings()   # önbelleği doldur
+
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps({"max_holding_days": 11}), encoding="utf-8")
+    assert sc.load_settings(path=p).max_holding_days == 11, (
+        "açık path önbellekten dönmüş — izole dosya okuması bozulur"
+    )

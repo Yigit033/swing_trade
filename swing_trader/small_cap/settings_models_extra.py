@@ -414,21 +414,3 @@ class BacktestEntrySettings(BaseModel):
     partial_fallback_target_bump: float = 1.15
 
 
-class BacktestExitTrailingSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    time_stop_min_days: int = 5
-    time_stop_min_loss_fraction: float = 0.05
-    trail_peak_atr_25: float = 2.5
-    trail_high_minus_atr_25: float = 0.8
-    trail_peak_atr_20: float = 2.0
-    trail_peak_frac_20: float = 0.5
-    trail_peak_atr_15: float = 1.5
-    trail_peak_frac_15: float = 0.3
-    breakeven_peak_atr: float = 1.5
-    light_protect_peak_atr: float = 1.0
-    light_protect_below_entry_atr: float = 0.2
-    close_gain_atr_20: float = 2.0
-    close_trail_atr_20: float = 1.0
-    close_gain_atr_15: float = 1.5
-    close_trail_atr_15: float = 1.2

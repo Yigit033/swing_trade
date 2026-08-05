@@ -291,6 +291,94 @@ işaret artık kullanıcıya da görünür.
 
 ---
 
+## 5. tur — signals / backtest / paper_trading (2026-08-05)
+
+Kalan büyük dosyalar denetlendi. Bu tur ölçüm değil **doğruluk** turu: burada
+bulunanlar "işe yaramıyor" değil, **yanlış** kategorisindeydi.
+
+### 🔴 PARİTE KIRIĞI — `/backtest` canlıda kullanılmayan çıkışı gösteriyordu
+
+`smallcap_backtest.py`'nin çıkışı canlı `tracker.py`'den üç yerde ayrışmıştı:
+
+| Konu | CANLI | BACKTEST (kırık) |
+|---|---|---|
+| Trailing | Chandelier: giriş sonrası **kümülatif tepe** − 3 ATR, +1.5 ATR kârdan sonra | 8 parametreli kademeli merdiven, "tepe" olarak **yalnız o günün** yükseği |
+| Aynı-bar sıralaması | Stop, trail güncellemesinden **ÖNCE** | Trail önce → yükseltilmiş stop'tan çıkış → **sonuçlar iyimser** |
+| Timeout | **İşlem günü** (bar) | **Takvim günü** → 20 takvim ≈ 14 işlem günü, erken çıkış |
+
+Sıralama kırığı özellikle sinsi: tracker'da bu bir hata olarak bulunup
+düzeltilmişti (kod yorumu: *"check stop BEFORE updating trail (was inverted)"*)
+ama backtest ters sırayı korumuştu. Ayrıca canlıda **olmayan** bir "Time Stop"
+(5 gün + %5 zarar) vardı.
+
+→ Çıkış canlıyla **birebir** eşitlendi; 15 parametreli `backtest_exit_trailing`
+bölümü (model + JSON + 15 UI slider'ı) silindi. Kilit test:
+`test_backtest_exit_parity.py` — hem kaynak hem davranış seviyesinde bağlıyor
+(chandelier formülü, sıralama, gün sayımı).
+
+### 🔴 PARA HATASI — realize P/L %33 satışı %50 sanıyordu
+
+`tracker.py` realize P/L'yi **ikinci kez** hesaplıyor ve kısmi satışı
+`position_size // 2` ile bölüyordu — yani %50 varsayımı. Oysa T1 oranı
+2026-08-04'te ölçümle **%33**'e indirilmişti.
+
+`storage.close_trade()` DOĞRU hesaplıyor (kayıtlı `partial_exit_pct`'i okuyor),
+ama tracker sonucu bellek üstünde **eziyordu** → DB'de doğru, API yanıtında
+yanlış sayı. Kullanıcı çıkıştan hemen sonra bir P/L görüyor, sayfayı
+yenileyince başkasını.
+
+Yön **iyimser**: giriş 100, T1 108, çıkış 95 senaryosunda doğru sonuç
+−0.71/hisse iken kopya **+1.50/hisse** gösteriyordu.
+
+Aynı blokta ikinci hata: T1 sonrası **açık** işlemlerin realize-olmayan P/L'si
+tam pozisyon büyüklüğüyle hesaplanıyordu (payların %33'ü satılmışken) ve T1'de
+kilitlenen kâr hiç sayılmıyordu. İkisi de düzeltildi.
+
+→ İkinci hesap silindi (otorite `storage`), realize-olmayan P/L satılan/kalan
+ayrımını yapıyor.
+
+### 🔴 KALICI BOZUK ENDPOINT — `generate_weekly_report` hiç var olmamış
+
+`/api/performance/weekly-report` ve `/api/genai/weekly-report`,
+`PaperTradeReporter.generate_weekly_report()` çağırıyordu — **böyle bir metot
+yok**. Her istek `AttributeError` alıyor, geniş `except` onu yutup "Rapor
+üretilemedi" fallback'i döndürüyordu. Yani iki endpoint de ilk günden beri
+bozuktu ve hata hiç görünmemişti.
+
+Hiçbir sayfa bunları çağırmıyordu (çalışan rapor `/api/genai/weekly-report-ai`,
+`genai/reporter.py: WeeklyReporter`). → İki endpoint + ölü frontend export'u +
+`api/deps.get_paper_reporter` silindi. `paper_trading/reporter.py` (292 satır)
+**tamamen** ölü çıktı ve dosya silindi.
+
+### 🟡 ÖLÜ AYAR TUZAĞININ YARISI GERİ GELMİŞTİ
+
+`tracker.py` gap limitlerini `MAX_GAP_UP_PCT, MAX_GAP_DOWN_PCT = _gap_limits()`
+ile **modül import anında** donduruyordu. Kullanıcı UI'dan değiştiriyor, DB'ye
+yazılıyor, ama çalışan süreç import anındaki değeri kullanmaya devam ediyordu.
+2026-08-04'te kapatılan tuzağın aynısı, yarım kapatılmış hali. → Çağrı anında
+okunuyor; `test_gap_limits_are_not_frozen_at_import` bağlıyor.
+
+### ⚡ PERFORMANS — `load_settings()` her çağrıda DB turu atıyordu
+
+Ölçüldü: **5 çağrı 12.7 sn** (her çağrı JSON okuyup üstüne bir DB round-trip).
+Bu fonksiyon sıcak yollarda: tracker'ın çıkış döngüsünde her T1 kısmisinde,
+scoring'de her sinyalde, motorda her taramada. → 30 sn TTL'li önbellek +
+yazma sonrası `invalidate_settings_cache()` (UI değişikliği hâlâ anında).
+Kanıt: **test paketi 250 sn → 59 sn**.
+
+### Ölü kod
+
+| Silinen | Satır | Neden |
+|---|---|---|
+| `paper_trading/reporter.py` (dosya) | 292 | Tamamı ölü; tek "tüketicileri" var olmayan bir metodu çağıran 2 bozuk endpoint'ti |
+| `signals.calculate_vwap_position` + `calculate_gap` | 97 | Hiç çağrılmıyor; 8 çıktı anahtarının hiçbiri okunmuyor |
+| `signals.check_volume_surge` | 7 | Hiç çağrılmıyor → `min_volume_surge_soft` ayarı da ölmüştü, o da silindi |
+| `signals.py` sınıf docstring'i | — | "3-Tier / VWAP / gap / catalyst / Volume≥1.8x" anlatıyordu — sistem VCE+RVOL. Aktif olarak **yanlış bilgi**; gerçek iki yolla yeniden yazıldı |
+| 3 ölü sınıf sabiti + 12 ölü dict anahtarı | ~20 | macd ham serileri, rsi_diff/price_diff/confidence, obv_slope/rising, has_breakout/has_continuation, primary, max_single_day |
+| `backtest_exit_trailing` (15 ayar + 15 UI slider'ı) | ~90 | Parite eşitlenince okuyanı kalmadı |
+
+---
+
 ## Ölçülmemiş kalanlar (sonraki tur)
 
 | Katman | Not |

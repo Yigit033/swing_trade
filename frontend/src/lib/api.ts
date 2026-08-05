@@ -229,9 +229,6 @@ export const confirmTrade = (id: number) =>
 export const getPerformance = () =>
     api.get("/api/performance").then((r) => r.data);
 
-export const getWeeklyReport = () =>
-    api.get("/api/performance/weekly-report").then((r) => r.data);
-
 // Scanner — background job (sayfa değiştirsen de scan sürer)
 export const startSmallcapScanJob = (params: {
     min_quality?: number;

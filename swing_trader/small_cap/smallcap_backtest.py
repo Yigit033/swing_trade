@@ -709,66 +709,47 @@ class SmallCapBacktester:
                 continue
             
             bar = today_bars.iloc[0]
-            entry_date = datetime.strptime(trade['entry_date'], '%Y-%m-%d')
-            days_held = (current_date - entry_date).days
             current_close = float(bar['Close'])
             current_high = float(bar['High'])
             current_low = float(bar['Low'])
             atr = trade.get('atr', 0)
             entry_price = trade['entry_price']
             shares = trade['shares']
-            
-            xt = self.settings.backtest_exit_trailing
-            # Time-based exit: stale losers only after more room
-            if (
-                days_held >= xt.time_stop_min_days
-                and current_close < entry_price
-                and not trade.get("partial_done")
-            ):
-                loss_pct = (entry_price - current_close) / entry_price
-                if loss_pct > xt.time_stop_min_loss_fraction:
-                    trade['exit_price'] = self._exit_fill_price(current_close)
-                    trade['exit_date'] = current_date.strftime('%Y-%m-%d')
-                    trade['exit_reason'] = f'Time Stop ({days_held}d, {loss_pct*100:.1f}% loss)'
-                    trade['status'] = 'STOPPED'
-                    trade['days_held'] = days_held
-                    self._close_trade(trade)
-                    self.cooldowns[ticker] = current_date + timedelta(days=self.settings.cooldown_days)
-                    self.ticker_losses[ticker] = self.ticker_losses.get(ticker, 0) + 1
-                    if self.ticker_losses[ticker] >= self.settings.ticker_max_losses:
-                        self.banned_tickers.add(ticker)
-                    continue
-            
-            # Aggressive trailing stop: protect gains quickly
-            if atr > 0 and current_high > entry_price:
-                peak_gain = current_high - entry_price
-                atr_gain_peak = peak_gain / atr
-                close_gain = max(current_close - entry_price, 0)
-                atr_gain_close = close_gain / atr if current_close > entry_price else 0
-                new_trail = trade['trailing_stop']
 
-                if atr_gain_peak >= xt.trail_peak_atr_25:
-                    new_trail = max(new_trail, current_high - xt.trail_high_minus_atr_25 * atr)
-                elif atr_gain_peak >= xt.trail_peak_atr_20:
-                    new_trail = max(new_trail, entry_price + (peak_gain * xt.trail_peak_frac_20))
-                elif atr_gain_peak >= xt.trail_peak_atr_15:
-                    new_trail = max(new_trail, entry_price + (peak_gain * xt.trail_peak_frac_15))
-                
-                if atr_gain_peak >= xt.breakeven_peak_atr:
-                    new_trail = max(new_trail, entry_price)
-                elif atr_gain_peak >= xt.light_protect_peak_atr:
-                    new_trail = max(new_trail, entry_price - xt.light_protect_below_entry_atr * atr)
-                
-                if atr_gain_close >= xt.close_gain_atr_20:
-                    new_trail = max(new_trail, current_close - xt.close_trail_atr_20 * atr)
-                elif atr_gain_close >= xt.close_gain_atr_15:
-                    new_trail = max(new_trail, current_close - xt.close_trail_atr_15 * atr)
+            # ================================================================
+            # ÇIKIŞ MANTIĞI — CANLI tracker.py İLE BİREBİR (2026-08-05 parite)
+            # ================================================================
+            # Buradaki mantık ÖNCE canlıdan ayrışmıştı ve /backtest sayfası
+            # canlıda KULLANILMAYAN bir çıkış stratejisinin sonuçlarını
+            # gösteriyordu. Üç ayrı kırık vardı:
+            #
+            #   1) TRAILING: canlı chandelier (giriş sonrası GÖRÜLEN EN YÜKSEK
+            #      tepe − 3 ATR, +1.5 ATR kârdan sonra devreye girer) kullanıyor;
+            #      backtest 8 parametreli kademeli merdiven kullanıyordu ve
+            #      "tepe" olarak yalnız O GÜNÜN yükseğini alıyordu (giriş sonrası
+            #      kümülatif tepe değil) — her barda sıfırlanan farklı bir kural.
+            #   2) SIRALAMA: canlı stop'u trail GÜNCELLEMESİNDEN ÖNCE kontrol
+            #      ediyor (tracker.py'de bu bir HATA olarak bulunup düzeltilmiş:
+            #      "check stop BEFORE updating trail (was inverted)"). Backtest
+            #      ters sırayı koruyordu → yeni zirve yapıp düşen barlarda
+            #      yükseltilmiş trail'den çıkıyordu, yani sonuçları İYİMSER.
+            #   3) GÜN SAYIMI: canlı işlem günü (bar) sayıyor, backtest TAKVİM
+            #      günü sayıyordu → 20 takvim günü ≈ 14 işlem günü, timeout
+            #      canlıdan daha erken tetikliyordu.
+            #
+            # Ayrıca canlıda OLMAYAN bir "Time Stop" (5 gün + %5 zarar) vardı;
+            # parite için kaldırıldı. Kaldırılan 15 ayar GATE_AUDIT.md'de.
+            TRAIL_ATR_MULT = 3.0
+            TRAIL_ACTIVATE_ATR = 1.5
 
-                if new_trail > trade['trailing_stop']:
-                    trade['trailing_stop'] = round(new_trail, 2)
-            
+            trade['bars_held'] = int(trade.get('bars_held', 0)) + 1
+            days_held = trade['bars_held']          # işlem günü (canlı ile aynı)
+            peak_high = max(float(trade.get('peak_high', entry_price)), current_high)
+            trade['peak_high'] = peak_high
+
+            # ── 1. STOP kontrolü (trail güncellemesinden ÖNCE) ──
             active_stop = trade['trailing_stop']
-            
+
             if current_low <= active_stop:
                 today_open = float(bar['Open'])
                 if today_open <= active_stop:
@@ -828,7 +809,16 @@ class SmallCapBacktester:
                 trade['days_held'] = days_held
                 self._close_trade(trade)
                 continue
-            
+
+            # ── 4. CHANDELIER TRAIL GÜNCELLEMESİ (stop/hedef kontrollerinden SONRA) ──
+            # Kümülatif tepe − 3 ATR, yalnız yukarı kilitlenir (monotonik).
+            # Başlangıç 2.5 ATR stop'u, trail onu geçene kadar aşağıyı korur.
+            if atr > 0 and (peak_high - entry_price) / atr >= TRAIL_ACTIVATE_ATR:
+                new_trail = peak_high - TRAIL_ATR_MULT * atr
+                if new_trail > trade['trailing_stop']:
+                    trade['trailing_stop'] = round(new_trail, 2)
+
+            # ── 5. TIMEOUT (işlem günü) ──
             if days_held >= trade['max_hold_days']:
                 exit_px = current_close
                 if not trade.get('partial_done') and current_high >= trade['target']:

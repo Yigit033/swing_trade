@@ -308,8 +308,10 @@ export default function HowItWorksPage() {
                                 <SettingsSectionLink id="settings-section-backtest-giris-yurutme">Backtest / giriş yürütme</SettingsSectionLink> — gap limitleri, max kayıp/işlem, gap risk bütçesi.
                             </li>
                             <li style={{ marginBottom: 0 }}>
-                                Simülasyonda çıkış:{" "}
-                                <SettingsSectionLink id="settings-section-backtest-cikis-trailing">Backtest çıkış (zaman stop / trailing)</SettingsSectionLink>.
+                                Simülasyonda çıkış <strong>ayarlanamaz</strong> — 2026-08-05'te canlı
+                                çıkışla (chandelier trail) birebir eşitlendi. Backtest'in ayrı
+                                parametreleri olması, sonuçların canlıda kullanılmayan bir stratejiyi
+                                göstermesine yol açıyordu.
                             </li>
                         </ul>
                     </PlaybookCard>
@@ -375,8 +377,8 @@ export default function HowItWorksPage() {
                                 <SettingsSectionLink id="settings-section-backtest-dongu">Backtest döngü (rejim / drawdown)</SettingsSectionLink> — ayıda giriş kapatma, drawdown durdurma.
                             </li>
                             <li style={{ marginBottom: 8 }}>
-                                Çıkış:{" "}
-                                <SettingsSectionLink id="settings-section-backtest-cikis-trailing">Backtest çıkış (zaman stop / trailing)</SettingsSectionLink>.
+                                Çıkış: canlı ile aynı (chandelier trail, tepe − 3 ATR) — ayrı
+                                backtest çıkış ayarı yok.
                             </li>
                             <li style={{ marginBottom: 0 }}>
                                 Özet: <Link href="/performance" style={{ color: "var(--accent)", fontWeight: 600 }}>Performance</Link> ve trade günlüğü ile birlikte oku.

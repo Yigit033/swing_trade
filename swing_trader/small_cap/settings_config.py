@@ -17,7 +17,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .settings_models_extra import (
     AutoScanSettings,
     BacktestEntrySettings,
-    BacktestExitTrailingSettings,
     BacktestLoopSettings,
     BacktestTypeQualityOverride,
     RiskTargetRegimeSettings,
@@ -125,12 +124,6 @@ class SmallCapSettings(BaseModel):
             "aren't penalised by their own recent elevated activity."
         ),
     )
-    min_volume_surge_soft: float = Field(
-        default=1.2,
-        ge=1.0,
-        le=3.0,
-        description="Helper threshold in check_volume_surge messaging.",
-    )
     min_atr_percent: float = Field(
         default=0.03,
         ge=0.01,
@@ -210,9 +203,6 @@ class SmallCapSettings(BaseModel):
     backtest_loop: BacktestLoopSettings = Field(default_factory=BacktestLoopSettings)
     backtest_type_quality: BacktestTypeQualityOverride = Field(default_factory=BacktestTypeQualityOverride)
     backtest_entry: BacktestEntrySettings = Field(default_factory=BacktestEntrySettings)
-    backtest_exit_trailing: BacktestExitTrailingSettings = Field(
-        default_factory=BacktestExitTrailingSettings
-    )
 
     @field_validator("max_stop_by_type", "type_atr_multipliers", "type_position_caps")
     @classmethod
@@ -335,6 +325,30 @@ _REMOVED_KEYS = {
     # HER ZAMAN False, dolayısıyla Type B skoruna eklenen bu puan hiç
     # uygulanmıyordu (ölü ayar).
     "swing.type_b.catalyst_pts",
+    # 2026-08-05: check_volume_surge() hiç çağrılmıyordu (tek okuyucusu oydu);
+    # metot silindi, ayar ölü kaldı. Hacim barajları başka yerlerde:
+    # volume_surge_trigger (tetik) ve VCE'nin zorunlu RVOL≥1.5x barajı.
+    "min_volume_surge_soft",
+    # 2026-08-05 PARİTE: backtest çıkışı canlı tracker.py ile birebir hizalandı
+    # (chandelier trail = tepe − 3 ATR, +1.5 ATR sonrası; stop trail'den ÖNCE
+    # kontrol edilir; işlem günü sayılır). Bu 15 ayar canlıda HİÇ çalışmayan
+    # kademeli merdiveni tanımlıyordu → backtest'i canlıdan uzaklaştırıyorlardı.
+    "backtest_exit_trailing.time_stop_min_days",
+    "backtest_exit_trailing.time_stop_min_loss_fraction",
+    "backtest_exit_trailing.trail_peak_atr_25",
+    "backtest_exit_trailing.trail_high_minus_atr_25",
+    "backtest_exit_trailing.trail_peak_atr_20",
+    "backtest_exit_trailing.trail_peak_frac_20",
+    "backtest_exit_trailing.trail_peak_atr_15",
+    "backtest_exit_trailing.trail_peak_frac_15",
+    "backtest_exit_trailing.breakeven_peak_atr",
+    "backtest_exit_trailing.light_protect_peak_atr",
+    "backtest_exit_trailing.light_protect_below_entry_atr",
+    "backtest_exit_trailing.close_gain_atr_20",
+    "backtest_exit_trailing.close_trail_atr_20",
+    "backtest_exit_trailing.close_gain_atr_15",
+    "backtest_exit_trailing.close_trail_atr_15",
+    "backtest_exit_trailing",
 }
 
 
@@ -373,6 +387,16 @@ def _db_overlay() -> Dict[str, Any]:
         return {}
 
 
+_CACHE_TTL_SECONDS = 30.0
+_cache: Dict[str, Any] = {"at": 0.0, "value": None}
+
+
+def invalidate_settings_cache() -> None:
+    """Ayar yazıldıktan sonra çağrılır — sonraki okuma taze veriyi görür."""
+    _cache["at"] = 0.0
+    _cache["value"] = None
+
+
 def load_settings(path: Optional[Path] = None) -> SmallCapSettings:
     """
     Katmanlı yükleme (en zayıftan en güçlüye):
@@ -380,7 +404,21 @@ def load_settings(path: Optional[Path] = None) -> SmallCapSettings:
         kod varsayılanları  →  JSON dosyası (git)  →  DB yaması (UI değişikliği)
 
     Dosya yoksa varsayılanlar, DB yoksa dosya katmanı kullanılır.
+
+    ÖNBELLEK (2026-08-05): her çağrı JSON dosyasını okuyup ÜSTÜNE bir DB
+    turu atıyordu (~2.5 sn). Bu fonksiyon sıcak yollarda çağrılıyor —
+    tracker'ın çıkış döngüsü her T1 kısmisinde, scoring her sinyalde, motor
+    her taramada. Ölçüm: 5 çağrı 12.7 sn. Artık 30 sn'lik TTL var; UI'dan
+    kayıt yapılınca `invalidate_settings_cache()` ile anında tazeleniyor,
+    yani ayar değişikliği hâlâ hemen uygulanıyor. Açık `path` verilen
+    çağrılar (testler, geçici dosyalar) önbelleğe HİÇ girmez.
     """
+    if path is None:
+        import time as _time
+
+        if _cache["value"] is not None and (_time.monotonic() - _cache["at"]) < _CACHE_TTL_SECONDS:
+            return _cache["value"]
+
     p = path or DEFAULT_SETTINGS_PATH
     base = SmallCapSettings().model_dump(mode="json")
 
@@ -402,8 +440,16 @@ def load_settings(path: Optional[Path] = None) -> SmallCapSettings:
         if overlay:
             base = _deep_merge(base, _prune_removed_keys(overlay))
 
+    def _finish(result: SmallCapSettings) -> SmallCapSettings:
+        if path is None:
+            import time as _time
+
+            _cache["at"] = _time.monotonic()
+            _cache["value"] = result
+        return result
+
     try:
-        return SmallCapSettings.model_validate(base)
+        return _finish(SmallCapSettings.model_validate(base))
     except Exception as e:
         # KADEMELİ GERİ ÇEKİLME — hepsini birden varsayılana düşürmek TEHLİKELİ.
         # Senaryo: bir ayar alanı koddan kaldırılır (model extra="forbid"), ama
@@ -426,12 +472,12 @@ def load_settings(path: Optional[Path] = None) -> SmallCapSettings:
                     "DB ayar yaması geçersiz — YOK SAYILDI, dosya katmanıyla devam "
                     "ediliyor. Yamayı düzeltmek için: POST /api/settings/reset"
                 )
-                return s
+                return _finish(s)
             except Exception as e2:
                 logger.error("Dosya katmanı da geçersiz (%s)", e2)
 
         logger.error("TÜM KATMANLAR GEÇERSİZ — kod varsayılanlarına düşüldü (kalibrasyon KAYIP)")
-        return SmallCapSettings.model_validate(SmallCapSettings().model_dump(mode="json"))
+        return _finish(SmallCapSettings.model_validate(SmallCapSettings().model_dump(mode="json")))
 
 
 def save_settings(settings: SmallCapSettings, path: Optional[Path] = None) -> None:
@@ -442,6 +488,7 @@ def save_settings(settings: SmallCapSettings, path: Optional[Path] = None) -> No
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     tmp.replace(p)
+    invalidate_settings_cache()
     logger.info("Saved small-cap settings to %s", p)
 
 
@@ -493,4 +540,7 @@ def apply_settings_patch(
         except Exception as e:
             logger.error("Ayar kalıcılığı (DB) başarısız: %s", e)
 
+    # DB yaması da yazıldıktan SONRA boşalt: save_settings içindeki çağrı
+    # yalnız dosya katmanını kapsıyordu, DB katmanı henüz yazılmamıştı.
+    invalidate_settings_cache()
     return validated
