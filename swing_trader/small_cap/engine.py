@@ -756,7 +756,8 @@ class SmallCapEngine:
         self, 
         tickers: List[str],
         data_dict: Dict[str, pd.DataFrame],
-        portfolio_value: float = 10000
+        portfolio_value: float = 10000,
+        progress_cb=None,
     ) -> List[Dict]:
         """
         Scan multiple stocks for small-cap momentum signals.
@@ -765,7 +766,11 @@ class SmallCapEngine:
             tickers: List of ticker symbols
             data_dict: Dict mapping ticker to DataFrame
             portfolio_value: Portfolio value for position sizing
-        
+            progress_cb: opsiyonel `fn(done, total)` — döngü ilerledikçe çağrılır.
+                2026-08-05: eskiden bu döngü boyunca HİÇ ilerleme yayınlanmıyordu;
+                API %84'te donuyor, kullanıcı taramanın asılıp asılmadığını
+                anlayamıyor ve asılı-iş bekçisi meşru taramayı iptal edebiliyordu.
+
         Returns:
             List of signals sorted by quality_score
         """
@@ -781,7 +786,14 @@ class SmallCapEngine:
 
         current_regime = market_regime.get('regime', '')
 
-        for ticker in tickers:
+        total = len(tickers)
+        for idx, ticker in enumerate(tickers, 1):
+            if progress_cb is not None and (idx % 20 == 0 or idx == total):
+                try:
+                    progress_cb(idx, total)
+                except Exception:
+                    pass        # ilerleme raporu taramayı asla düşürmemeli
+
             if ticker not in data_dict:
                 continue
 

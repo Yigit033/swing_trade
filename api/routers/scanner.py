@@ -471,10 +471,19 @@ def _execute_smallcap_scan(
     prog(83, "fetch", f"Price data ready: {len(data_dict)}/{len(tickers)} tickers")
 
     prog(84, "scan", "Running momentum engine…")
+
+    def _scan_progress(done: int, total: int) -> None:
+        # 84 → 90 bandını döngü boyunca yay. Eskiden 84'te donup döngü bitince
+        # 90'a atlıyordu: kullanıcı ilerleme göremiyordu ve asılı-iş bekçisi
+        # (api/scanner_jobs.py) uzun ama SAĞLIKLI bir taramayı iptal edebilirdi.
+        pct = 84 + int(6 * done / max(total, 1))
+        prog(pct, "scan", f"Momentum motoru: {done}/{total} hisse")
+
     signals = engine.scan_universe(
         tickers=list(data_dict.keys()),
         data_dict=data_dict,
         portfolio_value=body.portfolio_value,
+        progress_cb=_scan_progress,
     )
 
     # ── Huni 3. aşama telemetrisi ────────────────────────────────────────

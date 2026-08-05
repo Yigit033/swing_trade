@@ -120,3 +120,46 @@ def test_zombie_release_does_not_steal_new_slot():
 
     sj.release_scan_slot(old)             # zombi thread'in finally bloğu
     assert sj.current_scan_job_id() == new, "yeni işin slotu çalındı"
+
+
+# ── Bekçi, YAVAŞ ama sağlıklı taramayı öldürmemeli ───────────────────────
+# 2026-08-05: bekçiyi eklerken bir regresyon riski doğdu. `prog(84, "scan")`
+# tüm motor döngüsünden ÖNCE, `prog(90)` döngü BİTTİKTEN sonra yazılıyordu —
+# yani ~260 hisse taranırken hiç ilerleme yayınlanmıyordu. Canlıda iş 84'te
+# uzun süre durdu (sonunda TAMAMLANDI, asılı değildi). Bekçi böyle bir taramayı
+# iptal ederdi. Çözüm: motor döngüsü ilerleme yayınlıyor.
+
+def test_scan_loop_publishes_progress():
+    """scan_universe döngü sırasında progress_cb çağırmalı."""
+    import inspect
+    from swing_trader.small_cap import engine as eng
+
+    src = inspect.getsource(eng.SmallCapEngine.scan_universe)
+    assert "progress_cb" in src, "tarama döngüsü ilerleme yayınlamıyor"
+    assert "for idx, ticker in enumerate(tickers" in src
+
+
+def test_api_wires_scan_progress_into_84_90_band():
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[2] / "api" / "routers" / "scanner.py").read_text(
+        encoding="utf-8"
+    )
+    assert "progress_cb=_scan_progress" in src, "API ilerleme geri çağrısını bağlamamış"
+    assert "84 + int(6 * done" in src, "84→90 bandı yayılmıyor"
+
+
+def test_periodic_progress_keeps_slow_scan_alive():
+    """
+    Bekçinin eşiğinden UZUN süren bir tarama, düzenli ilerleme yazdığı sürece
+    asla iptal edilmemeli.
+    """
+    jid = sj.create_exclusive_scan_job()
+    # Eşiğin 3 katı kadar süren tarama; her turda ilerleme geliyor
+    for step in range(3):
+        _age_active_job(sj.STALE_JOB_SECONDS - 30)
+        sj.update_job(jid, status="running", progress=84 + step, phase="scan")
+        assert sj.get_job_public(jid)["status"] == "running", (
+            "ilerleme yazan sağlıklı tarama iptal edildi"
+        )
+    assert sj.current_scan_job_id() == jid
