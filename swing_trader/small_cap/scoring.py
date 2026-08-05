@@ -426,9 +426,3 @@ class SmallCapScoring:
         
         return final_score
     
-    def is_swing_ready(self, boosters: Dict) -> bool:
-        """Check if stock passes swing trade criteria."""
-        if boosters is None:
-            return False
-        return boosters.get('swing_ready', False)
-

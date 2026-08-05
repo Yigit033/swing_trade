@@ -185,14 +185,6 @@ class SmallCapRisk:
 
         return round(target_1, 2), round(target_2, 2)
     
-    def calculate_target(self, entry_price: float, stop_loss: float) -> float:
-        """
-        Legacy single target (backward compatibility).
-        Returns T1 from type-specific targets.
-        """
-        t1, _ = self.calculate_targets(entry_price, stop_loss, 'A')
-        return t1
-    
     def calculate_position_size(
         self,
         portfolio_value: float,
@@ -505,62 +497,3 @@ class SmallCapRisk:
             result['reason'] = str(e)
             return result
     
-    def get_position_management(
-        self,
-        entry_price: float,
-        current_price: float,
-        initial_stop: float,
-        current_position_size: int,
-        portfolio_value: float,
-        atr: float,
-        pyramid_count: int = 0
-    ) -> Dict:
-        """
-        Get complete position management recommendation.
-        
-        Combines trailing stop and pyramid calculations.
-        
-        Returns:
-            {
-                'action': str,  # 'HOLD', 'TRAIL', 'PYRAMID', 'EXIT'
-                'trailing_stop': float,
-                'should_pyramid': bool,
-                'pyramid_size': int,
-                'unrealized_pct': float,
-                'recommendation': str
-            }
-        """
-        # Get trailing stop
-        trail_result = self.calculate_trailing_stop(
-            entry_price, current_price, initial_stop, atr
-        )
-        
-        # Get pyramid recommendation
-        pyramid_result = self.calculate_pyramid(
-            entry_price, current_price, current_position_size,
-            portfolio_value, pyramid_count
-        )
-        
-        # Determine action
-        if current_price <= trail_result['trailing_stop']:
-            action = 'EXIT'
-            recommendation = f"STOP HIT at ${trail_result['trailing_stop']:.2f}"
-        elif pyramid_result['should_pyramid']:
-            action = 'PYRAMID'
-            recommendation = f"ADD {pyramid_result['pyramid_size']} shares at +{pyramid_result['unrealized_pct']:.1f}%"
-        elif trail_result['stop_moved']:
-            action = 'TRAIL'
-            recommendation = f"Move stop to ${trail_result['trailing_stop']:.2f} (+{trail_result['atr_gain']:.1f} ATR gained)"
-        else:
-            action = 'HOLD'
-            recommendation = f"Holding, +{pyramid_result['unrealized_pct']:.1f}% unrealized"
-        
-        return {
-            'action': action,
-            'trailing_stop': trail_result['trailing_stop'],
-            'should_pyramid': pyramid_result['should_pyramid'],
-            'pyramid_size': pyramid_result['pyramid_size'],
-            'unrealized_pct': pyramid_result['unrealized_pct'],
-            'atr_gain': trail_result['atr_gain'],
-            'recommendation': recommendation
-        }

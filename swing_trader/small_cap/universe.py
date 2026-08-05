@@ -528,6 +528,3 @@ class SmallCapUniverse:
         self._last_rank_info = None  # static path: composite sıralama yok
         return self.get_static_universe()[:cap]
 
-    def validate_ticker(self, ticker: str) -> bool:
-        """Check if ticker is valid (not in exclusion list)."""
-        return ticker not in self.EXCLUDED_TICKERS

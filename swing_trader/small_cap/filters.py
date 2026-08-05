@@ -185,24 +185,6 @@ class SmallCapFilters:
         else:  # 60-80M
             return True, f"Float OK ({float_shares/1e6:.0f}M) +0pts"
     
-    def get_float_tier_bonus(self, float_shares: float) -> int:
-        """Get bonus points for float tier. Hard filter at 80M means no penalty tier needed."""
-        if float_shares is None or float_shares <= 0:
-            return 0
-
-        if float_shares <= self.FLOAT_TIER_ATOMIC:   # ≤15M
-            return 20
-        elif float_shares <= self.FLOAT_TIER_MICRO:  # ≤30M
-            return 15
-        elif float_shares <= self.FLOAT_TIER_SMALL:  # ≤45M
-            return 10
-        elif float_shares <= self.FLOAT_TIER_TIGHT:  # ≤60M
-            return 5
-        elif float_shares <= self.MAX_FLOAT:          # 60-80M
-            return 0
-        else:
-            return -100  # hard filter should have caught this
-    
     def check_price(self, price: float) -> Tuple[bool, str]:
         """Check if price is within acceptable range ($3-$200)."""
         if price is None or price <= 0:
@@ -319,8 +301,8 @@ class SmallCapFilters:
         # predominantly LARGE-float (HIMS, SOFI, RKLB, SOUN, TOST, RDDT...),
         # and backtest_mode bypassed this gate (45M default) — so the proven
         # pipeline never enforced it. Keeping it live would reject exactly the
-        # population the edge was measured on. Float tightness still feeds the
-        # quality score via get_float_tier_bonus.
+        # population the edge was measured on. Float sıkılığı kalite skoruna
+        # scoring.score_float_tightness ile giriyor (ağırlık %25).
         float_shares = stock_info.get('floatShares', 0) or stock_info.get('float_shares', 0)
         if backtest_mode and (float_shares is None or float_shares <= 0):
             float_shares = 45_000_000
