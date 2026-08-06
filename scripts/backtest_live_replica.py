@@ -161,6 +161,52 @@ def simulate(df, t, cfg, apply_slippage=True):
     return (realized - slip_pct) * 100  # slippage cezasını düş
 
 
+def simulate_from_entry(df, t, cfg, entry_price, apply_slippage=True):
+    """
+    `simulate` ile AYNI çıkış mantığı, tek farkı GİRİŞ FİYATI dışarıdan verilir.
+
+    2026-08-06'da gün içi giriş ölçümü için eklendi: "kırılım anında girmek
+    ertesi açılışta girmekten iyi mi?" sorusu ancak tek değişken (giriş anı)
+    oynatılarak cevaplanabilir — çıkış, stop, hedef, trail, slippage aynı kalmalı.
+    """
+    o = df["Open"].astype(float).values; c = df["Close"].astype(float).values
+    h = df["High"].astype(float).values; low = df["Low"].astype(float).values
+    n = len(df); e = t + 1
+    if e >= n:
+        return None
+    entry = float(entry_price); atr = float(df["atr"].iloc[t])
+    if entry <= 0 or atr <= 0:
+        return None
+    slip_pct = (2 * _slippage_bps(df, t) / 10000.0) if apply_slippage else 0.0
+    raw_stop = entry - cfg["stop_atr"] * atr
+    cap_stop = entry * (1 - cfg["max_stop_pct"])
+    stop = max(raw_stop, cap_stop)
+    t1 = entry * (1 + cfg["t1_pct"]) if cfg.get("t1_pct") else None
+    t2 = entry * (1 + cfg["t2_pct"]) if cfg.get("t2_pct") else None
+    pos = 1.0; realized = 0.0; peak = entry; t1_done = False
+    last = min(e + cfg["hold"], n - 1)
+    for j in range(e, last + 1):
+        if low[j] <= stop:
+            px = min(o[j], stop) if o[j] < stop else stop
+            realized += pos * (px / entry - 1); pos = 0.0; break
+        if t1 and not t1_done and h[j] >= t1:
+            realized += cfg["t1_frac"] * (t1 / entry - 1)
+            pos -= cfg["t1_frac"]; t1_done = True
+            if cfg.get("be_after_t1"):
+                stop = max(stop, entry)
+        if t2 and h[j] >= t2:
+            realized += pos * (t2 / entry - 1); pos = 0.0; break
+        if h[j] > peak:
+            peak = h[j]
+        if cfg.get("trail_atr") and (peak - entry) / atr >= cfg.get("trail_after", 1.5):
+            nt = peak - cfg["trail_atr"] * atr
+            if nt > stop:
+                stop = nt
+    if pos > 0:
+        realized += pos * (c[last] / entry - 1)
+    return (realized - slip_pct) * 100
+
+
 EXIT_OLD = dict(stop_atr=1.5, max_stop_pct=0.10, t1_pct=0.10, t1_frac=0.5,
                 be_after_t1=True, t2_pct=0.28, trail_atr=2.5, trail_after=2.0, hold=10)
 # t1_frac 0.33 = CANLI değerle AYNI (tracker._t1_partial_fraction → settings

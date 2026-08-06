@@ -437,6 +437,79 @@ baraj rank_score'a kayarsa veya sıralama işaretleri bırakırsa kırılır.
 
 ---
 
+## 7. tur — GİRİŞ ANI: gün içi mi, ertesi açılış mı? (2026-08-06)
+
+Kullanıcı sorusu: *"gün içinde kırılırken ya da geri çekilirken alsak daha çok
+kazanmaz mıyız?"* Fikirle kapatılmadı, ölçüldü. Saatlik bar (yfinance 730g)
+tüm sinyal dönemimizi kapsıyor. Harness: `measure_intraday_entry.py`,
+`measure_intraday_entry_v2.py`, `validate_dip_entry.py`.
+
+### 🔴 Gün içi kırılımda giriş — ÇÜRÜDÜ (fakeout %98)
+
+İlk ölçüm +7.58% dedi. **Geçersizdi**: yalnız KAPANIŞTA GEÇERLİ çıkmış günlerde
+"gün içinde girseydik" hesabı yapıyordu — yani sonucu bilinen günler seçilmişti,
+tüm fakeout'lar ölçümden düşmüştü (ileriye-bakış yanlılığı).
+
+v2'de yalnız o an bilinebilen bilgiyle ölçüldü (t−1 sıkışma + t−1 MA50 üstü +
+gün içi 20g zirve aşımı):
+
+| Kurgu | İşlem | EV | WR | Toplam |
+|---|---|---|---|---|
+| A t+1 açılış (mevcut) | 65 | +5.05% | 66% | +328% |
+| **C2 gün içi, tüm tetikler** | 927 | **−1.77%** | **31%** | **−1643%** |
+| C2c yalnız teyitli alt küme *(yanlı)* | 21 | +15.33% | 81% | +322% |
+
+**927 gün içi tetiğin yalnız 21'i (%2) kapanışta geçerli sinyale dönüştü.**
+O 21 muhteşem, ama hangisinin o 21'den olacağı gün içinde bilinemez — "teyit"
+tam olarak budur. Slot kısıtlı portföyde de her seviyede kaybettiriyor
+(3 slot: +109% → +55.6%).
+
+### 🔴 Saf dip alımı — işlem başına iyi, TOPLAMDA kaybettiriyor
+
+Teyitli sinyalde t+1 açılış yerine dipte (limit = açılış − k×ATR) almak:
+
+| | İşlem | EV | Toplam |
+|---|---|---|---|
+| A hepsi açılıştan | 66 | +5.28% | **+349%** |
+| B yalnız dip −0.25 ATR | 51 | +5.45% | +278% |
+
+Eşleştirilmiş karşılaştırmada dip kazanıyor (+5.45 vs +4.39 aynı işlemlerde),
+**ama %23 sinyal hiç dolmuyor ve kaçanlar EN İYİLERİ:**
+
+> Dip vermeyen 15 sinyal ortalama **+8.32%** — dip verenlerin (+4.39%) iki katı.
+
+Mekanik: gerçekten patlayan hisse sana ucuzluk sunmaz. Dip beklemek en güçlü
+hareketleri sistematik olarak eler.
+
+### ✅ Melez (H) — ölçülen tek kazanan
+
+Dipte dene, **dolmazsa t+1 kapanışta yine al**:
+
+| Q80+ | İşlem | EV | Toplam | TRAIN | OOS |
+|---|---|---|---|---|---|
+| A açılış (mevcut) | 66 | +5.28% | +349% | +7.16% | +3.82% |
+| **H dip −0.25, dolmazsa kapanış** | 66 | **+5.70%** | **+376%** | +7.25% | **+4.49%** |
+| H dip −0.50, dolmazsa kapanış | 66 | +4.94% | +326% | +5.57% | +4.45% |
+
+Tutarlılık kontrollerinin hepsini geçiyor: kalite bantlarında aynı (tümü +0.37,
+Q80+ +0.42), TRAIN/OOS aynı yön, yıl yıl 2024 +0.65 / 2025 +1.42 / 2026 +0.54.
+−0.50 ATR ise kaybettiriyor — yalnız SIĞ dip işe yarıyor.
+
+**Durum: ölçüldü, UYGULANMADI.** Kazanç gerçek ama küçük (+0.42 puan, n=66) ve
+canlı giriş akışının iki adıma çıkmasını gerektiriyor (sabah limit + kapanış
+doldurma). Örneklem büyüyene kadar bekletiliyor.
+
+### Metodolojik ders
+
+Bu turda İKİ kez aynı hataya düştüm ve ikisini de sonraki adım yakaladı:
+1. Sonucu bilinen günleri seçip "gün içinde girseydik" demek (ileriye-bakış).
+2. Dolan işlemlerin ortalamasını tam örneklemle kıyaslamak (doluluk yanlılığı) —
+   düzeltmesi EŞLEŞTİRİLMİŞ karşılaştırma.
+Ayrıca bir fiyat hatası: açılış limitin altındaysa fill AÇILIŞTA olur, limitte
+değil (dip girişini kendi aleyhine hesaplıyordum).
+
+---
+
 ## Ölçülmemiş kalanlar (sonraki tur)
 
 | Katman | Not |
