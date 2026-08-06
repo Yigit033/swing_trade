@@ -137,3 +137,62 @@ def test_no_hardcoded_duplicate_in_tracker(field):
     assert "load_settings" in code, "tracker ayarı hiç okumuyor"
     # 'T1 partial 50%' gibi gömülü metin kalmamalı
     assert not re.search(r"T1 partial \d+%", code), "T1 oranı hâlâ metne gömülü"
+
+
+# ── UI'daki her alan GERÇEK bir ayara bağlı olmalı (2026-08-06) ──────────
+# Type S 2026-08-04'te silindi ama 18 ayar paneli UI'da kaldı: kullanıcı var
+# olmayan bir stratejiyi ayarlıyor sanıyordu. Ölü ayarın en görünür biçimi.
+
+def test_every_ui_settings_field_maps_to_a_real_setting():
+    import re
+    from pathlib import Path
+
+    from swing_trader.small_cap.settings_config import SmallCapSettings
+
+    def leaves(model, prefix=""):
+        out = set()
+        for name, f in model.model_fields.items():
+            ann = f.annotation
+            sub = None
+            if hasattr(ann, "model_fields"):
+                sub = ann
+            else:
+                for a in getattr(ann, "__args__", ()) or ():
+                    if hasattr(a, "model_fields"):
+                        sub = a
+                        break
+            if sub is not None:
+                out |= leaves(sub, prefix + name + ".")
+            else:
+                out.add(prefix + name)
+        return out
+
+    valid = leaves(SmallCapSettings)
+    roots = {v.split(".")[0] for v in valid}
+    # Liste-değerli alanlar UI'da bütün dizi olarak düzenleniyor
+    list_fields = {n for n, f in SmallCapSettings.model_fields.items()}
+    dict_fields = {"max_stop_by_type", "type_position_caps",
+                   "type_atr_multipliers", "type_target_caps"}
+    array_paths = {"scoring_tuning.volume_surge_tiers",
+                   "scoring_tuning.atr_percent_tiers",
+                   "scoring_tuning.float_millions_bands"}
+
+    src = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "app" /
+           "settings" / "page.tsx").read_text(encoding="utf-8")
+
+    bad = []
+    for m in re.finditer(r'\[\s*((?:"[\w]+"\s*,\s*)*"[\w]+")\s*\]', src):
+        parts = [p.strip().strip('"') for p in m.group(1).split(",")]
+        if not parts or parts[0] not in roots | dict_fields:
+            continue
+        dotted = ".".join(parts)
+        if dotted in valid or dotted in array_paths:
+            continue
+        if parts[0] in dict_fields and len(parts) >= 2 and parts[1] in {"C", "A", "B"}:
+            continue
+        bad.append(dotted)
+
+    assert not bad, (
+        "UI'da modelde karşılığı olmayan ayar alanı var — kullanıcı değiştirir, "
+        f"kaydeder, hiçbir şey olmaz: {sorted(set(bad))}"
+    )

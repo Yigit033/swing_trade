@@ -121,3 +121,43 @@ def test_measured_value_is_the_code_default(dotted, expected, kaynak):
     """Bu değerler ölçümle belirlendi; varsayılan onlardan sapmamalı."""
     got = _flat(SmallCapSettings().model_dump(mode="json"))[dotted]
     assert got == expected, f"{dotted}={got}, beklenen {expected} ({kaynak})"
+
+
+# ── Dosya katmanı YAMA tutmalı, tam görüntü DEĞİL (2026-08-06) ───────────
+# Ayrışmanın ÜRETECİ buydu: apply_settings_patch her UI kaydında 198 değeri
+# dosyaya donduruyordu. Sonraki ölçüm iyileştirmeleri bu donmuş kopyanın
+# altında kalıyordu — DB katmanının bilinçle kaçındığı tuzağın aynısı.
+
+def test_file_layer_stores_patch_not_snapshot(tmp_path):
+    from swing_trader.small_cap import settings_config as sc
+
+    p = tmp_path / "s.json"
+    sc.apply_settings_patch({"auto_scan": {"enabled": True}}, path=p)
+    written = json.loads(p.read_text(encoding="utf-8"))
+    assert written == {"auto_scan": {"enabled": True}}, (
+        f"dosyaya tam görüntü yazıldı ({len(written)} üst anahtar) — "
+        "ölçümle iyileşen varsayılanlar bu donmuş kopyanın altında kalır"
+    )
+
+
+def test_file_patches_accumulate(tmp_path):
+    from swing_trader.small_cap import settings_config as sc
+
+    p = tmp_path / "s.json"
+    sc.apply_settings_patch({"auto_scan": {"enabled": True}}, path=p)
+    sc.apply_settings_patch({"max_holding_days": 18}, path=p)
+    written = json.loads(p.read_text(encoding="utf-8"))
+    assert written == {"auto_scan": {"enabled": True}, "max_holding_days": 18}
+
+
+def test_shipped_file_carries_only_real_overrides():
+    """
+    Depodaki dosya yalnız varsayılandan SAPAN değerleri taşımalı. Tekrar eden
+    her değer bir ayrışma adayıdır.
+    """
+    from swing_trader.small_cap.settings_config import SmallCapSettings
+
+    defaults = _flat(SmallCapSettings().model_dump(mode="json"))
+    shipped = _flat(_file_layer())
+    redundant = [k for k, v in shipped.items() if k in defaults and defaults[k] == v]
+    assert not redundant, f"dosyada varsayılanla aynı {len(redundant)} değer var: {redundant[:8]}"

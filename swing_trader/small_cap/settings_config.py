@@ -543,16 +543,30 @@ def load_settings(path: Optional[Path] = None) -> SmallCapSettings:
         return _finish(SmallCapSettings.model_validate(SmallCapSettings().model_dump(mode="json")))
 
 
-def save_settings(settings: SmallCapSettings, path: Optional[Path] = None) -> None:
-    """Write full validated settings to JSON (atomic replace)."""
+def _write_json_layer(data: Dict[str, Any], path: Optional[Path] = None) -> None:
+    """Dosya katmanını atomik yaz."""
     p = path or DEFAULT_SETTINGS_PATH
     p.parent.mkdir(parents=True, exist_ok=True)
-    data = settings.model_dump(mode="json")
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     tmp.replace(p)
     invalidate_settings_cache()
-    logger.info("Saved small-cap settings to %s", p)
+
+
+def save_settings(settings: SmallCapSettings, path: Optional[Path] = None) -> None:
+    """
+    Tam anlık görüntüyü JSON'a yaz. YALNIZ açık `path` ile (dışa aktarma/test).
+
+    UYARI: varsayılan dosya katmanına tam görüntü YAZMA. 2026-08-06'da bulunan
+    hata tam olarak buydu: `apply_settings_patch` her UI kaydında tüm ayarları
+    dosyaya donduruyordu. Sonuç, DB katmanının bilinçli olarak kaçındığı tuzağın
+    aynısı — ölçümle iyileştirilen bir varsayılan, dosyadaki donmuş eski kopya
+    tarafından sessizce eziliyordu. Ayrışma böyle doğdu: 16 alanda kod
+    varsayılanı ölçülmüş değerden sapmıştı ve dosya katmanı çökene kadar
+    (2026-08-05) kimse fark etmedi.
+    """
+    _write_json_layer(settings.model_dump(mode="json"), path)
+    logger.info("Saved full small-cap settings snapshot to %s", path or DEFAULT_SETTINGS_PATH)
 
 
 def apply_settings_patch(
@@ -561,14 +575,19 @@ def apply_settings_patch(
     """
     ``patch``'i mevcut ayarların üstüne birleştir, doğrula ve KALICI olarak sakla.
 
-    Kalıcılık iki katmanlı:
+    Kalıcılık iki katmanlı, İKİSİ DE YAMA:
       1. DB yaması (varsa) — deploy'lardan sağ çıkar, asıl kaynak burasıdır.
       2. JSON dosyası — yerel geliştirme ve DB'siz kurulum için.
 
-    Sadece kullanıcının GÖNDERDİĞİ alanlar yama olarak saklanır (tam anlık görüntü
-    değil). Böylece kod/git varsayılanları ileride değişirse (ör. ölçümle
-    yükseltilen eşikler) kullanıcının dokunmadığı alanlar yeni değeri alır —
-    donmuş eski bir kopya yeni kalibrasyonu sessizce ezmez.
+    Sadece kullanıcının GÖNDERDİĞİ alanlar saklanır (tam anlık görüntü DEĞİL).
+    Böylece kod varsayılanları ileride ölçümle iyileşirse, kullanıcının
+    dokunmadığı alanlar yeni değeri alır — donmuş eski bir kopya yeni
+    kalibrasyonu sessizce ezmez.
+
+    2026-08-06: dosya katmanı EskiDEN tam görüntü yazıyordu ve tam da yukarıda
+    tarif edilen tuzağı üretiyordu. Her UI kaydı 198 değeri dosyaya donduruyor,
+    sonraki ölçüm iyileştirmeleri bu donmuş kopyanın altında kalıyordu. Artık
+    dosya da birikimli yama tutuyor.
 
     Raises pydantic.ValidationError if the merged result is invalid.
     """
@@ -578,8 +597,17 @@ def apply_settings_patch(
     merged = _deep_merge(current, patch)
     validated = SmallCapSettings.model_validate(merged)
 
-    # Dosya katmanı (yerel geliştirme + DB'siz kurulum)
-    save_settings(validated, path=path)
+    # Dosya katmanı: birikimli YAMA (tam görüntü değil)
+    p = path or DEFAULT_SETTINGS_PATH
+    existing: Dict[str, Any] = {}
+    if p.exists():
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                existing = _prune_removed_keys(raw)
+        except Exception as e:
+            logger.warning("Mevcut ayar dosyası okunamadı (%s) — yama sıfırdan yazılıyor", e)
+    _write_json_layer(_deep_merge(existing, patch), path)
 
     # DB katmanı: birikimli yama (önceki yamanın üstüne bu yama)
     if path is None:
