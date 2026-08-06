@@ -150,18 +150,29 @@ def test_every_ui_settings_field_maps_to_a_real_setting():
     from swing_trader.small_cap.settings_config import SmallCapSettings
 
     def leaves(model, prefix=""):
+        """
+        Geçerli ayar yolları. LİSTE alanları (List[Model]) hem kendi adıyla hem
+        alt alanlarıyla geçerlidir — UI onları bütün dizi olarak düzenler.
+
+        NOT: ilk sürüm List[...] içine inmiyordu ve volume_surge_tiers /
+        atr_percent_tiers / float_millions_bands'i "yok" sanıyordu. Elle
+        beyaz-liste yazmak yerine kökten düzeltildi; aksi halde eklenen her yeni
+        liste alanı yanlış alarm üretirdi.
+        """
         out = set()
         for name, f in model.model_fields.items():
             ann = f.annotation
-            sub = None
+            sub, is_list = None, False
             if hasattr(ann, "model_fields"):
                 sub = ann
             else:
                 for a in getattr(ann, "__args__", ()) or ():
                     if hasattr(a, "model_fields"):
-                        sub = a
+                        sub, is_list = a, True
                         break
             if sub is not None:
+                if is_list:
+                    out.add(prefix + name)          # dizinin kendisi de geçerli
                 out |= leaves(sub, prefix + name + ".")
             else:
                 out.add(prefix + name)
@@ -169,13 +180,8 @@ def test_every_ui_settings_field_maps_to_a_real_setting():
 
     valid = leaves(SmallCapSettings)
     roots = {v.split(".")[0] for v in valid}
-    # Liste-değerli alanlar UI'da bütün dizi olarak düzenleniyor
-    list_fields = {n for n, f in SmallCapSettings.model_fields.items()}
     dict_fields = {"max_stop_by_type", "type_position_caps",
                    "type_atr_multipliers", "type_target_caps"}
-    array_paths = {"scoring_tuning.volume_surge_tiers",
-                   "scoring_tuning.atr_percent_tiers",
-                   "scoring_tuning.float_millions_bands"}
 
     src = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "app" /
            "settings" / "page.tsx").read_text(encoding="utf-8")
@@ -186,7 +192,7 @@ def test_every_ui_settings_field_maps_to_a_real_setting():
         if not parts or parts[0] not in roots | dict_fields:
             continue
         dotted = ".".join(parts)
-        if dotted in valid or dotted in array_paths:
+        if dotted in valid:
             continue
         if parts[0] in dict_fields and len(parts) >= 2 and parts[1] in {"C", "A", "B"}:
             continue
