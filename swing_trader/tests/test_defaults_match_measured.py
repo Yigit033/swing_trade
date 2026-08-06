@@ -36,10 +36,11 @@ from swing_trader.small_cap.settings_config import (
     _prune_removed_keys,
 )
 
-# Kullanıcı TERCİHİ olan alanlar — varsayılanla farklı olmaları normaldir.
-# auto_scan.enabled varsayılanı bilinçli False (güvenli); kullanıcının açtığı
-# değer DB yamasında yaşar.
-USER_PREFERENCE_FIELDS = {"auto_scan.enabled"}
+# 2026-08-06: muafiyet listesi BOŞ. auto_scan.enabled varsayılanı True oldu
+# (kullanıcı kararı) ve dosya katmanı boşaldı — artık hiçbir alanın varsayılandan
+# sapmasına gerek yok. Buraya alan eklemek, o alanın iki kaynağı olmasına izin
+# vermek demektir; gerçekten kaçınılmazsa gerekçesini yaz.
+USER_PREFERENCE_FIELDS: set[str] = set()
 
 
 def _flat(d, pre=""):

@@ -239,7 +239,14 @@ class AutoScanSettings(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = False
+    # 2026-08-06: varsayılan False → True (kullanıcı kararı). Ürünün normal
+    # çalışma biçimi bu: her kapanış sonrası taransın, sinyal varsa PENDING
+    # kâğıt pozisyon açılsın. Varsayılan False iken kullanıcının UI'dan açtığı
+    # değer tek başına DB yamasında duruyordu — o yama kaybolduğunda özellik
+    # SESSİZCE kapanıyordu (2026-08-03'te tam olarak bu yaşandı).
+    # NOT: bu ayar açıkken sistem otomatik olarak kâğıt pozisyon AÇAR
+    # (tracker.add_trade_from_signal). Gerçek para değil, kâğıt takip.
+    enabled: bool = True
     # NYSE kapanışından sonraki hedef saat (ET). 16:30 ET = kapanıştan 60dk
     # sonra — Finviz'in günlük Change/Volume/20D-High kolonları o ana kadar
     # sindirilmiş olur (ölçümlerin yapıldığı pencereyle aynı varsayım).
