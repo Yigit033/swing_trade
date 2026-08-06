@@ -62,7 +62,6 @@ class SmallCapFilters:
         uf = self._settings.universe_filters
         self.MIN_MARKET_CAP = uf.min_market_cap
         self.MAX_MARKET_CAP = uf.max_market_cap
-        self.MIN_AVG_VOLUME = uf.min_avg_volume
         self.MAX_FLOAT = uf.max_float_shares
         self.MIN_PRICE = uf.min_price
         self.MAX_PRICE = uf.max_price
@@ -100,15 +99,6 @@ class SmallCapFilters:
             logger.error(f"Error calculating ATR%: {e}")
             return 0.0
     
-    def calculate_avg_volume(self, df: pd.DataFrame, period: int = 20) -> float:
-        """Calculate average share volume over period (kept for display/logging)."""
-        if df is None or len(df) < period:
-            return 0.0
-        try:
-            return float(df['Volume'].tail(period).mean())
-        except Exception:
-            return 0.0
-
     def calculate_avg_dollar_volume(self, df: pd.DataFrame, period: int = 20) -> float:
         """
         Calculate average DOLLAR volume (price × shares) over period.
@@ -273,11 +263,13 @@ class SmallCapFilters:
         if not passed:
             return False, results
         
-        # 2. Dollar Volume — real liquidity gate ($5M/day minimum)
-        avg_vol = self.calculate_avg_volume(df)
+        # 2. Dolar hacim — gerçek likidite kapısı ($5M/gün)
+        # Anahtar adı 2026-08-06'da 'avg_volume' → 'dollar_volume' oldu: /lookup
+        # sayfası bu kapıyı "Ortalama Hacim" diye etiketliyordu, oysa hisse adedi
+        # değil DOLAR hacmi ölçülüyor. Etiket kullanıcıya yanlış kapıyı gösteriyordu.
         avg_dollar_vol = self.calculate_avg_dollar_volume(df)
         passed, reason = self.check_dollar_volume(avg_dollar_vol)
-        results['filters']['avg_volume'] = {'passed': passed, 'reason': reason, 'value': avg_dollar_vol}
+        results['filters']['dollar_volume'] = {'passed': passed, 'reason': reason, 'value': avg_dollar_vol}
         if not passed:
             return False, results
         
@@ -324,7 +316,6 @@ class SmallCapFilters:
         
         results['passed'] = True
         results['atr_percent'] = atr_pct
-        results['avg_volume'] = avg_vol
         results['market_cap'] = market_cap
         results['float_shares'] = float_shares
         

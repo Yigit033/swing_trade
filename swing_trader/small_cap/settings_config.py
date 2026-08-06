@@ -99,8 +99,6 @@ class SmallCapSettings(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: int = Field(default=3, ge=1, le=999)
-
     # --- Signal / filter (live scan + shared semantics) ---
     max_entry_rsi: int = Field(
         default=70,
@@ -157,7 +155,7 @@ class SmallCapSettings(BaseModel):
     type_atr_multipliers: Dict[str, float] = Field(
         default_factory=lambda: {"B": 2.0, "A": 1.8, "C": 1.5}
     )
-    t2_atr_ratio: float = Field(default=2.0, ge=1.0, le=4.0)
+    t2_atr_ratio: float = Field(default=1.7, ge=1.0, le=4.0)
     # v13.4: T2 caps raised so the trailing stop — not a fixed cap — decides
     # the exit on winners. The old +28% cap on Type A/B was the single biggest
     # EV drag (it guillotined the runners that pay for the losers).
@@ -175,14 +173,14 @@ class SmallCapSettings(BaseModel):
     # partial default 0.5 → 0.33: ölçüldü (measure_t1_fraction.py, monotonik,
     # TRAIN+OOS aynı yön; %50 → %33 = +0.42 puan EV).
     partial_at_t1_fraction: float = Field(default=0.33, ge=0.05, le=1.0)
-    min_quality_type_c: int = Field(default=65, ge=30, le=100)
-    min_quality_type_a: int = Field(default=60, ge=30, le=100)
-    min_quality_type_b: int = Field(default=60, ge=30, le=100)
+    min_quality_type_c: int = Field(default=70, ge=30, le=100)
+    min_quality_type_a: int = Field(default=70, ge=30, le=100)
+    min_quality_type_b: int = Field(default=70, ge=30, le=100)
     max_gap_up_pct: float = Field(default=5.0, ge=0.0, le=30.0)
-    max_gap_down_pct: float = Field(default=4.0, ge=0.0, le=30.0)
+    max_gap_down_pct: float = Field(default=7.0, ge=0.0, le=30.0)
     max_loss_per_trade_pct: float = Field(default=0.07, ge=0.02, le=0.25)
     max_gap_risk_portfolio_pct: float = Field(default=0.02, ge=0.005, le=0.1)
-    max_position_cost_portfolio_pct: float = Field(default=0.15, ge=0.05, le=0.5)
+    max_position_cost_portfolio_pct: float = Field(default=0.25, ge=0.05, le=0.5)
     cooldown_days: int = Field(default=5, ge=0, le=30)
     ticker_max_losses: int = Field(default=2, ge=1, le=10)
     slippage_bps_per_side: int = Field(default=5, ge=0, le=100)
@@ -349,6 +347,15 @@ _REMOVED_KEYS = {
     "backtest_exit_trailing.close_gain_atr_15",
     "backtest_exit_trailing.close_trail_atr_15",
     "backtest_exit_trailing",
+    # 2026-08-06: filters.py bunu `self.MIN_AVG_VOLUME`e atıyordu ama o öznitelik
+    # hiçbir yerde OKUNMUYORDU — gerçek likidite kapısı MIN_DOLLAR_VOLUME
+    # ($5M/gün). UI'da ayarlanabiliyordu ve değiştirmek hiçbir şey yapmıyordu.
+    # (Önceki ölü-ayar taramam bunu kaçırmıştı: ATAMA satırını "okuma" sayıyordu.)
+    "universe_filters.min_avg_volume",
+    # 2026-08-06: hiçbir göç/migrasyon mantığı okumuyordu. UI'da bilgi olarak
+    # gösteriliyordu ama dosyada 1, kodda 3 yazıyordu — kullanıcıya çelişkili ve
+    # eyleme dönüşmeyen bir sayı. Sürüm uyumu zaten _REMOVED_KEYS ile sağlanıyor.
+    "schema_version",
 }
 
 

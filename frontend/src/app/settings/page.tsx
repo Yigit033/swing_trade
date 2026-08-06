@@ -1446,15 +1446,9 @@ export default function SettingsPage() {
                     min={1}
                     max={50_000_000_000}
                 />
-                <FieldNum
-                    label="Min ort. hacim"
-                    hint="20g ortalama günlük hacim (adet); likidite tabanı."
-                    value={nn(["universe_filters", "min_avg_volume"], 750000)}
-                    onChange={(v) => sn(["universe_filters", "min_avg_volume"], Math.round(v))}
-                    step={50_000}
-                    min={0}
-                    max={50_000_000}
-                />
+                {/* "Min ort. hacim" (adet) 2026-08-06'da kaldırıldı: hiçbir kod
+                    okumuyordu — gerçek likidite kapısı dolar-hacim ($5M/gün), çünkü
+                    $4'lık 10M adet ($40M) likit, $15'lik 250K adet ($3.75M) ince. */}
                 <FieldNum
                     label="Min fiyat ($)"
                     hint="Penny / çok düşük fiyatları kesmek için."
@@ -2904,29 +2898,6 @@ export default function SettingsPage() {
                 </div>
             </details>
 
-            <details className="glass-card settings-section-details" style={{ padding: 0, marginTop: 8 }}>
-                <summary
-                    style={{
-                        cursor: "pointer",
-                        padding: "12px 16px",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 10,
-                        userSelect: "none",
-                        color: "var(--text-muted)",
-                        fontSize: "0.8rem",
-                    }}
-                >
-                    <ChevronDown size={16} className="settings-section-chevron" aria-hidden />
-                    <span>
-                        Şema sürümü: <strong style={{ color: "var(--text-secondary)" }}>{String(draft.schema_version ?? "—")}</strong>
-                    </span>
-                </summary>
-                <div style={{ padding: "10px 16px 14px", borderTop: "1px solid var(--border-muted)", color: "var(--text-muted)", fontSize: "0.78rem", lineHeight: 1.55 }}>
-                    Bu değer, ayar dosyasının (JSON) yapı sürümüdür. Normal kullanımda değiştirmeniz gerekmez; geriye dönük uyumluluk ve
-                    validasyon için tutulur.
-                </div>
-            </details>
         </div>
     );
 }

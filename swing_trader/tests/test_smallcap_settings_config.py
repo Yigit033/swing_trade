@@ -19,7 +19,6 @@ from swing_trader.small_cap.settings_config import (
 
 def test_default_matches_known_engine_constants():
     d = default_settings()
-    assert d.schema_version == 3
     # 2026-08-04: late_entry_* / parabolic_* / extreme_* SİLİNDİ (ölü ayar +
     # ΔEV 0.00 ölçümü). Kalan iki scan_gate ÖLÇÜLDÜ ve işe yarıyor:
     assert d.scan_gates.reject_stage3 is True
@@ -33,7 +32,11 @@ def test_default_matches_known_engine_constants():
     # 2026-08-04: rank_weight_* / chase_penalty_* SİLİNDİ (composite sıralama
     # tek ölçüte indi — dolar-hacim). R:R kapısı da ölçülüp silindi.
     assert d.regime_thresholds.caution_other_min_quality == 80
-    assert d.backtest_type_quality.type_c_bear == 82
+    # 2026-08-06: kod varsayılanları ölçülmüş (dosya) değerlere hizalandı —
+    # ayrışma canlıda gerçek zarar üretiyordu (dosya katmanı çökünce ürün
+    # sessizce eski/gevşek varsayılanlara düşüyordu). Bkz.
+    # test_defaults_match_measured.py — ayrışmayı kalıcı olarak yasaklıyor.
+    assert d.backtest_type_quality.type_c_bear == 86
     assert len(d.scoring_tuning.volume_surge_tiers) == 8
     assert len(d.scoring_tuning.atr_percent_tiers) == 7
     assert len(d.scoring_tuning.float_millions_bands) == 5

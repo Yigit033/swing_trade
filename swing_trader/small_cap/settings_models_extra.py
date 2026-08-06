@@ -245,7 +245,7 @@ class AutoScanSettings(BaseModel):
     # sindirilmiş olur (ölçümlerin yapıldığı pencereyle aynı varsayım).
     target_hour_et: int = Field(default=16, ge=0, le=23)
     target_minute_et: int = Field(default=30, ge=0, le=59)
-    min_quality: int = Field(default=70, ge=0, le=100)
+    min_quality: int = Field(default=60, ge=0, le=100)
     top_n: int = Field(default=15, ge=1, le=100)
     portfolio_value: float = Field(default=10_000.0, gt=0)
 
@@ -257,10 +257,9 @@ class UniverseFilterSettings(BaseModel):
     # v13.2: raised 2.5B → 10B. The VCE edge was measured cap-agnostic and its
     # strongest contributors (HIMS, CELH, RDDT, TOST, MNDY) are mid-caps.
     max_market_cap: int = 10_000_000_000
-    min_avg_volume: int = 750_000
-    min_price: float = 3.0
+    min_price: float = 7.0
     max_price: float = 200.0
-    max_float_shares: int = 150_000_000
+    max_float_shares: int = 80000000
     earnings_exclusion_days: int = 3
     atr_period: int = 10
 
@@ -297,7 +296,7 @@ class UniverseScanSettings(BaseModel):
     # (DB katmanını atıp dosyayla devam eder) ve _prune_removed_keys aşağıdaki
     # listeyi sessizce temizler.
 
-    post_filter_price_min: float = Field(default=3.0, ge=0.5, le=500.0)
+    post_filter_price_min: float = Field(default=7.0, ge=0.5, le=500.0)
     post_filter_price_max: float = Field(default=200.0, ge=1.0, le=50000.0)
 
     # 2026-08-04 TEMİZLİK — rank_weight_* ve chase_penalty_* SİLİNDİ.
@@ -395,12 +394,12 @@ class BacktestLoopSettings(BaseModel):
 class BacktestTypeQualityOverride(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    type_c_bear: int = 82
-    type_c_caution: int = 75
-    type_a_bear: int = 72
-    type_a_caution: int = 66
-    type_b_bear: int = 67
-    type_b_caution: int = 60
+    type_c_bear: int = 86
+    type_c_caution: int = 82
+    type_a_bear: int = 90
+    type_a_caution: int = 87
+    type_b_bear: int = 85
+    type_b_caution: int = 82
 
 
 class BacktestEntrySettings(BaseModel):

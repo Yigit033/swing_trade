@@ -6,7 +6,7 @@ import { Zap, Plus, CheckCircle, XCircle, Circle, ChevronDown, ChevronUp } from 
 // ── Label maps (engine stage/filter adlarının Türkçe karşılıkları) ────────
 const FILTER_LABELS: Record<string, string> = {
     market_cap: "Piyasa Değeri",
-    avg_volume: "Ortalama Hacim",
+    dollar_volume: "Dolar Hacim (likidite)",
     atr_percent: "Volatilite (ATR%)",
     float: "Float (Halka Açık Pay)",
     earnings: "Kazanç Raporu",
