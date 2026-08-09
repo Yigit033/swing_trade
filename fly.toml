@@ -1,66 +1,31 @@
-# fly.toml app configuration file generated for swing-trade on 2026-03-18T02:58:25+03:00
+# fly.toml app configuration file generated for swing-trade on 2026-08-09T20:08:17+03:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
 app = 'swing-trade'
-primary_region = 'iad'
-
-[build]
+primary_region = 'sin'
 
 [http_service]
   internal_port = 8000
   force_https = true
-  # 2026-07-18: 'stop' → 'suspend'. Python import zinciri (pandas+numpy+yfinance,
-  # lokalde 4.3s, fly shared-cpu'da ~9s) yüzünden stop'tan uyanan makine portu
-  # geç bağlıyor ve fly proxy ~8s'de pes ediyordu (PM05 "failed to connect" →
-  # kullanıcıya "Fly proxy waited too much..."). Suspend RAM anlık görüntüsünden
-  # ~1s'de döner; import maliyeti yalnız deploy sonrası ilk boot'ta kalır
-  # (health check grace_period=30s bunu karşılar). Maliyet stop ile aynı.
-  # 2026-08-04: min_machines_running 0 KALIYOR (7/24 makine ≈ $6/ay — gereksiz).
-  # Sorun: askıya alınmış makinede HİÇBİR arka plan görevi çalışmaz; makine
-  # yalnız gelen HTTP isteğiyle uyanır (logda: 18:32 autosuspend → 18:58 wake).
-  # Bu, auto_scan_loop'u ve pending/exit döngüsünü pratikte hiç çalıştırmıyordu.
-  #
-  # Çözüm 7/24 makine DEĞİL, dışarıdan tetikleme (.github/workflows/daily-run.yml):
-  # GitHub Actions cron her iş günü kapanış sonrası POST /api/scanner/daily-run
-  # çağırır → makine uyanır → pending onayı + çıkış kontrolü + otomatik tarama
-  # koşar → makine tekrar uyur. Maliyet $0.
-  #
-  # Bu bir uzlaşma değil, DAHA DOĞRU bir mimari: strateji GÜNLÜK BAR üzerinde
-  # karar veriyor (stop/T1/trailing/timeout hepsi günlük bar). 5 dakikada bir
-  # kontrol etmek yeni bilgi üretmiyor — kapanış sonrası tek koşu tam da doğru
-  # kadans. Ayrıca in-process asyncio döngüsüne bağımlılık kalkıyor: tetikleyici
-  # dışarıda ve gözlemlenebilir (Actions run geçmişi).
   auto_stop_machines = 'suspend'
   auto_start_machines = true
   min_machines_running = 0
   processes = ['app']
 
-  # 2026-07-22: soft_limit 1 → 200. Tek makineli deployment'ta soft_limit=1,
-  # tarama sırasındaki poll+health trafiğini "aşırı yük" sayıp fly'ı olmayan
-  # 2. makineyi başlatmaya / trafiği dengelemeye zorluyordu ([PR04] "could not
-  # find a good candidate", [PC07] connect fail). Ölçekleme yok (min=max=1),
-  # bu yüzden concurrency limiti yalnız "makine kapanabilir mi" kararını
-  # etkiler — yüksek tutmak tek makinenin tüm istekleri almasını sağlar.
   [http_service.concurrency]
-    type = "requests"
-    soft_limit = 200
+    type = 'requests'
     hard_limit = 250
+    soft_limit = 200
 
-  # Scan 10dk sürebilir — bağlantı timeout önlemi
   [http_service.http_options]
     idle_timeout = 660
 
-  # 2026-07-22: timeout 10s→15s, grace 30s→120s. Tek CPU'da tarama thread'i
-  # (pandas/numpy + yfinance) çalışırken health check event loop'u aç kalıp
-  # timeout'a takılıyor, fly makineyi "unhealthy" sayıp trafiği kesiyor →
-  # frontend poll'u kesiliyor. Uzun grace, tarama süresince (90-120s) tek bir
-  # yavaş health yanıtının makineyi öldürmesini engeller.
   [[http_service.checks]]
     interval = '30s'
     timeout = '15s'
-    grace_period = '120s'
+    grace_period = '2m0s'
     method = 'GET'
     path = '/api/health'
 

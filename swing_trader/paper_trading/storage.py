@@ -44,7 +44,7 @@ def _connect():
         try:
             import psycopg2
             import psycopg2.extras
-            conn = psycopg2.connect(DATABASE_URL, connect_timeout=5)
+            conn = psycopg2.connect(DATABASE_URL, connect_timeout=10)
             return conn
         except Exception as e:
             logger.warning(f"PostgreSQL baglantisi basarisiz ({e.__class__.__name__}): {e}")
