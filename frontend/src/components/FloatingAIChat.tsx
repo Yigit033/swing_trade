@@ -12,7 +12,7 @@ interface Message {
 export default function FloatingAIChat() {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<Message[]>([
-        { role: "ai", content: "Merhaba! Ben Swing Trade AI. Sana nasıl yardımcı olabilirim? 📊" }
+        { role: "ai", content: "Merhaba! Ben Swing Trade AI asistanınım. Trade stratejilerin, risk yönetimin veya pozisyonların hakkında sorular sorabilirsin. 📊" }
     ]);
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
@@ -108,8 +108,8 @@ export default function FloatingAIChat() {
                         placeholder="Bir şeyler sor..."
                         className="floating-chat-input"
                     />
-                    <button 
-                        onClick={handleSend} 
+                    <button
+                        onClick={handleSend}
                         disabled={loading || !input.trim()}
                         className="floating-chat-send-btn"
                     >
@@ -119,8 +119,8 @@ export default function FloatingAIChat() {
             </div>
 
             {/* Tetikleyici Buton */}
-            <button 
-                className={`floating-chat-trigger ${isOpen ? "hidden" : ""}`} 
+            <button
+                className={`floating-chat-trigger ${isOpen ? "hidden" : ""}`}
                 onClick={() => setIsOpen(true)}
                 aria-label="AI ile konuş"
             >
