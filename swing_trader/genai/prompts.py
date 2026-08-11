@@ -19,7 +19,7 @@ from typing import Dict
 SYSTEM_PROMPT = """Sen bir profesyonel swing trading performans analistisın.
 Görevin:
 - Paper trading sisteminin haftalık sonuçlarını analiz etmek
-- Hangi kurulumların (A/B/C/S tipi) daha başarılı olduğunu yorumlamak
+- Hangi kurulumların (A/B/C tipi) daha başarılı olduğunu yorumlamak
 - İyileştirme önerileri sunmak
 
 KURALLAR:
@@ -218,13 +218,13 @@ def build_strategy_chat_prompt(question: str, context: Dict) -> str:
     top_win  = context.get("top_win")
     top_loss = context.get("top_loss")
 
-    # Son 10 trade (token limiti icin)
+    # Son 25 trade (10 cok az kaliyordu, model son durumlari kaciriyordu)
     trade_lines = []
-    for t in trades[:10]:
+    for t in trades[:25]:
         emoji = "V" if t["outcome"] == "WIN" else "X"
         trade_lines.append(
             f"[{emoji}] {t['ticker']} | {t['status']} | "
-            f"P/L:{t['pnl_pct']:+.1f}% | Tip:{t['swing_type']} | R/R:1:{t['rr_ratio']:.1f}"
+            f"P/L:{t['pnl_pct']:+.1f}% | Tip:{t['swing_type']} | R/R:1:{t['rr_ratio']:.1f} | Tarih: {t['exit_date']}"
         )
     trade_block = "\n".join(trade_lines) or "(Trade yok)"
 
@@ -249,7 +249,7 @@ def build_strategy_chat_prompt(question: str, context: Dict) -> str:
         f"  Ort. P/L     : {all_s.get('avg_pnl_pct', 0):+.2f}%\n"
         f"  Profit Factor: {all_s.get('profit_factor', 0):.2f}x\n\n"
         f"SETUP BAZINDA:\n{type_block}\n\n"
-        f"SON TRADELER:\n{trade_block}\n\n"
+        f"SON 25 TRADE:\n{trade_block}\n\n"
         f"EN IYI : {win_ticker} ({win_pnl:+.1f}% - {win_status})\n"
         f"EN KOTU: {loss_ticker} ({loss_pnl:+.1f}% - {loss_status})\n\n"
         f"---\n"

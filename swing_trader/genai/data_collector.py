@@ -124,7 +124,8 @@ class WeeklyDataCollector:
                 "exit_date":   (t.get("exit_date", "") or "")[:10],
             })
 
-        return sorted(result, key=lambda x: x["pnl_pct"], reverse=True)
+        # BUG FIX: P/L'ye gore degil, tarihe gore sirala (en yeniden en eskiye)
+        return sorted(result, key=lambda x: x["exit_date"], reverse=True)
 
     def _compute_summary(self, trades: List[Dict]) -> Dict:
         """İstatistik özeti hesapla."""
