@@ -1,0 +1,21 @@
+{
+  "name": "Swing Trade AI",
+  "short_name": "SwingTrade",
+  "description": "AI-powered swing trading dashboard",
+  "icons": [
+    {
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#0a0f1e",
+  "background_color": "#0a0f1e",
+  "display": "standalone",
+  "start_url": "/"
+}
