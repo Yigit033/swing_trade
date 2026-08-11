@@ -7,6 +7,7 @@ import { Menu } from "lucide-react";
 import { QueryProvider } from "@/providers/QueryProvider";
 import { ScannerJobProvider } from "@/providers/ScannerJobProvider";
 import ScannerScanBanner from "@/components/ScannerScanBanner";
+import FloatingAIChat from "@/components/FloatingAIChat";
 
 const SIDEBAR_COLLAPSED_KEY = "sidebar-collapsed";
 
@@ -82,6 +83,7 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
                     aria-label="Close menu"
                 />
             )}
+            <FloatingAIChat />
             </ScannerJobProvider>
         </QueryProvider>
     );
