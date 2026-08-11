@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
     LayoutDashboard, Search, TrendingUp, Clock, BarChart3,
     LineChart, MessageSquare, Zap, FlaskConical, X, LogOut, Settings, BookOpen,
-    Target,
+    Target, PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 import { createSupabaseClient } from "@/lib/supabase/client";
 
@@ -12,6 +12,8 @@ interface SidebarProps {
     isOpen?: boolean;
     onClose?: () => void;
     isMobile?: boolean;
+    collapsed?: boolean;
+    onToggleCollapse?: () => void;
 }
 
 const navItems = [
@@ -30,7 +32,7 @@ const navItems = [
     { href: "/chat", label: "AI Chat", icon: MessageSquare },
 ];
 
-export default function Sidebar({ isOpen = false, onClose, isMobile = false }: SidebarProps) {
+export default function Sidebar({ isOpen = false, onClose, isMobile = false, collapsed = false, onToggleCollapse }: SidebarProps) {
     const pathname = usePathname();
     const router = useRouter();
     const supabase = createSupabaseClient();
@@ -43,39 +45,48 @@ export default function Sidebar({ isOpen = false, onClose, isMobile = false }: S
         }
     };
 
+    const isCollapsed = collapsed && !isMobile;
+
     return (
-        <aside className={`sidebar ${isMobile && isOpen ? "sidebar-open" : ""}`}>
+        <aside className={`sidebar ${isMobile && isOpen ? "sidebar-open" : ""} ${isCollapsed ? "sidebar-collapsed" : ""}`}>
             {/* Logo */}
-            <div style={{ padding: "20px 18px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <div style={{
-                        width: 36, height: 36, borderRadius: 10,
-                        background: "linear-gradient(135deg, #3b82f6, #8b5cf6)",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: "16px",
-                    }}>📈</div>
-                    <div>
-                        <div style={{ fontWeight: 800, fontSize: "0.95rem", letterSpacing: "-0.02em" }}>
-                            Swing Trade
+            <div className="sidebar-header">
+                <div className="sidebar-logo">
+                    <div className="sidebar-logo-icon">📈</div>
+                    {!isCollapsed && (
+                        <div className="sidebar-logo-text">
+                            <div style={{ fontWeight: 800, fontSize: "0.95rem", letterSpacing: "-0.02em" }}>
+                                Swing Trade
+                            </div>
+                            <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", letterSpacing: "0.06em" }}>
+                                AI DASHBOARD
+                            </div>
                         </div>
-                        <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", letterSpacing: "0.06em" }}>
-                            AI DASHBOARD
-                        </div>
-                    </div>
+                    )}
                 </div>
-                {isMobile && onClose && (
+                {isMobile && onClose ? (
                     <button type="button" onClick={onClose} aria-label="Close menu" className="sidebar-close-btn">
                         <X size={20} />
                     </button>
+                ) : (
+                    !isMobile && onToggleCollapse && (
+                        <button
+                            type="button"
+                            onClick={onToggleCollapse}
+                            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                            className="sidebar-toggle-btn"
+                            title={collapsed ? "Genişlet" : "Daralt"}
+                        >
+                            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+                        </button>
+                    )
                 )}
             </div>
 
             {/* Live indicator */}
-            <div style={{ padding: "10px 18px", borderBottom: "1px solid var(--border-muted)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.72rem", color: "var(--text-secondary)" }}>
-                    <span className="live-dot" />
-                    Live Market Mode
-                </div>
+            <div className="sidebar-live-indicator">
+                <span className="live-dot" />
+                {!isCollapsed && <span>Live Market Mode</span>}
             </div>
 
             {/* Nav */}
@@ -83,10 +94,16 @@ export default function Sidebar({ isOpen = false, onClose, isMobile = false }: S
                 {navItems.map(({ href, label, icon: Icon }) => {
                     const active = pathname === href || (href !== "/" && pathname.startsWith(href));
                     return (
-                        <Link key={href} href={href} className={`sidebar-nav-item ${active ? "active" : ""}`} onClick={isMobile ? onClose : undefined}>
+                        <Link
+                            key={href}
+                            href={href}
+                            className={`sidebar-nav-item ${active ? "active" : ""}`}
+                            onClick={isMobile ? onClose : undefined}
+                            title={isCollapsed ? label : undefined}
+                        >
                             <Icon size={16} />
-                            <span>{label}</span>
-                            {active && (
+                            {!isCollapsed && <span>{label}</span>}
+                            {active && !isCollapsed && (
                                 <div style={{
                                     marginLeft: "auto", width: 4, height: 4,
                                     borderRadius: "50%", background: "var(--accent)",
@@ -98,19 +115,22 @@ export default function Sidebar({ isOpen = false, onClose, isMobile = false }: S
             </nav>
 
             {/* Footer */}
-            <div style={{ padding: "14px 18px", borderTop: "1px solid var(--border)" }}>
-                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: supabase ? 8 : 0 }}>
-                    SmallCap Momentum v2.1
-                </div>
+            <div className="sidebar-footer">
+                {!isCollapsed && (
+                    <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: supabase ? 8 : 0 }}>
+                        SmallCap Momentum v2.1
+                    </div>
+                )}
                 {supabase && (
                     <button
                         type="button"
                         onClick={handleSignOut}
                         className="sidebar-nav-item"
-                        style={{ width: "100%", justifyContent: "flex-start", color: "var(--text-muted)", fontSize: "0.75rem" }}
+                        style={{ width: "100%", justifyContent: isCollapsed ? "center" : "flex-start", color: "var(--text-muted)", fontSize: "0.75rem" }}
+                        title={isCollapsed ? "Sign Out" : undefined}
                     >
                         <LogOut size={14} />
-                        <span>Sign Out</span>
+                        {!isCollapsed && <span>Sign Out</span>}
                     </button>
                 )}
             </div>

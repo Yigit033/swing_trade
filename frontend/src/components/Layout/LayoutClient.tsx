@@ -8,10 +8,13 @@ import { QueryProvider } from "@/providers/QueryProvider";
 import { ScannerJobProvider } from "@/providers/ScannerJobProvider";
 import ScannerScanBanner from "@/components/ScannerScanBanner";
 
+const SIDEBAR_COLLAPSED_KEY = "sidebar-collapsed";
+
 export default function LayoutClient({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [isMobile, setIsMobile] = useState(false);
+    const [collapsed, setCollapsed] = useState(false);
 
     useEffect(() => {
         const check = () => setIsMobile(window.innerWidth < 768);
@@ -19,6 +22,22 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
         window.addEventListener("resize", check);
         return () => window.removeEventListener("resize", check);
     }, []);
+
+    // Persist collapsed state in localStorage
+    useEffect(() => {
+        const stored = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+        if (stored !== null) {
+            setCollapsed(stored === "true");
+        }
+    }, []);
+
+    const toggleCollapse = () => {
+        setCollapsed((prev) => {
+            const next = !prev;
+            localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
+            return next;
+        });
+    };
 
     const closeSidebar = () => setSidebarOpen(false);
     const isLoginPage = pathname === "/login";
@@ -34,8 +53,10 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
                 isOpen={sidebarOpen}
                 onClose={closeSidebar}
                 isMobile={isMobile}
+                collapsed={collapsed}
+                onToggleCollapse={toggleCollapse}
             />
-            <main className="main-content">
+            <main className={`main-content ${collapsed && !isMobile ? "main-content-collapsed" : ""}`}>
                 <ScannerScanBanner />
                 {/* Mobile hamburger — only visible on small screens */}
                 {isMobile && (
