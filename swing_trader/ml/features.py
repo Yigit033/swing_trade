@@ -43,7 +43,7 @@ FEATURE_COLUMNS = [
 ]
 
 # Swing type encoding haritası
-SWING_TYPE_MAP = {"A": 0, "B": 1, "C": 2, "S": 3}
+SWING_TYPE_MAP = {"A": 0, "B": 1, "C": 2}
 
 
 class FeatureEngineer:

@@ -12,7 +12,7 @@ interface Message {
 export default function FloatingAIChat() {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<Message[]>([
-        { role: "ai", content: "Merhaba! Ben Swing Trade AI asistanınım. Trade stratejilerin, risk yönetimin veya pozisyonların hakkında sorular sorabilirsin. 📊" }
+        { role: "ai", content: "Merhaba! Ben Swing Trade Strategy asistanınım. Trade stratejilerin, risk yönetimin veya pozisyonların hakkında sorular sorabilirsin. 📊" }
     ]);
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);

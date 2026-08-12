@@ -192,7 +192,7 @@ STRATEGY_CHAT_SYSTEM = (
     "- Dogrudan 'su hisseyi al' gibi tavsiye verme\n"
     "- Turkce ve sade konus\n"
     "- Somut sayilar kullan\n"
-    "- Maksimum 200 kelime"
+    "- Maksimum 300 kelime"
 )
 
 
