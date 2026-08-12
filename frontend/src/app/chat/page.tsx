@@ -458,12 +458,20 @@ export default function ChatPage() {
                 <TabBtn active={tab === "predict"} icon={<Crosshair size={14} />} label="Canlı Sinyal Testi" onClick={() => setTab("predict")} />
             </div>
 
-            {/* Tab content */}
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-                {tab === "chat" && <ChatTab />}
-                {tab === "weekly" && <WeeklyReportTab />}
-                {tab === "model" && <ModelTab />}
-                {tab === "predict" && <PredictTab />}
+            {/* Tab content (State Preservation via CSS Display) */}
+            <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+                <div style={{ display: tab === "chat" ? "flex" : "none", flexDirection: "column", height: "100%" }}>
+                    <ChatTab />
+                </div>
+                <div style={{ display: tab === "weekly" ? "flex" : "none", flexDirection: "column", height: "100%" }}>
+                    <WeeklyReportTab />
+                </div>
+                <div style={{ display: tab === "model" ? "flex" : "none", flexDirection: "column", height: "100%" }}>
+                    <ModelTab />
+                </div>
+                <div style={{ display: tab === "predict" ? "flex" : "none", flexDirection: "column", height: "100%" }}>
+                    <PredictTab />
+                </div>
             </div>
         </div>
     );
