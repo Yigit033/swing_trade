@@ -21,7 +21,7 @@ from typing import Dict, Optional
 
 from .data_collector import WeeklyDataCollector
 from .llm_client import LLMClient
-from .prompts import SYSTEM_PROMPT, build_weekly_report_prompt
+from .prompts import WEEKLY_REPORT_SYSTEM, build_weekly_report_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -112,14 +112,14 @@ class WeeklyReporter:
         # 4. LLM raporu üret
         try:
             prompt  = build_weekly_report_prompt(context)
-            report  = self.client.complete(
+            report_text = self.client.complete(
                 prompt=prompt,
-                system_prompt=SYSTEM_PROMPT,
+                system_prompt=WEEKLY_REPORT_SYSTEM,
                 max_tokens=1500,
                 temperature=0.5,
             )
 
-            if not report:
+            if not report_text:
                 raise ValueError("LLM boş cevap döndürdü")
 
             # Header ekle
@@ -129,7 +129,7 @@ class WeeklyReporter:
                 f"*{period.get('start', '?')} — {period.get('end', '?')} | "
                 f"Oluşturuldu: {datetime.now().strftime('%d %b %Y %H:%M')}*\n\n---\n\n"
             )
-            full_report = header + report
+            full_report = header + report_text
 
             # 5. Önbelleğe kaydet
             self._save_cache(full_report, context)

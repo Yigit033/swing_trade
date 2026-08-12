@@ -22,7 +22,7 @@ from typing import Dict
 # A: HAFTALIK RAPOR
 # ════════════════════════════════════════════════════
 
-SYSTEM_PROMPT = """Sen bir profesyonel swing trading performans analistisin.
+WEEKLY_REPORT_SYSTEM = """Sen bir profesyonel swing trading performans analistisin.
 Görevin:
 - Paper trading sisteminin haftalık sonuçlarını analiz etmek
 - Hangi kurulumların (A/B/C tipi) daha başarılı olduğunu yorumlamak
@@ -241,9 +241,9 @@ def build_strategy_chat_prompt(question: str, context: Dict) -> str:
     open_pos = context.get("open_positions", [])
     regime   = context.get("market_regime", {})
 
-    # Son 25 trade
+    # Tüm trade geçmişini LLM'e ver (RAG-lite 25 kısıtı kaldırıldı)
     trade_lines = []
-    for t in trades[:25]:
+    for t in trades:
         emoji = "✅" if t["outcome"] == "WIN" else "❌"
         trade_lines.append(
             f"[{emoji}] {t['ticker']} | {t['status']} | "
@@ -280,7 +280,7 @@ def build_strategy_chat_prompt(question: str, context: Dict) -> str:
         f"  Profit Factor: {all_s.get('profit_factor', 0):.2f}x\n\n"
         f"SETUP BAZINDA:\n{type_block}\n\n"
         f"{open_block}\n"
-        f"SON 25 TRADE:\n{trade_block}\n\n"
+        f"TÜM TRADE GEÇMİŞİ:\n{trade_block}\n\n"
         f"EN İYİ : {win_ticker} ({win_pnl:+.1f}% - {win_status})\n"
         f"EN KÖTÜ: {loss_ticker} ({loss_pnl:+.1f}% - {loss_status})\n\n"
         f"---\n"
