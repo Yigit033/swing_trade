@@ -329,8 +329,8 @@ export const lookupTickers = (tickers: string[], portfolio_value = 10000) =>
     api.post("/api/lookup", { tickers, portfolio_value }).then((r) => r.data);
 
 // GenAI
-export const chatWithAI = (message: string, history: unknown[] = []) =>
-    api.post("/api/genai/chat", { message, history }).then((r) => r.data);
+export const chatWithAI = (message: string, history: unknown[] = [], verbosity: "brief" | "detailed" = "detailed") =>
+    api.post("/api/genai/chat", { message, history, verbosity }).then((r) => r.data);
 
 export const getSignalBrief = (ticker: string, signal: Signal) =>
     api.post("/api/genai/signal-brief", { ticker, signal }).then((r) => r.data);

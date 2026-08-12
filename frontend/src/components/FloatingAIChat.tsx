@@ -12,6 +12,7 @@ interface Message {
 export default function FloatingAIChat() {
     const [isOpen, setIsOpen] = useState(false);
     const [isExpanded, setIsExpanded] = useState(false);
+    const [verbosity, setVerbosity] = useState<"brief" | "detailed">("detailed");
     const [messages, setMessages] = useState<Message[]>([
         { role: "ai", content: "Merhaba! Ben Swing Trade Strategy asistanınım. Trade stratejilerin, risk yönetimin veya pozisyonların hakkında sorular sorabilirsin. 📊" }
     ]);
@@ -37,7 +38,7 @@ export default function FloatingAIChat() {
         const history = messages.map(m => ({ role: m.role, content: m.content }));
 
         try {
-            const res = await chatWithAI(text, history);
+            const res = await chatWithAI(text, history, verbosity);
             setMessages((prev) => [...prev, { role: "ai", content: res.answer || "Yanıt alınamadı." }]);
         } catch {
             setMessages((prev) => [...prev, { role: "ai", content: "❌ API bağlantısı kurulamadı." }]);
@@ -61,7 +62,19 @@ export default function FloatingAIChat() {
                             <span style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.7)" }}>Sana özel analiz</span>
                         </div>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <button 
+                            onClick={() => setVerbosity(v => v === "detailed" ? "brief" : "detailed")}
+                            style={{ 
+                                fontSize: "0.65rem", padding: "4px 8px", borderRadius: "12px", border: "none", cursor: "pointer",
+                                background: verbosity === "brief" ? "rgba(59, 130, 246, 0.4)" : "rgba(255, 255, 255, 0.1)",
+                                color: "#fff", transition: "all 0.2s"
+                            }}
+                            title="Yanıt Uzunluğu"
+                        >
+                            {verbosity === "brief" ? "⚡ Kısa Mod" : "📝 Detaylı Mod"}
+                        </button>
+                        <div style={{ width: "1px", height: "16px", background: "rgba(255,255,255,0.2)", margin: "0 2px" }}></div>
                         <button onClick={() => setIsExpanded(!isExpanded)} className="floating-chat-action-btn">
                             {isExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
                         </button>

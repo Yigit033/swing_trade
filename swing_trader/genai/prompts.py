@@ -211,12 +211,15 @@ STRATEGY_CHAT_SYSTEM = (
     "genel sorular sorarsa, kendi devasa bilgi dağarcığını kullanarak detaylıca cevapla. Bu tür sorularda 'Sağlanan veride bu bilgi yok' DEME.\n"
     "4. TAVSİYE SINIRI: Strateji, eğitim ve piyasa yorumu yap; ancak asla 'Şu hisseyi al/sat' şeklinde "
     "kesin yatırım danışmanlığı (YTD) yapma.\n"
-    "5. FORMAT: Kusursuz, akıcı ve samimi bir Türkçe kullan. Cevaplarını kalın yazılar, maddeler ve emojilerle (gerekirse) "
+    "5. UYARLANABİLİR UZUNLUK (ADAPTIVE VERBOSITY): Cevap uzunluğunu sorunun derinliğine göre ayarla. Kullanıcı basit bir "
+    "'Evet/Hayır' veya net bir veri soruyorsa SADECE 1-2 cümlelik çok kısa ve öz cevaplar ver. Gereksiz felsefe yapma. "
+    "Ancak kullanıcı 'Neden?', 'Nasıl?' derse veya kapsamlı bir analiz isterse, o zaman detaylı ve uzun açıklamalar yap.\n"
+    "6. FORMAT: Kusursuz, akıcı ve samimi bir Türkçe kullan. Cevaplarını kalın yazılar, maddeler ve emojilerle (gerekirse) "
     "görsel olarak zenginleştirerek (Markdown) ver."
 )
 
 
-def build_strategy_chat_prompt(question: str, context: Dict) -> str:
+def build_strategy_chat_prompt(question: str, context: Dict, verbosity: str = "detailed") -> str:
     """
     Kullanıcının sorusunu ve tüm trade geçmişini birleştirip LLM'e
     göndermek için prompt.
@@ -232,6 +235,7 @@ def build_strategy_chat_prompt(question: str, context: Dict) -> str:
     Args:
         question: "Bu hafta neden kaybettik?" gibi soru
         context:  WeeklyDataCollector.collect() çıktısı
+        verbosity: "brief" veya "detailed"
     """
     all_s    = context.get("all_time_summary", {})
     by_type  = context.get("by_swing_type", {})
@@ -270,6 +274,10 @@ def build_strategy_chat_prompt(question: str, context: Dict) -> str:
     # Market regime bloğu
     regime_block = _build_regime_block(regime)
 
+    brief_instruction = ""
+    if verbosity == "brief":
+        brief_instruction = "\n\n[DİKKAT: KULLANICI BU SORU İÇİN ÇOK KISA VE ÖZ BİR CEVAP (MAKS 2 CÜMLE) İSTİYOR. DETAYA GİRME VE UZATMA.]"
+
     return (
         f"SİSTEM VERİSİ (bu veriye dayanarak cevap ver):\n\n"
         f"{regime_block}\n"
@@ -286,7 +294,7 @@ def build_strategy_chat_prompt(question: str, context: Dict) -> str:
         f"---\n"
         f"KULLANICININ SORUSU: {question}\n"
         f"---\n\n"
-        f"Kullanıcının sorusunu yukarıdaki kurallara (Persona'na) uygun şekilde yanıtla."
+        f"Kullanıcının sorusunu yukarıdaki kurallara (Persona'na) uygun şekilde yanıtla.{brief_instruction}"
     )
 
 

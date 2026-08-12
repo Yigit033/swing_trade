@@ -40,6 +40,7 @@ function ChatTab() {
     ]);
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
+    const [verbosity, setVerbosity] = useState<"brief" | "detailed">("detailed");
     const bottomRef = useRef<HTMLDivElement>(null);
     useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
@@ -51,7 +52,7 @@ function ChatTab() {
         setLoading(true);
         const history = messages.map(m => ({ role: m.role, content: m.content }));
         try {
-            const res = await chatWithAI(message, history);
+            const res = await chatWithAI(message, history, verbosity);
             setMessages(prev => [...prev, { role: "ai", content: res.answer || "Yanıt alınamadı." }]);
         } catch {
             setMessages(prev => [...prev, { role: "ai", content: "❌ API bağlantısı kurulamadı." }]);
@@ -96,7 +97,18 @@ function ChatTab() {
                     )}
                     <div ref={bottomRef} />
                 </div>
-                <div style={{ padding: "14px 18px", borderTop: "1px solid var(--border)", display: "flex", gap: 10 }}>
+                <div style={{ padding: "14px 18px", borderTop: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "center" }}>
+                    <button 
+                        onClick={() => setVerbosity(v => v === "detailed" ? "brief" : "detailed")}
+                        style={{ 
+                            fontSize: "0.75rem", padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border)", cursor: "pointer",
+                            background: verbosity === "brief" ? "rgba(59, 130, 246, 0.2)" : "transparent",
+                            color: verbosity === "brief" ? "#3b82f6" : "var(--text-secondary)", transition: "all 0.2s", flexShrink: 0
+                        }}
+                        title="Yanıt Uzunluğu"
+                    >
+                        {verbosity === "brief" ? "⚡ Kısa Yanıt" : "📝 Detaylı Yanıt"}
+                    </button>
                     <input className="input" value={input} onChange={e => setInput(e.target.value)}
                         onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
                         placeholder="Strateji, risk yönetimi, trade fikirleri hakkında sor..." />

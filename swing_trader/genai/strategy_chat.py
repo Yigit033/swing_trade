@@ -47,12 +47,13 @@ class StrategyChat:
         """LLM ve veri hazır mı?"""
         return self.client.is_ready()
 
-    def ask(self, question: str) -> Dict:
+    def ask(self, question: str, verbosity: str = "detailed") -> Dict:
         """
         Kullanıcının sorusunu tüm trade geçmişiyle birlikte LLM'e gönder.
 
         Args:
             question: "Bu hafta neden kaybettik?" gibi serbest soru
+            verbosity: "detailed" | "brief" - İstenen cevap uzunluğu
 
         Returns:
             {
@@ -90,8 +91,8 @@ class StrategyChat:
             }
 
         try:
-            # 3. Soruyu + context'i birleştir (RAG-lite)
-            prompt = build_strategy_chat_prompt(question, context)
+            # 3. Prompt oluştur
+            prompt = build_strategy_chat_prompt(question, context, verbosity=verbosity)
 
             # 4. LLM'e gönder
             # max_tokens: Detaylı analiz/özet için yeterli olmalı (1200 → 3000)

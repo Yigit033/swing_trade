@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 class ChatRequest(BaseModel):
     message: str
     history: Optional[list] = []
+    verbosity: Optional[str] = "detailed"
 
 
 class SignalBriefRequest(BaseModel):
@@ -53,7 +54,7 @@ async def strategy_chat(body: ChatRequest):
             f"available={chat.client.available}, ready={chat.client.is_ready()}"
         )
 
-        result = chat.ask(body.message)
+        result = chat.ask(body.message, verbosity=body.verbosity)
         return {
             "answer": result.get("answer", "Cevap alınamadı"),
             "llm_available": result.get("llm_available", False),
