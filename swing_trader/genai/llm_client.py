@@ -106,7 +106,6 @@ class LLMClient:
     def _setup_gemini(self):
         """Google Gemini client kurulumu."""
         api_key = os.getenv("GEMINI_API_KEY", "")
-        logger.info(f"Gemini setup: key_exists={bool(api_key)}, key_starts_with_your={api_key.startswith('your_') if api_key else 'N/A'}, key_len={len(api_key)}")
         if not api_key or api_key.startswith("your_"):
             logger.info("GEMINI_API_KEY bulunamadı — AI rapor özelliği pasif")
             return
@@ -114,7 +113,11 @@ class LLMClient:
         try:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
-            self._client = genai.GenerativeModel(self.model)
+            # NOT: Model'i burada oluşturmuyoruz.
+            # Her complete() çağrısında system_instruction ile birlikte
+            # yeni bir model instance yaratılacak — bu Gemini'ın resmi
+            # yöntemidir ve system prompt'un "kural" olarak algılanmasını sağlar.
+            self._client = genai  # genai modülünü referans olarak tut
             self.available = True
             logger.info(f"Gemini client hazır: {self.model}")
         except ImportError:
@@ -130,7 +133,7 @@ class LLMClient:
         self,
         prompt: str,
         system_prompt: str = "",
-        max_tokens: int = 1000000,
+        max_tokens: int = 4096,
         temperature: float = 0.5,
     ) -> Optional[str]:
         """
@@ -183,9 +186,24 @@ class LLMClient:
         return response.choices[0].message.content.strip()
 
     def _complete_gemini(self, prompt, system_prompt, max_tokens, temperature) -> str:
-        full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
-        response = self._client.generate_content(
-            full_prompt,
+        # ── Gemini system_instruction kullanımı ──────────────────────
+        # ESKİ (yanlış): system_prompt + prompt yapıştırılıp tek mesaj
+        #   olarak gönderiliyordu. Gemini bunu "kullanıcı mesajı" olarak
+        #   görüyordu ve kurallara gevşek uyuyordu.
+        #
+        # YENİ (doğru): Gemini API'nin resmi system_instruction parametresi
+        #   kullanılıyor. Bu parametre model'e "sen kimsin, kuralların ne"
+        #   bilgisini ayrı bir kanaldan aktarır. Model artık kurallara
+        #   çok daha sıkı uyuyor (hallucination azalır, format tutarlılığı artar).
+        # ─────────────────────────────────────────────────────────────
+        model_kwargs = {"model_name": self.model}
+        if system_prompt:
+            model_kwargs["system_instruction"] = system_prompt
+
+        model = self._client.GenerativeModel(**model_kwargs)
+
+        response = model.generate_content(
+            prompt,
             generation_config={
                 "max_output_tokens": max_tokens,
                 "temperature": temperature,

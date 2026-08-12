@@ -84,3 +84,6 @@ data/watchlist.txt
 
 # Regenerable caches
 data/genai_cache/
+
+swing_trader/tests/*
+

@@ -7,6 +7,12 @@ Her özellik için:
 
 Her yeni özellik aynı 4 adımı izler:
   VERİ → PROMPT → LLM (client.complete) → ÇIKTI
+
+v2.0 İyileştirmeler:
+  - Türkçe karakter desteği (UTF-8)
+  - Açık pozisyonlar prompt'a eklendi
+  - Market regime bilgisi prompt'a eklendi
+  - 300 kelime limiti kaldırıldı (soru karmaşıklığına göre uzasın)
 """
 
 from typing import Dict
@@ -16,7 +22,7 @@ from typing import Dict
 # A: HAFTALIK RAPOR
 # ════════════════════════════════════════════════════
 
-SYSTEM_PROMPT = """Sen bir profesyonel swing trading performans analistisın.
+SYSTEM_PROMPT = """Sen bir profesyonel swing trading performans analistisin.
 Görevin:
 - Paper trading sisteminin haftalık sonuçlarını analiz etmek
 - Hangi kurulumların (A/B/C tipi) daha başarılı olduğunu yorumlamak
@@ -42,13 +48,15 @@ def build_weekly_report_prompt(context: Dict) -> str:
     by_type  = context.get("by_swing_type", {})
     top_win  = context.get("top_win")
     top_loss = context.get("top_loss")
+    open_pos = context.get("open_positions", [])
+    regime   = context.get("market_regime", {})
 
     period_str = f"{period.get('start', '?')} - {period.get('end', '?')}"
 
     if trades:
         trade_lines = []
         for t in trades:
-            emoji = "V" if t["outcome"] == "WIN" else "X"
+            emoji = "✅" if t["outcome"] == "WIN" else "❌"
             trade_lines.append(
                 f"  [{emoji}] {t['ticker']:6} | {t['status']:8} | "
                 f"P/L:{t['pnl_pct']:+.2f}% | R/R:1:{t['rr_ratio']:.1f} | "
@@ -56,7 +64,7 @@ def build_weekly_report_prompt(context: Dict) -> str:
             )
         trade_block = "\n".join(trade_lines)
     else:
-        trade_block = "  (Bu donemde kapanan trade yok)"
+        trade_block = "  (Bu dönemde kapanan trade yok)"
 
     type_lines = []
     for st in sorted(by_type.keys()):
@@ -68,36 +76,44 @@ def build_weekly_report_prompt(context: Dict) -> str:
 
     extremes = ""
     if top_win:
-        extremes += f"  En Iyi: {top_win['ticker']} -> {top_win['pnl_pct']:+.2f}% ({top_win['status']})\n"
+        extremes += f"  En İyi: {top_win['ticker']} -> {top_win['pnl_pct']:+.2f}% ({top_win['status']})\n"
     if top_loss:
-        extremes += f"  En Kotu: {top_loss['ticker']} -> {top_loss['pnl_pct']:+.2f}% ({top_loss['status']})"
+        extremes += f"  En Kötü: {top_loss['ticker']} -> {top_loss['pnl_pct']:+.2f}% ({top_loss['status']})"
+
+    # Açık pozisyonlar bloğu
+    open_block = _build_open_positions_block(open_pos)
+
+    # Market regime bloğu
+    regime_block = _build_regime_block(regime)
 
     return (
-        f"Asagidaki paper trading verilerini analiz et ve haftalik performans raporu yaz.\n\n"
-        f"DONEM: {period_str}\n\n"
-        f"HAFTALIK OZET:\n"
+        f"Aşağıdaki paper trading verilerini analiz et ve haftalık performans raporu yaz.\n\n"
+        f"DÖNEM: {period_str}\n\n"
+        f"{regime_block}\n"
+        f"HAFTALIK ÖZET:\n"
         f"  Toplam Trade  : {weekly.get('total', 0)}\n"
-        f"  Kazanilan     : {weekly.get('wins', 0)} (%{weekly.get('win_rate', 0):.1f})\n"
+        f"  Kazanılan     : {weekly.get('wins', 0)} (%{weekly.get('win_rate', 0):.1f})\n"
         f"  Kaybedilen    : {weekly.get('losses', 0)}\n"
         f"  Toplam P/L    : {weekly.get('total_pnl_pct', 0):+.2f}%\n"
         f"  Ort. P/L/Trade: {weekly.get('avg_pnl_pct', 0):+.2f}%\n"
-        f"  Ort. Kazanc   : {weekly.get('avg_win_pct', 0):+.2f}%\n"
-        f"  Ort. Kayip    : {weekly.get('avg_loss_pct', 0):+.2f}%\n"
+        f"  Ort. Kazanç   : {weekly.get('avg_win_pct', 0):+.2f}%\n"
+        f"  Ort. Kayıp    : {weekly.get('avg_loss_pct', 0):+.2f}%\n"
         f"  Profit Factor : {weekly.get('profit_factor', 0):.2f}x\n\n"
-        f"BU DONEM KAPANAN TRADELER:\n{trade_block}\n\n"
-        f"TUM ZAMANLARIN OZETI (bagbam icin):\n"
+        f"BU DÖNEM KAPANAN TRADE'LER:\n{trade_block}\n\n"
+        f"{open_block}\n"
+        f"TÜM ZAMANLARIN ÖZETİ (kıyaslama için):\n"
         f"  Toplam Trade  : {all_time.get('total', 0)}\n"
         f"  Win Rate      : %{all_time.get('win_rate', 0):.1f}\n"
         f"  Ort. P/L      : {all_time.get('avg_pnl_pct', 0):+.2f}%\n\n"
-        f"SWING TIPI BAZINDA:\n{type_block}\n\n"
-        f"ONE CIKANLAR:\n{extremes if extremes else '  (Veri yok)'}\n\n"
-        f"Lutfen su basliklar altinda bir Turkce rapor yaz:\n\n"
-        f"## Haftalik Ozet\n"
-        f"## Bu Hafta Neler Iyi Gitti?\n"
-        f"## Neler Iyilestirilebilir?\n"
+        f"SWING TİPİ BAZINDA:\n{type_block}\n\n"
+        f"ÖNE ÇIKANLAR:\n{extremes if extremes else '  (Veri yok)'}\n\n"
+        f"Lütfen şu başlıklar altında bir Türkçe rapor yaz:\n\n"
+        f"## Haftalık Özet\n"
+        f"## Bu Hafta Neler İyi Gitti?\n"
+        f"## Neler İyileştirilebilir?\n"
         f"## Setup Analizi\n"
-        f"## Onumüzdeki Hafta Icin 3 Oneri\n\n"
-        f"Rapor 300-400 kelime olsun. Dogrudan yatirim tavsiyesi verme."
+        f"## Önümüzdeki Hafta İçin 3 Öneri\n\n"
+        f"Rapor 300-400 kelime olsun. Doğrudan yatırım tavsiyesi verme."
     )
 
 
@@ -109,27 +125,27 @@ def build_weekly_report_prompt(context: Dict) -> str:
 #   1. VERİ    → scanner signal dict (entry, stop, target, atr, quality...)
 #   2. PROMPT  → build_signal_briefing_prompt() bunu metin haline getirir
 #   3. LLM     → client.complete() — her zaman aynı satır
-#   4. ÇIKTI   → sinyal kartı altındaki st.info() kutusu
+#   4. ÇIKTI   → sinyal kartı altındaki bilgi kutusu
 #
 # Haftalık rapordan farkı: çok kısa (2-3 cümle), tek sinyal için, anlık.
 
 SIGNAL_BRIEFING_SYSTEM = (
     "Sen bir swing trading sinyal yorumcususun.\n"
-    "Gorev: Verilen teknik kurulum verisini 2-3 cumleyle Turkce degerlendir.\n"
+    "Görev: Verilen teknik kurulum verisini 2-3 cümleyle Türkçe değerlendir.\n"
     "KURALLAR:\n"
     "- Asla 'al' veya 'sat' deme\n"
-    "- Sadece verilen sayilara bak\n"
-    "- Maksimum 3 cumle\n"
-    "- Turkce yaz, teknik terimler Ingilizce olabilir (ATR, R/R vs.)"
+    "- Sadece verilen sayılara bak\n"
+    "- Maksimum 3 cümle\n"
+    "- Türkçe yaz, teknik terimler İngilizce olabilir (ATR, R/R vs.)"
 )
 
 
 def build_signal_briefing_prompt(signal: Dict) -> str:
     """
-    Tek bir scanner sinyali icin kisa AI brifingi ureten prompt.
+    Tek bir scanner sinyali için kısa AI brifingi üreten prompt.
 
-    Nasil calisir:
-      scanner dict gelir -> sayilar metin haline gelir -> LLM 2-3 cumle yazar
+    Nasıl çalışır:
+      scanner dict gelir -> sayılar metin haline gelir -> LLM 2-3 cümle yazar
 
     Args:
         signal: Scanner signal dict
@@ -143,29 +159,28 @@ def build_signal_briefing_prompt(signal: Dict) -> str:
     stype   = signal.get("swing_type", "?")
     ticker  = signal.get("ticker", "?")
 
-    # ONEMLI: Bu hesaplamalar LLM yapmıyor — biz yapip LLM'e hazir veriyoruz.
-    # Bu Hybrid Architecture'in ozü: deterministik hesap + LLM yorum.
+    # ÖNEMLİ: Bu hesaplamalar LLM yapmıyor — biz yapıp LLM'e hazır veriyoruz.
+    # Bu Hybrid Architecture'ın özü: deterministik hesap + LLM yorum.
     risk_pct   = abs(entry - stop) / entry * 100 if entry else 0
     reward_pct = abs(target - entry) / entry * 100 if entry else 0
     rr_ratio   = reward_pct / risk_pct if risk_pct > 0 else 0
     atr_pct    = atr / entry * 100 if entry else 0
-    
 
-    rr_label  = "guclu" if rr_ratio >= 3.0 else "orta" if rr_ratio >= 2.0 else "dusuk"
-    atr_label = "yuksek volatilite" if atr_pct > 5 else "normal volatilite"
-    q_label   = "yuksek kaliteli" if quality >= 8 else "orta kaliteli" if quality >= 6 else "dusuk kaliteli"
+    rr_label  = "güçlü" if rr_ratio >= 3.0 else "orta" if rr_ratio >= 2.0 else "düşük"
+    atr_label = "yüksek volatilite" if atr_pct > 5 else "normal volatilite"
+    q_label   = "yüksek kaliteli" if quality >= 8 else "orta kaliteli" if quality >= 6 else "düşük kaliteli"
     return (
-        f"Asagidaki swing trade sinyalini 2-3 cumleyle degerlendir:\n\n"
-        f"HISSE: {ticker} | Tip: {stype} | Kalite: {quality}/10 ({q_label})\n\n"
-        f"TEKNIK KURULUM:\n"
+        f"Aşağıdaki swing trade sinyalini 2-3 cümleyle değerlendir:\n\n"
+        f"HİSSE: {ticker} | Tip: {stype} | Kalite: {quality}/10 ({q_label})\n\n"
+        f"TEKNİK KURULUM:\n"
         f"  Entry     : ${entry:.2f}\n"
         f"  Stop Loss : ${stop:.2f}  -> Risk: %{risk_pct:.1f}\n"
-        f"  Target    : ${target:.2f} -> Kazanc Potansiyeli: %{reward_pct:.1f}\n"
-        f"  R/R Orani : 1:{rr_ratio:.1f} ({rr_label})\n"
+        f"  Target    : ${target:.2f} -> Kazanç Potansiyeli: %{reward_pct:.1f}\n"
+        f"  R/R Oranı : 1:{rr_ratio:.1f} ({rr_label})\n"
         f"  ATR       : ${atr:.2f} (%{atr_pct:.1f} - {atr_label})\n\n"
-        f"Kurulumun guclu ve zayif yonlerini belirt. "
-        f"Dogrudan al/sat tavsiyesi verme. "
-        f"3 cumleyi gecme."
+        f"Kurulumun güçlü ve zayıf yönlerini belirt. "
+        f"Doğrudan al/sat tavsiyesi verme. "
+        f"3 cümleyi geçme."
     )
 
 
@@ -174,54 +189,58 @@ def build_signal_briefing_prompt(signal: Dict) -> str:
 # ════════════════════════════════════════════════════
 #
 # Bu "RAG-lite" mimarisi:
-#   Gercek RAG: harici belgeler vektor DB'de tutulur, sorgu aninda getirilir.
-#   Burada: trade gecmisi zaten kucuk -> direkt prompt'a koyuyoruz.
+#   Gerçek RAG: harici belgeler vektör DB'de tutulur, sorgu anında getirilir.
+#   Burada: trade geçmişi zaten küçük -> direkt prompt'a koyuyoruz.
 #
 # VERİ AKIŞI:
-#   1. VERİ    → data_collector.collect() → tum istatistikler
-#   2. PROMPT  → kullanicinin sorusu + bu context birlestirilir
-#   3. LLM     → client.complete() — ayni satir
+#   1. VERİ    → data_collector.collect() → tüm istatistikler
+#   2. PROMPT  → kullanıcının sorusu + bu context birleştirilir
+#   3. LLM     → client.complete() — aynı satır
 #   4. ÇIKTI   → chat kutusunda cevap
 
 STRATEGY_CHAT_SYSTEM = (
-    "Sen bir paper trading sistem danismanisın.\n"
-    "Sana verilen trade gecmisi ve istatistiklere dayanarak soru cevapla.\n"
+    "Sen bir paper trading sistem danışmanısın.\n"
+    "Sana verilen trade geçmişi, açık pozisyonlar, piyasa durumu ve "
+    "istatistiklere dayanarak soruları cevapla.\n\n"
     "KURALLAR:\n"
-    "- Sadece saglanan veriye dayan\n"
-    "- Bilmiyorsan 'Bu veriden cikaramiiyorum' de\n"
-    "- Dogrudan 'su hisseyi al' gibi tavsiye verme\n"
-    "- Turkce ve sade konus\n"
-    "- Somut sayilar kullan\n"
-    "- Maksimum 300 kelime"
+    "- Sadece sağlanan veriye dayan\n"
+    "- Bilmiyorsan 'Bu veriyle cevaplayamıyorum' de\n"
+    "- Doğrudan 'şu hisseyi al' gibi tavsiye verme\n"
+    "- Türkçe ve sade konuş\n"
+    "- Somut sayılar kullan\n"
+    "- Sorunun karmaşıklığına göre cevap uzunluğunu ayarla"
 )
 
 
 def build_strategy_chat_prompt(question: str, context: Dict) -> str:
     """
-    Kullanicinin sorusunu ve tum trade gecmisini birlestirip LLM'e gondermek icin prompt.
+    Kullanıcının sorusunu ve tüm trade geçmişini birleştirip LLM'e
+    göndermek için prompt.
 
     VERİ AKIŞI:
-      data_collector.collect() -> context dict  (SQLite istatistikler)
-      kullanici sorusu          -> question str
-      ikisi BIRLESTIRILIYOR    -> tek prompt string
+      data_collector.collect() -> context dict  (Supabase/PostgreSQL istatistikler)
+      kullanıcı sorusu         -> question str
+      ikisi BİRLEŞTİRİLİYOR   -> tek prompt string
 
-    Bu RAG-lite: trade gecmisi kucuk oldugu icin direkt prompt'a koyuyoruz.
-    Gercek RAG'da binlerce belge icin vektor DB kullanilir.
+    Bu RAG-lite: trade geçmişi küçük olduğu için direkt prompt'a koyuyoruz.
+    Gerçek RAG'da binlerce belge için vektör DB kullanılır.
 
     Args:
         question: "Bu hafta neden kaybettik?" gibi soru
-        context:  WeeklyDataCollector.collect() ciktisi
+        context:  WeeklyDataCollector.collect() çıktısı
     """
     all_s    = context.get("all_time_summary", {})
     by_type  = context.get("by_swing_type", {})
     trades   = context.get("weekly_trades", [])
     top_win  = context.get("top_win")
     top_loss = context.get("top_loss")
+    open_pos = context.get("open_positions", [])
+    regime   = context.get("market_regime", {})
 
-    # Son 25 trade (10 cok az kaliyordu, model son durumlari kaciriyordu)
+    # Son 25 trade
     trade_lines = []
     for t in trades[:25]:
-        emoji = "V" if t["outcome"] == "WIN" else "X"
+        emoji = "✅" if t["outcome"] == "WIN" else "❌"
         trade_lines.append(
             f"[{emoji}] {t['ticker']} | {t['status']} | "
             f"P/L:{t['pnl_pct']:+.1f}% | Tip:{t['swing_type']} | R/R:1:{t['rr_ratio']:.1f} | Tarih: {t['exit_date']}"
@@ -241,20 +260,71 @@ def build_strategy_chat_prompt(question: str, context: Dict) -> str:
     loss_pnl    = top_loss["pnl_pct"] if top_loss else 0
     loss_status = top_loss["status"] if top_loss else ""
 
+    # Açık pozisyonlar bloğu
+    open_block = _build_open_positions_block(open_pos)
+
+    # Market regime bloğu
+    regime_block = _build_regime_block(regime)
+
     return (
-        f"SISTEM VERISI (bu veriye dayanarak cevap ver):\n\n"
-        f"GENEL ISTATISTIKLER:\n"
+        f"SİSTEM VERİSİ (bu veriye dayanarak cevap ver):\n\n"
+        f"{regime_block}\n"
+        f"GENEL İSTATİSTİKLER:\n"
         f"  Toplam Trade : {all_s.get('total', 0)}\n"
         f"  Win Rate     : %{all_s.get('win_rate', 0):.1f}\n"
         f"  Ort. P/L     : {all_s.get('avg_pnl_pct', 0):+.2f}%\n"
         f"  Profit Factor: {all_s.get('profit_factor', 0):.2f}x\n\n"
         f"SETUP BAZINDA:\n{type_block}\n\n"
+        f"{open_block}\n"
         f"SON 25 TRADE:\n{trade_block}\n\n"
-        f"EN IYI : {win_ticker} ({win_pnl:+.1f}% - {win_status})\n"
-        f"EN KOTU: {loss_ticker} ({loss_pnl:+.1f}% - {loss_status})\n\n"
+        f"EN İYİ : {win_ticker} ({win_pnl:+.1f}% - {win_status})\n"
+        f"EN KÖTÜ: {loss_ticker} ({loss_pnl:+.1f}% - {loss_status})\n\n"
         f"---\n"
         f"KULLANICININ SORUSU: {question}\n"
         f"---\n\n"
-        f"Yukaridaki sisteme dayanarak soruyu cevapla. "
-        f"Veri yoksa 'Bu soruyu mevcut veriden cevaplayamiyorum' de."
+        f"Yukarıdaki sisteme dayanarak soruyu cevapla. "
+        f"Veri yoksa 'Bu soruyu mevcut veriden cevaplayamıyorum' de."
     )
+
+
+# ════════════════════════════════════════════════════
+# YARDIMCI FONKSİYONLAR (Ortak bloklar)
+# ════════════════════════════════════════════════════
+
+def _build_open_positions_block(open_pos: list) -> str:
+    """Açık pozisyonları prompt'a eklenecek metin bloğuna dönüştürür."""
+    if not open_pos:
+        return "AÇIK POZİSYONLAR:\n  (Şu an açık pozisyon yok)\n"
+
+    lines = ["AÇIK POZİSYONLAR:"]
+    for p in open_pos:
+        status_label = "⏳ PENDING" if p["status"] == "PENDING" else "🟢 OPEN"
+        lines.append(
+            f"  {status_label} {p['ticker']} | Tip:{p['swing_type']} | "
+            f"Giriş:${p['entry_price']:.2f} | Güncel:${p['current_price']:.2f} | "
+            f"P/L:{p['unrealized_pnl_pct']:+.1f}% | "
+            f"Stop:${p['stop_loss']:.2f} | Hedef:${p['target']:.2f} | "
+            f"Giriş Tarihi: {p['entry_date']}"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _build_regime_block(regime: dict) -> str:
+    """Market regime bilgisini prompt'a eklenecek metin bloğuna dönüştürür."""
+    if not regime or regime.get("regime") == "UNKNOWN":
+        return "PİYASA DURUMU: Bilinmiyor\n"
+
+    regime_labels = {
+        "BULL": "🟢 BOĞA (Yükseliş Trendi)",
+        "CAUTION": "🟡 DİKKAT (Belirsiz)",
+        "BEAR": "🔴 AYI (Düşüş Trendi)",
+    }
+    label = regime_labels.get(regime["regime"], regime["regime"])
+    confidence = regime.get("confidence", "?")
+
+    parts = [f"PİYASA DURUMU: {label} (Güven: {confidence})"]
+    if regime.get("spy_price"):
+        parts.append(f"  SPY: ${regime['spy_price']:.2f}")
+    if regime.get("vix"):
+        parts.append(f"  VIX: {regime['vix']:.1f}")
+    return "\n".join(parts) + "\n"

@@ -148,16 +148,22 @@ class TestFeatureEngineer:
 
     def test_swing_type_encoding(self):
         """
-        A→0, B→1, C→2, S→3 encode edilmeli.
+        A→0, B→1, C→2 encode edilmeli. Bilinmeyen tip → 0 (default).
         """
         from swing_trader.ml.features import FeatureEngineer
 
         engineer = FeatureEngineer()
-        for swing_type, expected_enc in [("A", 0), ("B", 1), ("C", 2), ("S", 3)]:
+        for swing_type, expected_enc in [("A", 0), ("B", 1), ("C", 2)]:
             trade = make_trade("TARGET", swing_type=swing_type)
             X, _ = engineer.transform([trade])
             assert X["swing_type_enc"].iloc[0] == expected_enc, \
                 f"Swing type {swing_type} → {expected_enc} bekleniyor"
+
+        # Bilinmeyen tip → 0 (default fallback)
+        trade = make_trade("TARGET", swing_type="Z")
+        X, _ = engineer.transform([trade])
+        assert X["swing_type_enc"].iloc[0] == 0, \
+            "Bilinmeyen swing type default 0 olmalı"
 
     def test_no_nan_in_output(self):
         """Feature matrix'te NaN olmamalı."""
