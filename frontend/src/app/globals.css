@@ -689,9 +689,7 @@ body {
   width: 350px;
   height: 500px;
   max-height: calc(100vh - 40px);
-  background: rgba(17, 24, 39, 0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: #111827; /* Mat arka plan (solid) */
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 20px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(59, 130, 246, 0.15);
@@ -718,6 +716,14 @@ body {
   visibility: visible;
 }
 
+.floating-chat-panel.expanded {
+  width: 700px;
+  height: 80vh;
+  max-height: 800px;
+  bottom: 20px;
+  right: 20px;
+}
+
 /* Header */
 .floating-chat-header {
   padding: 16px;
@@ -739,24 +745,24 @@ body {
   box-shadow: 0 2px 8px rgba(0,0,0,0.3);
 }
 
-.floating-chat-close {
-  background: rgba(255,255,255,0.1);
+.floating-chat-action-btn {
+  background: rgba(255, 255, 255, 0.1);
   border: none;
-  color: var(--text-secondary);
-  width: 28px;
-  height: 28px;
   border-radius: 50%;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
+  color: rgba(255, 255, 255, 0.8);
   cursor: pointer;
   transition: all 0.2s;
 }
 
-.floating-chat-close:hover {
-  background: rgba(255,255,255,0.2);
+.floating-chat-action-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
   color: #fff;
-  transform: rotate(90deg);
+  transform: scale(1.05);
 }
 
 /* Messages Area */

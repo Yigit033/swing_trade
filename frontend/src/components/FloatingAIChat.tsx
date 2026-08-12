@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { MessageCircle, X, Send, Bot, User } from "lucide-react";
+import { MessageCircle, X, Send, Bot, User, Maximize2, Minimize2 } from "lucide-react";
 import { chatWithAI } from "@/lib/api";
 
 interface Message {
@@ -11,6 +11,7 @@ interface Message {
 
 export default function FloatingAIChat() {
     const [isOpen, setIsOpen] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(false);
     const [messages, setMessages] = useState<Message[]>([
         { role: "ai", content: "Merhaba! Ben Swing Trade Strategy asistanınım. Trade stratejilerin, risk yönetimin veya pozisyonların hakkında sorular sorabilirsin. 📊" }
     ]);
@@ -48,7 +49,7 @@ export default function FloatingAIChat() {
     return (
         <div className="floating-chat-container">
             {/* Sohbet Paneli */}
-            <div className={`floating-chat-panel ${isOpen ? "open" : "closed"}`}>
+            <div className={`floating-chat-panel ${isOpen ? "open" : "closed"} ${isExpanded ? "expanded" : ""}`}>
                 {/* Header */}
                 <div className="floating-chat-header">
                     <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -60,9 +61,14 @@ export default function FloatingAIChat() {
                             <span style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.7)" }}>Sana özel analiz</span>
                         </div>
                     </div>
-                    <button onClick={() => setIsOpen(false)} className="floating-chat-close">
-                        <X size={18} />
-                    </button>
+                    <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                        <button onClick={() => setIsExpanded(!isExpanded)} className="floating-chat-action-btn">
+                            {isExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                        </button>
+                        <button onClick={() => setIsOpen(false)} className="floating-chat-action-btn">
+                            <X size={18} />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Mesaj Alanı */}

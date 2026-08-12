@@ -131,7 +131,7 @@ function WeeklyReportTab() {
     };
 
     return (
-        <div className="glass-card" style={{ padding: 24 }}>
+        <div className="glass-card" style={{ padding: 24, overflowY: "auto", height: "100%" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
                 <div>
                     <h2 style={{ margin: 0, fontSize: "1.1rem" }}>🤖 AI Haftalık Performans Analizi</h2>
