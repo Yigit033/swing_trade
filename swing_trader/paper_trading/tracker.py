@@ -19,10 +19,7 @@ from datetime import datetime, timedelta, date
 import yfinance as yf
 import pandas as pd
 
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:
-    from backports.zoneinfo import ZoneInfo  # Python < 3.9
+from zoneinfo import ZoneInfo
 
 from .storage import PaperTradeStorage
 
