@@ -35,7 +35,7 @@ MODEL_PATH = MODEL_DIR / "signal_predictor.pkl"
 META_PATH = MODEL_DIR / "signal_predictor_meta.json"
 
 # Eğitim için minimum trade sayısı
-MIN_TRADES_REQUIRED = 15
+MIN_TRADES_REQUIRED = 50
 
 
 class SignalTrainer:
@@ -202,14 +202,27 @@ class SignalTrainer:
             n_win = int((y_train == 1).sum())
             scale_pos_weight = n_loss / n_win if n_win > 0 else 1.0
 
+            # Dinamik n_estimators (Aşırı Öğrenme / Overfitting Koruması)
+            # Veri setimiz çok küçükse (ör: 50), 200 ağaç eğitmek veriyi ezberletir.
+            train_size = len(X_train)
+            if train_size < 100:
+                n_trees = 30
+            elif train_size < 300:
+                n_trees = 80
+            elif train_size < 1000:
+                n_trees = 150
+            else:
+                n_trees = 250
+
+            logger.info(f"Model {n_trees} karar ağacı (estimators) ile eğitiliyor. (Eğitim boyutu: {train_size})")
+
             model = xgb.XGBClassifier(
-                n_estimators=200,         # Kaç ağaç? (daha fazla = daha iyi ama yavaş)
+                n_estimators=n_trees,     # Veri boyutuna göre dinamik ağaç sayısı
                 max_depth=4,              # Her ağacın derinliği (overfitting önler)
                 learning_rate=0.05,       # Her adımda ne kadar öğren
                 subsample=0.8,            # Her ağaç için veri oranı (randomness)
                 colsample_bytree=0.8,     # Her ağaç için feature oranı
                 scale_pos_weight=scale_pos_weight,  # Sınıf dengesi
-                use_label_encoder=False,
                 eval_metric="logloss",    # Kayıp fonksiyonu (binary classification)
                 random_state=42,
                 verbosity=0               # Eğitim loglarını sustur

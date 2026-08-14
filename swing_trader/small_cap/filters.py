@@ -188,35 +188,47 @@ class SmallCapFilters:
         
         return True, f"Price OK (${price:.2f})"
     
-    def check_earnings(self, ticker: str, signal_date) -> Tuple[bool, str]:
-        """Check if stock has earnings within ±3 days (tightened from ±7)."""
-        try:
-            import yfinance as yf
-            from datetime import datetime, timedelta
-            
-            stock = yf.Ticker(ticker)
-            
-            # Try to get earnings dates
-            try:
-                earnings_dates = stock.earnings_dates
-                if earnings_dates is not None and len(earnings_dates) > 0:
-                    if isinstance(signal_date, str):
-                        signal_date = datetime.strptime(signal_date, '%Y-%m-%d')
-                    
-                    for earn_date in earnings_dates.index:
-                        earn_dt = earn_date.to_pydatetime().replace(tzinfo=None)
-                        days_diff = (earn_dt.date() - signal_date.date()).days
+    def check_earnings(self, ticker: str, signal_date, earnings_dates=None) -> Tuple[bool, str]:
+        """Bilanço-öncesi pencereyi (0..+3 gün) reddet.
 
-                        # Block PRE-earnings only (0 to +3 days upcoming)
-                        # Post-earnings (negative days_diff) are NOT blocked —
-                        # post-earnings gap+continuation is one of the best swing setups.
-                        if 0 <= days_diff <= self.EARNINGS_EXCLUSION_DAYS:
-                            return False, f"Earnings in {days_diff} days (pre-event risk)"
-            except:
-                pass
-            
+        earnings_dates verilirse yfinance'e HİÇ gidilmez — ölçüm harness'ları
+        tarihleri ticker başına bir kez çekip buraya geçirebilir. Bu, canlı ile
+        backtest'in AYNI kapıyı kullanmasını sağlar (bkz. apply_all_filters).
+
+        Bilanço-SONRASI (negatif days_diff) bilerek engellenmez: gap + devam
+        en iyi swing kurulumlarından biridir.
+        """
+        from datetime import datetime
+
+        try:
+            if earnings_dates is None:
+                import yfinance as yf
+                earnings_dates = yf.Ticker(ticker).earnings_dates
+
+            if earnings_dates is None or len(earnings_dates) == 0:
+                return True, "No nearby earnings"
+
+            if isinstance(signal_date, str):
+                signal_date = datetime.strptime(signal_date, '%Y-%m-%d')
+
+            # DataFrame/Series ise tarihler index'te; düz liste/DatetimeIndex ise
+            # doğrudan üzerinde gezilir. DİKKAT: list.index bir METOT olduğu için
+            # getattr(x, "index", x) ile bakmak listeyi sessizce bozar.
+            if isinstance(earnings_dates, (pd.DataFrame, pd.Series)):
+                candidates = earnings_dates.index
+            else:
+                candidates = earnings_dates
+
+            for earn_date in candidates:
+                earn_ts = pd.Timestamp(earn_date)
+                if earn_ts.tzinfo is not None:
+                    earn_ts = earn_ts.tz_localize(None)
+                days_diff = (earn_ts.date() - signal_date.date()).days
+                if 0 <= days_diff <= self.EARNINGS_EXCLUSION_DAYS:
+                    return False, f"Earnings in {days_diff} days (pre-event risk)"
+
             return True, "No nearby earnings"
-            
+
         except Exception as e:
             logger.debug(f"Earnings check error for {ticker}: {e}")
             return True, "Earnings check skipped"
@@ -228,6 +240,7 @@ class SmallCapFilters:
         stock_info: Dict,
         signal_date=None,
         backtest_mode: bool = False,
+        earnings_dates=None,
     ) -> Tuple[bool, Dict]:
         """
         Apply all hard filters to a stock.
@@ -281,6 +294,23 @@ class SmallCapFilters:
         # statistically significant forward edge. Tradeability is enforced by
         # price/market-cap/dollar-volume gates above; stop/target sizing uses
         # live ATR in the risk module.
+        #
+        # MUTLAK TABAN (ör. ATR >= %1.5) DA REDDEDİLDİ — 2026-08-14,
+        # scripts/measure_atr_floor.py. Hipotez makuldü: göreceli düşük ATR
+        # (sıkışma) istediğimiz şey, ama MUTLAK düşük ATR "ölü tahta"
+        # (birleşme-arbitraj: fiyat nakit teklife çivilenmiş) olabilir ve orada
+        # hedefe giden yol yapısal olarak kapalıdır. Ölçüm bunu ÇÜRÜTTÜ:
+        #   - 64 sinyalin (VCE + baraj sonrası RVOL) EN DÜŞÜK ATR'si %1.46;
+        #     ölü-tahta kümesi diye bir şey YOK. Barajın yakalayacağı av yok.
+        #   - En düşük kova bile para kazanıyor: %1.5-2.0 -> EV +5.44% (n=3).
+        #   - ATR>=%1.5 tek işlem eliyor (n=1, kabul barajı n>=5 -> düşer) ve
+        #     TRAIN örneklemini hiç değiştirmiyor: kanıt değil, tek veriye uyum.
+        #   - Yüksek barajlar cazip görünüyor (ATR>=%3 -> EV +5.37%) AMA elenen
+        #     kova hâlâ POZİTİF (+1.98%) ve 33 VCE sinyalinin 20'sini kesiyor:
+        #     kârlı işlem kıymak, zarar kesmek değil.
+        # Ölü tahtayı zaten mevcut yapı eliyor: RVOL barajları olay gününü,
+        # VCE'nin genişleme şartı da çivilenmiş fiyatı bloke ediyor (teklife
+        # kilitli tahta genişleme üretemez). Bu kapı GEREKSİZ; tavsiye kalıyor.
         atr_pct = self.calculate_atr_percent(df)
         passed, reason = self.check_atr_percent(atr_pct)
         results['filters']['atr_percent'] = {
@@ -305,9 +335,28 @@ class SmallCapFilters:
             'value': float_shares,
         }
         
-        # 5. Earnings (live API only — not point-in-time in backtest)
-        if backtest_mode:
-            results['filters']['earnings'] = {'passed': True, 'reason': 'Backtest mode (skipped)'}
+        # 5. Bilanço kapısı.
+        # PARİTE (2026-08-14): eskiden backtest'te bu kapı TAMAMEN atlanıyordu,
+        # yani tüm eşiklerimiz canlı sistemin işlem ETMEDİĞİ bilanço-öncesi
+        # sinyalleri içeren bir örneklemde ayarlanmıştı. Kanıtlanmış vaka:
+        # LIFE 2026-08-03'te RVOL thrust ateşledi ve ölçümde +52% yazdı, ama
+        # bilanço aynı gün 16:00'da açıklandığı için canlı motor o sinyali
+        # "Earnings in 0 days" ile reddediyordu. Ölçtüğümüz şey ürün değildi.
+        # (Aynı sınıf hata katalizör bonusları ve sektör RS'inde de vardı.)
+        #
+        # Çözüm: harness'lar earnings_dates'i ticker başına BİR KEZ çekip
+        # geçirir; kapı o zaman backtest'te de aynen çalışır. Tarih verilmezse
+        # eski davranış korunur ama sebep artık dürüst yazılıyor.
+        if earnings_dates is not None:
+            passed, reason = self.check_earnings(ticker, signal_date, earnings_dates)
+            results['filters']['earnings'] = {'passed': passed, 'reason': reason}
+            if not passed:
+                return False, results
+        elif backtest_mode:
+            results['filters']['earnings'] = {
+                'passed': True,
+                'reason': 'Bilanço verisi geçirilmedi (canlıdan SAPMA — parite eksik)',
+            }
         else:
             passed, reason = self.check_earnings(ticker, signal_date)
             results['filters']['earnings'] = {'passed': passed, 'reason': reason}

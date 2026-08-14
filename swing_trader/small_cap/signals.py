@@ -33,15 +33,33 @@ class SmallCapSignals:
          hissenin ATR'si tanım gereği düşüktür, ATR≥%3 istemek kuralla çelişir.
 
       2. RVOL thrust — anormal hacim itişi  [İKİNCİL, v14]
-         RVOL ≥ 2.5x (50g) + yeşil kapanış + MA20 üstü. Squeeze gerekmez.
-         VCE'nin yapısal olarak kaçırdığı ani hareketleri yakalar
-         (R10 edge +3.34%, t=2.87). Kapılardan MUAF DEĞİL.
+         RVOL 2.5x–4.0x (50g) + tek-gün hareket < %8 + yeşil kapanış + MA20 üstü.
+         Squeeze gerekmez; VCE'nin yapısal olarak kaçırdığı ani hareketleri
+         yakalar (%90 örtüşmesiz). Kapılardan MUAF DEĞİL.
+         Hacim ve hareket bir BANT'tır: üst barajlar 2026-08-14'te ölçülüp
+         eklendi (EV +1.55% → +3.87%, PF 1.50 → 2.87, OOS'ta da düzeliyor).
+         Üstü "olay günü"dür — satın alma/halka arz/FDA; fiyat olayın
+         seviyesine kilitlenir, hedefe giden yol kapalıdır.
 
     ÖLÇÜLÜP ELENEN YOLLAR (geri eklemek için yeni kanıt gerekir):
       volume_ignition / erken birikim   R5 edge −1.17% (t=−1.83)
       technical_breakout (5-bar zirve)  ölçülebilir edge yok
       trend_continuation                R5 edge +0.29% (t=0.65 — gürültü)
       pullback-to-MA20                  R5 edge +0.29% (t=0.65); kodu da silindi
+      sıkı konsolidasyon kırılımı       bkz. aşağıdaki not — 2026-08-14'te RED
+
+    SIKI KONSOLİDASYON KIRILIMI — NEDEN EKLENMEDİ (2026-08-14):
+    measure_third_pathway.py (2026-08-04) bu kalıba KABUL vermişti (yeni sinyal
+    n=37, EV +1.85%, OOS +2.72%, +1.8/ay) ve eklenmeyi bekliyordu. Eklemeden önce
+    scripts/measure_tight_consolidation.py ile varyantları ölçtük; iki şey çıktı:
+      1. Kalıbın HİÇ hacim şartı yok. VCE'nin en pahalı dersi olan zorunlu
+         RVOL≥1.5x barajını eklemek kalıbı ÇÖKERTİYOR: n=8, EV −1.27%, WR %25.
+         62 ham sinyalin yalnız 11'i RVOL≥1.5x — yani kalıp esasen HACİMSİZ
+         kırılımlardan besleniyor. VCE'de fakeout diye elediğimiz şeyin aynısı.
+      2. Hacimsiz taban hali TRAIN diliminde NEGATİF (−0.85%, n=9; OOS +1.70%).
+    4 Ağustos kabul kriteri TRAIN>0 aramıyordu; aradığımızda hiçbir varyant
+    geçmiyor. Bir yol hem eğitim hem test diliminde para kazanmıyorsa elimizde
+    edge değil, dönem şansı var. VCE + RVOL thrust ikilisi korunur.
 
     `check_breakout` / `check_continuation_setup` hâlâ hesaplanıyor ama
     KARAR VERMİYOR: yalnız /lookup teşhis sayfasında "bu hisse neden geçmedi"
@@ -61,6 +79,9 @@ class SmallCapSignals:
         self._overext_single_day_max = scfg.overext_single_day_max
         self._overext_five_day_total_max = scfg.overext_five_day_total_max
         self._ma20_max_below_pct = scfg.ma20_max_distance_below_pct
+        rguard = self._settings.rvol_thrust_guards
+        self._rvol_max = rguard.max_rvol
+        self._rvol_max_day_change = rguard.max_day_change_pct
         self.ATR_PERIOD = self._settings.universe_filters.atr_period
         logger.info("SmallCapSignals initialized (Senior Trader v2.0)")
     
@@ -460,6 +481,31 @@ class SmallCapSignals:
     # than VCE, and 90% of its hits are signals VCE never saw. Its natural
     # volatility needs the wide exit (stop ~3 ATR, cap removed) applied in v14.
     # Constants match the harness EXACTLY — do not tune without re-running it.
+    #
+    # ── ÜST BARAJLAR (2026-08-14, scripts/measure_rvol_guards.py) ──────────
+    # VCE'nin hacim notunda zaten yazan "2.0x üstü TERS çalışıyor (geç/chase)"
+    # etkisinin bu yoldaki karşılığı hiç ölçülmemişti: alt baraj 2.5x vardı,
+    # ÜST baraj YOKTU. Mevcut 47 RVOL sinyali (gerçek motor + gerçek exit, Q80+)
+    # kovalara ayrıldığında hacimde işaret 4x'te dönüyor, tek-gün hareketinde 8%'te:
+    #   RVOL      0-3x  EV +3.07% (n=22) | 3-4x +2.42% (n=14)
+    #             4-6x  EV -3.34% (n=8)  | 6x+   -0.63% (n=3)
+    #   tek-gün   <5%   EV +1.88% (n=40) | 5-8%  +8.02% (n=2)
+    #             8-12% EV -3.64% (n=4)  | 12%+  -3.93% (n=1)
+    # Birleşik etki: EV +1.55% → +3.87%, WR %60 → %71, PF 1.50 → 2.87.
+    # TRAIN +0.22% → +2.75%, OOS +2.30% → +4.40% (ikisinde de düzeliyor).
+    # VCE yoluna etkisi 0/33 sinyal — squeeze şartı zaten olay günlerini eliyor.
+    #
+    # MEKANİZMA: 4x üstü hacim günü artık swing değil, TEK SEFERLİK OLAY günüdür
+    # (satın alma, halka arz, FDA kararı). Fiyat olayın belirlediği seviyeye
+    # kilitlenir; motor hedef verir ama hedefe giden yol yapısal olarak kapalıdır.
+    # Canlı vaka: DV 2026-08-07, RVOL 10.46x + %12.8 → motor 13.21$ giriş,
+    # 16.01/18.41$ hedef verdi; tahta Nielsen'in 13.60$ nakit teklifinde kilitli.
+    #
+    # NEDEN 3.5x DEĞİL: 3.5x tarama ızgarasında daha yüksek toplam edge veriyor
+    # (132.6 vs 120.0) ama bu üstünlük 5 sinyale dayanıyor ve kaba kovada 3-4x
+    # dilimi hâlâ POZİTİF (+2.42%). Ortalamayı güzelleştirmek için pozitif-EV
+    # kovası kesilmez; sınır işaretin döndüğü yere konur. Izgara komşuları
+    # pürüzsüz (bkz. harness [H] tablosu) — argmax'e oturmuyoruz.
     RVOL_THRUST_MULT = 2.5         # today's volume >= 2.5x its 50-day average
     RVOL_BASELINE_DAYS = 50        # relative-volume baseline window
     RVOL_MA_PERIOD = 20            # close must be above 20-day MA (uptrend gate)
@@ -473,9 +519,12 @@ class SmallCapSignals:
         prior volatility squeeze — it catches the sudden-interest / catalyst
         move that VCE structurally misses (90% non-overlap with VCE, measured).
 
+        Hacim ve tek-gün hareketi bir BANT'tır, alt sınır değil: üst barajların
+        gerekçesi ve ölçümü için RVOL_MAX_* sabitlerinin üstündeki nota bakın.
+
         Returns (passed, reason, metrics).
         """
-        metrics = {'rvol': 0.0, 'ma20': 0.0, 'green': False}
+        metrics = {'rvol': 0.0, 'ma20': 0.0, 'green': False, 'day_change_pct': 0.0}
         if df is None or len(df) < self.RVOL_BASELINE_DAYS + 2:
             return False, f"Insufficient data (<{self.RVOL_BASELINE_DAYS + 2} bars)", metrics
         try:
@@ -496,10 +545,27 @@ class SmallCapSignals:
                     f"No thrust (RVOL {rvol:.1f}x < {self.RVOL_THRUST_MULT}x)"
                 ), metrics
 
+            # 1b. ÜST HACİM BARAJI — olay günü değil, swing günü arıyoruz.
+            if rvol >= self._rvol_max:
+                return False, (
+                    f"Olay günü hacmi — RVOL {rvol:.1f}x >= {self._rvol_max:.1f}x "
+                    f"(tek seferlik haber/işlem, swing devamı değil)"
+                ), metrics
+
             # 2. GREEN DAY (close over prior close)
             metrics['green'] = c > cp
             if c <= cp:
                 return False, "Red/flat day on thrust bar", metrics
+
+            # 2b. OLAY-GÜNÜ HAREKET BARAJI — fiyatın tek günde ne kadar
+            # sıçradığı, hacimden bağımsız ikinci bir olay imzasıdır.
+            day_change = (c / cp - 1) * 100
+            metrics['day_change_pct'] = round(day_change, 2)
+            if day_change >= self._rvol_max_day_change:
+                return False, (
+                    f"Olay günü hareketi — tek gün +{day_change:.1f}% >= "
+                    f"{self._rvol_max_day_change:.1f}% (kovalama riski)"
+                ), metrics
 
             # 3. TREND: above 20-day MA
             ma20 = float(close.rolling(self.RVOL_MA_PERIOD).mean().iloc[-1])
@@ -508,7 +574,8 @@ class SmallCapSignals:
                 return False, f"Below MA20 ({c:.2f} <= {ma20:.2f})", metrics
 
             return True, (
-                f"RVOL thrust: {rvol:.1f}x volume on green day above MA20 ${ma20:.2f}"
+                f"RVOL thrust: {rvol:.1f}x volume (+{day_change:.1f}%) on green day "
+                f"above MA20 ${ma20:.2f}"
             ), metrics
 
         except Exception as e:
@@ -526,6 +593,19 @@ class SmallCapSignals:
         HARD gate = squeeze + breakout + green + MA50 (Variant B). Volume and
         close-strength are measured into `metrics` for scoring (premium tier)
         but do NOT block the signal.
+
+        SIKIŞMAYI ATR İLE ÖLÇÜYORUZ — BOLLINGER DENENDİ VE REDDEDİLDİ
+        (2026-08-14, scripts/measure_bollinger_squeeze.py). Aynı iskelet
+        (kırılım + yeşil + MA50 + zorunlu RVOL) üzerinde SADECE sıkışma metriği
+        değiştirildi: bant genişliği (4σ20/SMA20) hem ATR ile aynı biçimde
+        (bbw < 0.8 × taban) hem de ders kitabı "squeeze" tanımıyla (bbw son 60
+        barın en dar %10'unda) test edildi. BBW daha ÇOK sinyal üretiyor
+        (ham 8053 vs ATR 5660) ama popülasyon zararda: B1 EV -0.32%
+        (OOS -0.93%), B2 EV -0.82% (OOS -3.82%). Birleşimin getirdiği EK
+        sinyaller de OOS'ta negatif. Dikkat çekici: kesişim n=0 — iki metrik
+        pratikte AYNI günü işaret etmiyor, yani BBW "aynı şeyin daha iyi
+        ölçümü" değil, farklı ve daha kötü bir seçici.
+        
 
         Returns (passed, reason, metrics).
         """
@@ -623,6 +703,124 @@ class SmallCapSignals:
         except Exception as e:
             logger.error(f"Error checking VCE breakout: {e}")
             return False, str(e), metrics
+
+    def describe_setup(self, df: pd.DataFrame) -> Dict:
+        """Kurulum röntgeni — "sinyal yok" cevabını EYLEME DÖNÜŞTÜRÜR.
+
+        Motor bu seviyeleri (20g zirve, squeeze oranı, MA50, konsolidasyon dibi)
+        VCE kontrolü sırasında zaten hesaplıyordu ama ilk başarısız şartta erken
+        dönüp ATIYORDU. Sonuç: kullanıcı "SWING HAZIR DEĞİL" görüyor ve elinde
+        hiçbir eylem kalmıyor — oysa kıdemli bir trader'ın cevabı "hayır" değil,
+        "tetik şu fiyatta, geçersizlik şurada"dır.
+
+        Kapıları DEĞİŞTİRMEZ, karar vermez; yalnız mevcut durumu tarif eder.
+
+        state:
+          ARMED     — sıkışma tamam, kırılım bekleniyor (en değerli hâl)
+          BUILDING  — sıkışma yolda ama henüz eşiğin üstünde
+          EXTENDED  — fiyat MA20'den o kadar uzak ki baz/sıkışma kurulamaz
+          BROKEN    — MA50 altında; kurulum tezi geçersiz
+          NONE      — tanımlanabilir bir kurulum yok
+        """
+        out: Dict = {
+            'state': 'NONE',
+            'trigger_price': None,
+            'distance_to_trigger_pct': None,
+            'invalidation_price': None,
+            'squeeze_ratio': None,
+            'squeeze_ok': False,
+            'required_rvol': self.VCE_MIN_RVOL_GATE,
+            'current_rvol': None,
+            'ma20_distance_pct': None,
+            'note': '',
+        }
+        if df is None or len(df) < 55:
+            out['note'] = 'Yetersiz veri (55+ bar gerekli)'
+            return out
+
+        try:
+            close = df['Close'].astype(float)
+            high = df['High'].astype(float)
+            low = df['Low'].astype(float)
+            volume = df['Volume'].astype(float)
+
+            c = float(close.iloc[-1])
+
+            tr = pd.concat(
+                [high - low, (high - close.shift()).abs(), (low - close.shift()).abs()],
+                axis=1,
+            ).max(axis=1)
+            atr_pct = tr.rolling(self.VCE_ATR_PERIOD).mean() / close * 100
+
+            off_far, off_near = self.VCE_BASELINE_OFFSET
+            atr_now = float(atr_pct.iloc[-2])
+            atr_base = float(atr_pct.iloc[-1 - off_far:-1 - off_near].mean())
+            if not (np.isnan(atr_now) or np.isnan(atr_base) or atr_base <= 0):
+                ratio = atr_now / atr_base
+                out['squeeze_ratio'] = round(ratio, 2)
+                out['squeeze_ok'] = bool(ratio < self.VCE_SQUEEZE_RATIO)
+
+            # VCE tetiği: önceki 20 günün zirvesi (bugün hariç)
+            trigger = float(high.iloc[-1 - self.VCE_BREAKOUT_LOOKBACK:-1].max())
+            out['trigger_price'] = round(trigger, 2)
+            out['distance_to_trigger_pct'] = round((trigger / c - 1) * 100, 2)
+
+            # Geçersizlik: konsolidasyon dibi ile MA50'nin YÜKSEĞİ — hangisi
+            # önce kırılırsa tez ölür.
+            consol_low = float(low.iloc[-1 - self.VCE_BREAKOUT_LOOKBACK:-1].min())
+            ma50 = float(close.rolling(50).mean().iloc[-1])
+            out['invalidation_price'] = round(max(consol_low, ma50), 2)
+
+            vol50 = float(volume.rolling(self.VCE_RVOL_BASELINE_DAYS).mean().iloc[-1])
+            if vol50 > 0:
+                out['current_rvol'] = round(float(volume.iloc[-1]) / vol50, 2)
+
+            ma20 = float(close.rolling(20).mean().iloc[-1])
+            ma20_dist = (c / ma20 - 1) * 100 if ma20 > 0 else 0.0
+            out['ma20_distance_pct'] = round(ma20_dist, 2)
+
+            # ── Durum sınıflaması ──
+            if not np.isnan(ma50) and c <= ma50:
+                out['state'] = 'BROKEN'
+                out['note'] = (
+                    f"MA50 (${ma50:.2f}) altında — kurulum tezi geçersiz, "
+                    f"trendin dönmesini bekle."
+                )
+            elif ma20_dist > 25:
+                out['state'] = 'EXTENDED'
+                out['note'] = (
+                    f"MA20'nin %{ma20_dist:.0f} üstünde — baz kurulamamış, parabolik. "
+                    f"Sağlıklı bir geri çekilme veya yeni bir sıkışma beklenir; "
+                    f"buradan girmek kovalamaktır."
+                )
+            elif out['squeeze_ok']:
+                out['state'] = 'ARMED'
+                out['note'] = (
+                    f"Sıkışma tamam (ATR baz'ın %{out['squeeze_ratio'] * 100:.0f}'i). "
+                    f"${trigger:.2f} üstünde RVOL {self.VCE_MIN_RVOL_GATE}x ile "
+                    f"kapanış sinyali tetikler."
+                )
+            elif out['squeeze_ratio'] is not None and out['squeeze_ratio'] < 1.0:
+                out['state'] = 'BUILDING'
+                out['note'] = (
+                    f"Volatilite daralıyor (baz'ın %{out['squeeze_ratio'] * 100:.0f}'i) "
+                    f"ama sıkışma eşiği %{self.VCE_SQUEEZE_RATIO * 100:.0f}. "
+                    f"Yay henüz yeterince gerilmemiş."
+                )
+            else:
+                out['state'] = 'NONE'
+                out['note'] = (
+                    f"Volatilite baz seviyenin üstünde "
+                    f"(%{(out['squeeze_ratio'] or 0) * 100:.0f}) — sıkışma yok, "
+                    f"izlenecek bir kurulum oluşmamış."
+                )
+
+            return out
+
+        except Exception as e:
+            logger.error(f"Error describing setup: {e}")
+            out['note'] = str(e)
+            return out
 
     def check_all_triggers(self, df: pd.DataFrame) -> Tuple[bool, Dict]:
         """

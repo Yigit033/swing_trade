@@ -322,6 +322,37 @@ class UniverseScanSettings(BaseModel):
         return self
 
 
+class RvolThrustGuardSettings(BaseModel):
+    """RVOL thrust yolunun ÜST barajları (2026-08-14, scripts/measure_rvol_guards.py).
+
+    VCE'de zaten bilinen "çok yüksek hacim = geç/chase" etkisinin RVOL yolundaki
+    karşılığı. Alt baraj 2.5x'ti, üst baraj HİÇ YOKTU: 4x üstü hacim günü artık
+    swing değil, TEK SEFERLİK OLAY günüdür (satın alma, halka arz, FDA kararı) —
+    fiyat olayın belirlediği seviyeye kilitlenir ve hedefler ulaşılamaz olur.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_rvol: float = Field(
+        default=4.0,
+        ge=2.5,
+        le=20.0,
+        description=(
+            "RVOL üst barajı (50g ort). Kova ölçümü: 0-3x EV +3.07%, 3-4x +2.42%, "
+            "4-6x -3.34%, 6x+ -0.63% — işaret 4.0x'te dönüyor."
+        ),
+    )
+    max_day_change_pct: float = Field(
+        default=8.0,
+        ge=3.0,
+        le=50.0,
+        description=(
+            "Sinyal günü tek-gün hareket üst barajı. Kova ölçümü: <5% EV +1.88%, "
+            "5-8% +8.02%, 8-12% -3.64%, 12%+ -3.93%."
+        ),
+    )
+
+
 class SignalsConfirmationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

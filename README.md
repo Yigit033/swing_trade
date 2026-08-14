@@ -21,7 +21,7 @@ Bu sistem, iki farklı AI yaklaşımını **hibrid bir mimariyle** birleştirir:
 
 ### 🔬 Klasik Teknik Analiz
 - **Otomatik Hisse Tarama**: 200+ hisse, 15 saniyede
-- **15+ Gösterge**: RSI, MACD, EMA (20/50/200), ADX, OBV, VWAP, ATR, Bollinger
+- **Kullanılan göstergeler**: ATR (10/14), RVOL + hacim patlaması, SMA 20/50, RSI (14) + bullish divergence, MACD (12/26/9), OBV trendi, higher-low yapısı, MA20 eğimi. **Kullanılmayan**: ADX, Bollinger, VWAP, stokastik — hiçbiri kodda yok (ölçülebilir kenar katmadıkları için eklenmedi).
 - **Çoklu Faktörlü Skorlama**: 0–100+ skala
 - **Risk Yönetimi**: Position sizing, stop-loss, take-profit otomasyonu
 - **Backtesting Motoru**: Geçmiş verilerle strateji testi

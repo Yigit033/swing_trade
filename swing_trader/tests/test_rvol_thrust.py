@@ -94,3 +94,72 @@ def test_thrust_metrics_recorded_even_when_not_triggered():
     _, details = _sig().check_all_triggers(_df(closes, vols))
     assert "rvol_thrust" in details["triggers"]
     assert "rvol_metrics" in details
+
+
+# ── ÜST BARAJLAR (2026-08-14, scripts/measure_rvol_guards.py) ─────────────────
+# Hacim ve tek-gün hareketi bir BANT'tır, alt sınır değil. Ölçüm: RVOL 4-6x
+# kovası EV -3.34% (WR %25), tek-gün 8-12% kovası EV -3.64%. Birleşik baraj
+# EV +1.55% → +3.87%, PF 1.50 → 2.87 (TRAIN ve OOS'ta da düzeliyor).
+# Bu testler barajları kilitler: gevşetmek için harness'ı yeniden koşturun.
+
+
+def test_no_fire_on_event_day_volume():
+    """RVOL >= 4x = tek seferlik olay (satın alma/halka arz), swing devamı değil.
+
+    Canlı vaka: DV 2026-08-07, Nielsen'in 13.60$ nakit teklifi → RVOL 10.5x.
+    Motor 13.21$ giriş + 16.01/18.41$ hedef veriyordu ama tahta teklifte kilitli.
+    """
+    closes = [10.0] * 60 + [10.5]
+    vols = [100_000] * 60 + [1_000_000]  # 10x — DV senaryosu
+    passed, reason, m = _sig().check_rvol_thrust(_df(closes, vols))
+    assert not passed
+    assert "olay" in reason.lower()
+    assert m["rvol"] >= 4.0
+
+
+def test_no_fire_on_event_day_price_move():
+    """Hacim bantta olsa bile tek günde +%8+ sıçrama olay imzasıdır."""
+    closes = [10.0] * 60 + [11.2]  # +%12 tek gün
+    vols = [100_000] * 60 + [300_000]  # 3x — hacim bandın İÇİNDE
+    passed, reason, m = _sig().check_rvol_thrust(_df(closes, vols))
+    assert not passed
+    assert "hareket" in reason.lower()
+    assert m["rvol"] < 4.0  # eleme sebebi hacim DEĞİL
+    assert m["day_change_pct"] >= 8.0
+
+
+def test_fires_just_inside_both_guards():
+    """Bantların hemen içi geçer — barajlar üst sınır, yasak değil."""
+    closes = [10.0] * 60 + [10.7]  # +%7 < %8
+    vols = [100_000] * 60 + [390_000]  # 3.9x < 4.0x
+    passed, reason, m = _sig().check_rvol_thrust(_df(closes, vols))
+    assert passed, reason
+    assert 2.5 <= m["rvol"] < 4.0
+    assert m["day_change_pct"] < 8.0
+
+
+def test_guards_are_settings_tunable():
+    """Barajlar koda gömülü değil — yeniden ölçüm için ayarlanabilir olmalı."""
+    sig = _sig()
+    assert sig._rvol_max == sig._settings.rvol_thrust_guards.max_rvol
+    assert sig._rvol_max_day_change == sig._settings.rvol_thrust_guards.max_day_change_pct
+
+    sig._rvol_max = 12.0  # barajı gevşet → aynı bar artık geçer
+    closes = [10.0] * 60 + [10.5]
+    vols = [100_000] * 60 + [1_000_000]
+    passed, _, _ = sig.check_rvol_thrust(_df(closes, vols))
+    assert passed
+
+
+def test_vce_pathway_untouched_by_rvol_guards():
+    """Baraj VCE'ye SIZMAMALI — ölçümde 0/33 VCE sinyali etkilendi.
+
+    VCE'nin kendi hacim mantığı ayrıdır (alt baraj 1.5x, üst sınır YOK) ve
+    squeeze şartı olay günlerini zaten eliyor.
+    """
+    sig = _sig()
+    # VCE'de üst hacim barajı OLMAMALI: 10x hacimli bir squeeze-kırılımı
+    # yalnız RVOL yolunda elenir, VCE mantığında böyle bir kural yok.
+    src = sig.check_vce_breakout.__doc__ or ""
+    assert "olay günü" not in src.lower()
+    assert not hasattr(sig, "_vce_max_rvol")

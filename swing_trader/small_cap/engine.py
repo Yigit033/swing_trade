@@ -283,13 +283,19 @@ class SmallCapEngine:
         spy_df_window: Optional[pd.DataFrame] = None,
         reject_counts: Optional[MutableMapping[str, int]] = None,
         regime: str = '',
+        earnings_dates=None,
     ) -> Optional[Dict]:
         """
         Scan a single stock for small-cap momentum signal.
 
-        backtest_mode: skip live yfinance fundamentals, earnings API, catalysts
-        (short/insider/news bonuses zero; earnings filter skipped); optional
-        spy_df_window for point-in-time RS vs SPY; skip narrative/LLM.
+        backtest_mode: skip live yfinance fundamentals and catalysts
+        (short/insider/news bonuses zero); optional spy_df_window for
+        point-in-time RS vs SPY; skip narrative/LLM.
+
+        earnings_dates: önceden çekilmiş bilanço tarihleri. Verilirse bilanço
+        kapısı backtest'te de CANLI ile aynı şekilde uygulanır (parite). Ölçüm
+        harness'ları bunu ticker başına bir kez çekip geçirmelidir — aksi halde
+        canlının reddettiği bilanço-öncesi sinyaller ölçüme sızar.
         """
         if df is None or len(df) < 20:
             logger.debug(f"{ticker}: Insufficient data")
@@ -332,7 +338,9 @@ class SmallCapEngine:
             
             # Step 1: Apply universe filters
             filter_passed, filter_results = self.filters.apply_all_filters(
-                ticker, df, stock_info, signal_date_dt, backtest_mode=backtest_mode
+                ticker, df, stock_info, signal_date_dt,
+                backtest_mode=backtest_mode,
+                earnings_dates=earnings_dates,
             )
             
             if not filter_passed:

@@ -36,7 +36,7 @@ FEATURE_COLUMNS = [
     "risk_reward_ratio",  # reward / risk oranı (ne kadar iyi setup?)
     "atr_pct",            # ATR / entry_price × 100 (volatilite)
     "quality_score",      # Sistemin hesapladığı sinyal kalite puanı
-    "swing_type_enc",     # A/B/C/S → 0/1/2/3 (sayısal encoding)
+    "swing_type_enc",     # A/B/C → 0/1/2 (sayısal encoding)
     "max_hold_days",      # Max bekletme süresi
     "day_of_week",        # Giriş günü (0=Pzt, 4=Cum) — haftalık patern
     "month",              # Giriş ayı (1-12) — mevsimsel etki

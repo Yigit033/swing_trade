@@ -20,6 +20,7 @@ from .settings_models_extra import (
     BacktestLoopSettings,
     BacktestTypeQualityOverride,
     RiskTargetRegimeSettings,
+    RvolThrustGuardSettings,
     ScanStockGatesSettings,
     ScoringTuningSettings,
     SignalsConfirmationSettings,
@@ -197,6 +198,7 @@ class SmallCapSettings(BaseModel):
     universe_scan: UniverseScanSettings = Field(default_factory=UniverseScanSettings)
     auto_scan: AutoScanSettings = Field(default_factory=AutoScanSettings)
     signal_confirmation: SignalsConfirmationSettings = Field(default_factory=SignalsConfirmationSettings)
+    rvol_thrust_guards: RvolThrustGuardSettings = Field(default_factory=RvolThrustGuardSettings)
     scoring_tuning: ScoringTuningSettings = Field(default_factory=ScoringTuningSettings)
     backtest_loop: BacktestLoopSettings = Field(default_factory=BacktestLoopSettings)
     backtest_type_quality: BacktestTypeQualityOverride = Field(default_factory=BacktestTypeQualityOverride)

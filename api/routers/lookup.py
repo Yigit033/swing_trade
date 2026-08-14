@@ -50,6 +50,15 @@ def _analyze_smallcap_ticker(ticker: str, df, info: dict, engine, portfolio_valu
         "sector":      result["sector"],
     }
 
+    # Kurulum röntgeni — hangi aşamada reddedilirse edilsin EYLEME DÖNÜŞÜR.
+    # "SWING HAZIR DEĞİL" tek başına kullanıcıya hiçbir şey vermiyordu; tetik
+    # fiyatı ve geçersizlik seviyesi motorda zaten hesaplanıyor, artık dışa
+    # veriliyor. Kapı kararlarına etkisi YOKTUR (yalnız tarif).
+    try:
+        result["setup"] = engine.signals.describe_setup(df)
+    except Exception:
+        result["setup"] = None
+
     # ── STEP 1: Hard Filters ─────────────────────────────────────────────────
     filter_passed, filter_results = engine.filters.apply_all_filters(
         ticker, df, stock_info, datetime.now()
@@ -194,10 +203,20 @@ def lookup_tickers(body: LookupRequest):
             # farklı cevap vermesi demektir — kullanıcı hangisine güvenecek?
             df = fetcher.fetch_stock_data(ticker, period='6mo')
 
-            if df is None or len(df) < 20:
+            # İki farklı arıza aynı mesajı veriyordu ve teşhisi imkânsız
+            # kılıyordu: "hiç veri gelmedi" (sağlayıcı reddi/doğrulama hatası)
+            # ile "veri geldi ama kısa" (yeni listing) aynı şey değil.
+            if df is None:
                 results.append({
                     "ticker": ticker, "status": "error",
-                    "message": "Yetersiz veri (20+ gün gerekli)",
+                    "message": ("Veri sağlayıcısından geçerli seri alınamadı "
+                                "(sembol hatalı olabilir veya sağlayıcı bozuk bar döndürdü)"),
+                })
+                continue
+            if len(df) < 20:
+                results.append({
+                    "ticker": ticker, "status": "error",
+                    "message": f"Yetersiz veri — yalnız {len(df)} bar var (20+ gerekli)",
                 })
                 continue
 

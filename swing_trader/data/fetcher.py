@@ -132,6 +132,10 @@ class DataFetcher:
                     logger.warning(f"No data received for {ticker}")
                     return None
 
+                # Mikron OHLC artefaktlarını doğrulamadan ÖNCE onar — yoksa tek
+                # bozuk bar tüm seriyi çöpe attırıyor (bkz. _repair_ohlc_bars).
+                data = self._repair_ohlc_bars(data, ticker)
+
                 if not self._validate_ohlcv_data(data):
                     logger.warning(f"Invalid data received for {ticker}")
                     return None
@@ -308,6 +312,11 @@ class DataFetcher:
                             # incomplete (partial volume) — evaluate last
                             # completed session instead.
                             df = self._drop_incomplete_last_bar(df)
+
+                            # Tek-hisse yoluyla PARİTE: aynı mikron OHLC onarımı
+                            # burada da uygulanır, yoksa tarama ile lookup aynı
+                            # hisseye farklı barlarla bakar.
+                            df = self._repair_ohlc_bars(df, ticker)
 
                             if len(df) >= 20:
                                 results[ticker] = df
@@ -557,6 +566,53 @@ class DataFetcher:
         return results
 
     # ------------------------------------------------------------------
+
+    # Yuvarlama artefaktı sayılacak azami OHLC tutarsızlığı (barın kapanışına oran).
+    # Sağlayıcı artefaktları tipik olarak %0.02 mertebesinde; %0.5 cömert bir üst
+    # sınır ama gerçek bozulmayı (yanlış hisse, split kazası) yine yakalar.
+    OHLC_REPAIR_TOLERANCE = 0.005
+
+    def _repair_ohlc_bars(self, df: pd.DataFrame, ticker: str = "") -> pd.DataFrame:
+        """Sağlayıcı yuvarlama artefaktlarını onar: High/Low'u O/C'ye göre kıstır.
+
+        NEDEN: yfinance zaman zaman High'ı Open'ın MİKRON altında döndürüyor
+        (canlı vaka: DV 2026-08-13 → O=13.3500 H=13.3472, ihlal 0.3 SENT).
+        _validate_ohlcv_data bu tek barı görüp 123 barlık serinin TAMAMINI
+        reddediyordu ve /lookup kullanıcıya "Yetersiz veri (20+ gün gerekli)"
+        diyordu — hem yanlış sebep hem de hisseye karşı tam körlük.
+
+        Ayrıca bu bir PARİTE düzeltmesi: batch yolu (tarayıcı) OHLC hiç
+        doğrulamıyordu, tek-hisse yolu (lookup) tümden reddediyordu. Aynı hisse
+        iki yolda farklı cevap alıyordu.
+
+        Tolerans içindeki ihlaller onarılır (High = max(O,H,C), Low = min(O,L,C)),
+        dışındakiler DOKUNULMAZ — onları doğrulama reddetmeye devam etsin.
+        """
+        cols = ['Open', 'High', 'Low', 'Close']
+        if not all(c in df.columns for c in cols):
+            return df
+
+        o, h, l, c = (df[x].astype(float) for x in cols)
+        hi_need = pd.concat([o, c], axis=1).max(axis=1)
+        lo_need = pd.concat([o, c], axis=1).min(axis=1)
+
+        # Yalnız KÜÇÜK ihlaller onarılır; büyükleri doğrulamaya bırakıyoruz.
+        tol = c.abs() * self.OHLC_REPAIR_TOLERANCE
+        fix_hi = (h < hi_need) & ((hi_need - h) <= tol)
+        fix_lo = (l > lo_need) & ((l - lo_need) <= tol)
+
+        n = int(fix_hi.sum() + fix_lo.sum())
+        if n == 0:
+            return df
+
+        df = df.copy()
+        df.loc[fix_hi, 'High'] = hi_need[fix_hi]
+        df.loc[fix_lo, 'Low'] = lo_need[fix_lo]
+        logger.info(
+            f"{ticker or 'ticker'}: {n} barda mikron OHLC tutarsızlığı onarıldı "
+            f"(sağlayıcı yuvarlaması, <=%{self.OHLC_REPAIR_TOLERANCE * 100:.1f})"
+        )
+        return df
 
     def _validate_ohlcv_data(self, df: pd.DataFrame) -> bool:
         """

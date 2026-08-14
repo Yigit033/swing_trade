@@ -214,7 +214,7 @@ function ModelTab() {
 
     if (loading) return <div style={{ padding: 48, textAlign: "center" }}><span className="spinner" /></div>;
 
-    const MILESTONE = 15;
+    const MILESTONE = 50;
     const real = status?.real_count || 0;
     const demo = status?.demo_count || 0;
     const meta = status?.meta;

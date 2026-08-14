@@ -14,10 +14,20 @@ const FILTER_LABELS: Record<string, string> = {
 };
 const TRIGGER_LABELS: Record<string, string> = {
     vce_breakout: "VCE — Sıkışma Kırılımı (ANA TETİK)",
+    rvol_thrust: "RVOL İtişi — Anormal Hacim (2. YOL)",
     volume_surge: "Hacim Patlaması (Volume Surge)",
     atr_percent: "Volatilite Genişlemesi (ATR%)",
     breakout: "Breakout (Direnç Kırılımı)",
     continuation: "Trend Devamı (Continuation)",
+};
+
+// Kurulum durumu — "sinyal yok" cevabını eyleme dönüştüren röntgen
+const SETUP_STATE: Record<string, { label: string; color: string; bg: string; icon: string }> = {
+    ARMED: { label: "KURULUM HAZIR — tetik bekleniyor", color: "var(--yellow)", bg: "rgba(234,179,8,0.10)", icon: "🎯" },
+    BUILDING: { label: "KURULUM OLUŞUYOR", color: "var(--accent)", bg: "rgba(59,130,246,0.10)", icon: "🔧" },
+    EXTENDED: { label: "AŞIRI UZAMIŞ — kovalama riski", color: "var(--red)", bg: "rgba(239,68,68,0.08)", icon: "🚫" },
+    BROKEN: { label: "TREND KIRIK", color: "var(--red)", bg: "rgba(239,68,68,0.08)", icon: "📉" },
+    NONE: { label: "KURULUM YOK", color: "var(--text-muted)", bg: "rgba(0,0,0,0.2)", icon: "⚪" },
 };
 const SWING_LABELS: Record<string, string> = {
     five_day_momentum: "5-Günlük Momentum",
@@ -65,6 +75,19 @@ type AnalysisResult = {
     // Market Regime (v3.0)
     market_regime?: string;
     regime_multiplier?: number;
+    // Kurulum röntgeni — reddedilse bile eyleme dönüşen tetik/geçersizlik seviyeleri
+    setup?: {
+        state?: string;
+        trigger_price?: number | null;
+        distance_to_trigger_pct?: number | null;
+        invalidation_price?: number | null;
+        squeeze_ratio?: number | null;
+        squeeze_ok?: boolean;
+        required_rvol?: number | null;
+        current_rvol?: number | null;
+        ma20_distance_pct?: number | null;
+        note?: string;
+    } | null;
     // nested diagnostic
     filter_details?: { filters?: Record<string, { passed: boolean; reason: string }> };
     trigger_details?: { triggers?: Record<string, { passed: boolean; reason: string; optional?: boolean }>; volume_surge?: number; atr_percent?: number };
@@ -94,6 +117,77 @@ function StageRow({ label, passed, muted }: { label: string; passed?: boolean; m
         <div className="lookup-stage-row" style={{ color, opacity: muted ? 0.45 : 1 }}>
             <Icon passed={passed} muted={muted} />
             <span className="lookup-stage-label">{label}</span>
+        </div>
+    );
+}
+
+/**
+ * Kurulum röntgeni paneli.
+ *
+ * "SWING HAZIR DEĞİL" tek başına eyleme dönüşmüyordu: kullanıcı elinde hiçbir
+ * seviye olmadan kalıyordu. Tetik fiyatı ve geçersizlik seviyesi motorda zaten
+ * hesaplanıyor — bu panel onları gösterir. Kapı kararlarını DEĞİŞTİRMEZ.
+ */
+function SetupPanel({ setup }: { setup: NonNullable<AnalysisResult["setup"]> }) {
+    const meta = SETUP_STATE[setup.state ?? "NONE"] ?? SETUP_STATE.NONE;
+    const dist = setup.distance_to_trigger_pct;
+    const armed = setup.state === "ARMED";
+
+    return (
+        <div style={{
+            marginBottom: 18, padding: "14px 16px", borderRadius: 10,
+            background: meta.bg, border: `1px solid ${meta.color}40`,
+        }}>
+            <div style={{ fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.05em", color: meta.color, marginBottom: 10 }}>
+                {meta.icon} {meta.label}
+            </div>
+
+            {(armed || setup.state === "BUILDING") && setup.trigger_price != null && (
+                <div style={{ display: "flex", gap: 22, flexWrap: "wrap", marginBottom: 10 }}>
+                    <div>
+                        <div style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>TETİK FİYATI</div>
+                        <div style={{ fontWeight: 700, color: meta.color }}>
+                            ${setup.trigger_price.toFixed(2)}
+                            {dist != null && (
+                                <span style={{ fontSize: "0.72rem", fontWeight: 400, color: "var(--text-muted)", marginLeft: 6 }}>
+                                    ({dist >= 0 ? "+" : ""}{dist.toFixed(1)}%)
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                    {setup.invalidation_price != null && (
+                        <div>
+                            <div style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>GEÇERSİZLİK</div>
+                            <div style={{ fontWeight: 700, color: "var(--red)" }}>${setup.invalidation_price.toFixed(2)}</div>
+                        </div>
+                    )}
+                    {setup.required_rvol != null && (
+                        <div>
+                            <div style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>GEREKEN HACİM</div>
+                            <div style={{ fontWeight: 700, color: "var(--text-secondary)" }}>
+                                {setup.required_rvol.toFixed(1)}x
+                                {setup.current_rvol != null && (
+                                    <span style={{ fontSize: "0.72rem", fontWeight: 400, color: "var(--text-muted)", marginLeft: 6 }}>
+                                        (şu an {setup.current_rvol.toFixed(1)}x)
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                    {setup.squeeze_ratio != null && (
+                        <div>
+                            <div style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>SIKIŞMA</div>
+                            <div style={{ fontWeight: 700, color: setup.squeeze_ok ? "var(--green)" : "var(--text-secondary)" }}>
+                                bazın %{(setup.squeeze_ratio * 100).toFixed(0)}'i
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {setup.note && (
+                <div style={{ fontSize: "0.8rem", lineHeight: 1.5, color: "var(--text-secondary)" }}>{setup.note}</div>
+            )}
         </div>
     );
 }
@@ -186,6 +280,9 @@ function ResultCard({ r, onAdd, adding }: { r: AnalysisResult; onAdd: (r: Analys
                             <StageRow label="Aşama 3: Swing Onayı (5-Gün Momentum, MA20 Üzerinde, Higher Lows)" passed={triggerOk ? swingOk : undefined} muted={!triggerOk} />
                         </div>
                     )}
+
+                    {/* ── Kurulum röntgeni: reddedildiğinde de eyleme dönüşen seviyeler ── */}
+                    {!isSignal && r.setup && <SetupPanel setup={r.setup} />}
 
                     {/* ── STAGE 1: Filter detail ───────────────────────────────── */}
                     {r.filter_details && (
