@@ -18,7 +18,7 @@ interface SidebarProps {
 
 const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/how-it-works", label: "Nasıl çalışır?", icon: BookOpen },
+    { href: "/how-it-works", label: "How It Works?", icon: BookOpen },
     { href: "/scanner", label: "Scanner", icon: Search },
     { href: "/scanner/history", label: "Scanner Geçmişi", icon: Clock },
     { href: "/lookup", label: "Manual Lookup", icon: Zap },
