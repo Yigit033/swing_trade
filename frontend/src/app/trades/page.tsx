@@ -9,21 +9,36 @@ type FilterStatus = "ALL" | "OPEN" | "CLOSED" | "PENDING";
 
 const CLOSED_STATUSES = new Set(["STOPPED", "TRAILED", "TARGET", "MANUAL", "WIN", "LOSS", "CLOSED", "REJECTED", "TIMEOUT"]);
 
+const TR_TZ = "Europe/Istanbul";
+
+/** Format an instant in Turkey time (UTC+3). Never depend on the browser TZ. */
+function fmtTurkey(iso: string): { date: string; time: string } | null {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return null;
+    const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: TR_TZ,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+    }).formatToParts(d);
+    const g = (t: string) => parts.find(p => p.type === t)?.value ?? "";
+    return { date: `${g("year")}-${g("month")}-${g("day")}`, time: `${g("hour")}:${g("minute")}` };
+}
+
 /**
- * Format a date string for display in user's local timezone.
- * Handles two formats:
- *   New: "2026-05-19T13:30:00Z" (UTC ISO) → converts to local time → "2026-05-19 16:30"
- *   Old: "2026-05-19 09:30"     (ET, legacy) → shown with "ET" label → "2026-05-19 09:30 ET"
+ * Format a date string for display in Turkey time (UTC+3).
+ *   New: "2026-05-19T13:30:00Z" (UTC ISO) → "2026-05-19 16:30"
+ *   Old: "2026-05-19 09:30"     (ET, legacy) → shown with "ET" label
  */
 function fmtEntryDate(dt?: string | null): string {
     if (!dt) return "—";
     const s = String(dt);
     if (s.includes("T") || s.endsWith("Z")) {
-        const d = new Date(s);
-        if (!isNaN(d.getTime())) {
-            const pad = (n: number) => String(n).padStart(2, "0");
-            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-        }
+        const f = fmtTurkey(s);
+        if (f) return `${f.date} ${f.time}`;
     }
     // Legacy "YYYY-MM-DD HH:MM" stored as ET — label it clearly
     return s.length > 10 ? s.slice(0, 16) + " ET" : s.slice(0, 10);
@@ -391,11 +406,9 @@ export default function TradesPage() {
 
     const formattedLastUpdate = useMemo(() => {
         if (!lastUpdate) return null;
-        const d = new Date(lastUpdate);
-        if (isNaN(d.getTime())) return { date: lastUpdate, time: "" };
-        const date = d.toLocaleDateString();
-        const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        return { date, time };
+        const f = fmtTurkey(lastUpdate);
+        if (!f) return { date: lastUpdate, time: "" };
+        return { date: f.date, time: `${f.time} TR` };
     }, [lastUpdate]);
 
     if (tradesLoading && trades.length === 0) return <div style={{ padding: 80, textAlign: "center" }}><span className="spinner" /></div>;

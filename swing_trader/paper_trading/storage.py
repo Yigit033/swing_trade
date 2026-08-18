@@ -8,7 +8,7 @@ DATABASE_URL set edilmişse PostgreSQL kullanır (Supabase / Fly.io).
 import os
 import logging
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,32 @@ def _rows_to_dicts(cursor, rows):
         return [dict(zip(cols, row)) for row in rows]
     else:
         return [dict(row) for row in rows]
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _as_utc_iso(ts: Optional[str]) -> Optional[str]:
+    """Coerce a stored timestamp to UTC ISO with Z.
+
+    Legacy `datetime.now().isoformat()` values have no offset. Those were
+    written on UTC servers (Fly/production) so naive == UTC.
+    """
+    if not ts:
+        return None
+    s = str(ts).strip()
+    if not s:
+        return None
+    if s.endswith("Z") or (len(s) > 10 and ("+" in s[10:] or s.endswith("UTC"))):
+        return s
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return s
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # ── CREATE TABLE SQL ───────────────────────────────────────────────────────────
@@ -484,17 +510,18 @@ class PaperTradeStorage:
                 conn.close()
 
     def touch_last_price_update(self) -> None:
-        """Record the moment when prices were last refreshed."""
-        self._set_meta("last_price_update", datetime.now().isoformat())
+        """Record the moment when prices were last refreshed (UTC, with Z)."""
+        self._set_meta("last_price_update", _utc_now_iso())
 
     def get_last_update_timestamp(self) -> Optional[str]:
         """
         Return the last time prices were refreshed via the API.
-        
-        This is stored in the paper_meta table and updated whenever
-        /api/trades/update-prices is called.
+
+        Always a UTC ISO string with Z so the frontend can convert to
+        Europe/Istanbul. Naive legacy values (datetime.now().isoformat()
+        on a UTC server, no offset) are treated as UTC.
         """
-        return self._get_meta("last_price_update")
+        return _as_utc_iso(self._get_meta("last_price_update"))
 
     def get_trade_by_id(self, trade_id: int, user_id: Optional[str] = None) -> Optional[Dict]:
         """Get a specific trade by ID."""
