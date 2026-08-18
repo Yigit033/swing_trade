@@ -113,6 +113,10 @@ def _enrich_open_trades_inline(trades: list) -> list:
                 t["unrealized_pnl_pct"] = round(((cp / entry) - 1) * 100, 2)
         elif status not in ("OPEN", "PENDING"):
             # Post-exit drift: how far has it moved since we exited?
+            # Never leak the last OPEN unrealized P&L (KYMR: +10.15% leftover
+            # on a TRAILED −0.05% close).
+            t["unrealized_pnl"] = 0
+            t["unrealized_pnl_pct"] = 0
             exit_px = t.get("exit_price") or 0
             if exit_px:
                 t["since_exit_pct"] = round((cp / exit_px - 1) * 100, 2)

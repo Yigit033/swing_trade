@@ -604,6 +604,9 @@ class PaperTradeStorage:
                 'exit_price': exit_price,
                 'realized_pnl': round(pnl, 2),
                 'realized_pnl_pct': round(pnl_pct, 2),
+                'current_price': round(float(exit_price), 2),
+                'unrealized_pnl': 0,
+                'unrealized_pnl_pct': 0,
                 'notes': notes,
             }, user_id)
         except Exception as e:

@@ -149,6 +149,8 @@ class PaperTradeTracker:
       +1.5 ATR kâra ulaşıldıktan sonra devreye girer (monoton, yalnız yukarı)
     - T1'de ayardan okunan oran kadar kısmi satış + stop başabaşa çekilir
     - Stop, trail GÜNCELLEMESİNDEN ÖNCE kontrol edilir (aynı-bar sıralaması)
+    - Trail her koşuda baştan hesaplanır (persist edilen trailing_stop girdi DEĞİL —
+      KYMR 2026-08-14: persist edilen trail geçmiş bara uygulanınca sahte TRAILED)
     - Stop'un altında açılış → Open fiyatından çıkış (gerçekçi kayma)
     - Timeout işlem günü sayar (takvim günü DEĞİL)
     """
@@ -207,6 +209,19 @@ class PaperTradeTracker:
                 if len(df) == 0:
                     logger.warning(f"{ticker}: tüm barlar NaN OHLC — fiyat geçmişi yok sayıldı")
                     return None
+                # Bugünün henüz kapanmamış barını kullanma. KYMR'de (ve genel
+                # olarak) tamamlanmamış son barın High'ı trail'i şişirir; seans
+                # bitince Low o trail'i geriye dönük etiketleyebilir. Tarama
+                # yolu (_drop_incomplete_last_bar) zaten aynı kuralı uyguluyor.
+                today_ny = datetime.now(tz=_NYSE_TZ).date()
+                last_d = df['Date'].iloc[-1]
+                if hasattr(last_d, 'date'):
+                    last_d = last_d.date()
+                if last_d == today_ny:
+                    now_ny = datetime.now(tz=_NYSE_TZ)
+                    session_done = now_ny.hour > 16 or (now_ny.hour == 16 and now_ny.minute >= 10)
+                    if not session_done and len(df) > 1:
+                        df = df.iloc[:-1].copy()
                 return df
 
         except Exception as e:
@@ -284,7 +299,18 @@ class PaperTradeTracker:
         max_hold_days = trade.get('max_hold_days', 7)
         entry_date = datetime.strptime(trade['entry_date'][:10], '%Y-%m-%d').date()
         atr = trade.get('atr') or 0
-        trailing_stop = trade.get('trailing_stop') or stop_loss
+        # Trail is RECOMPUTED from the bar tape every run, seeded from the
+        # initial stop (or breakeven after T1). NEVER from the persisted
+        # `trailing_stop` column.
+        #
+        # KYMR 2026-08-12 (id=83): a later corrupt/incomplete bar ratcheted
+        # trailing_stop to $110.17 (≈ entry). The next run applied that
+        # persisted trail to the Aug 14 wick (Low $110.05) and closed TRAILED
+        # −0.05% — while a fresh replay from initial_stop stays OPEN with
+        # trail $105.62 (Low $110.05 never tagged it). Persisted trail is a
+        # DISPLAY cache, not an input. Same-bar "stop before trail update"
+        # is worthless if yesterday's trail was computed from tomorrow's high.
+        trailing_stop = initial_stop
         has_partial = (trade.get('partial_exit_price') or 0) > 0
 
         if len(price_history) <= 1:

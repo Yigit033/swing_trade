@@ -536,8 +536,8 @@ export default function TradesPage() {
                                         const exitPrice = isClosed ? t.exit_price : null;
                                         // Compute P&L: use realized for closed, unrealized for open
                                         // If unrealized is null but we have current_price, compute client-side
-                                        let pnl = t.realized_pnl ?? t.unrealized_pnl ?? null;
-                                        let pnlPct = t.realized_pnl_pct ?? t.unrealized_pnl_pct ?? null;
+                                        let pnl = isClosed ? (t.realized_pnl ?? null) : (t.unrealized_pnl ?? null);
+                                        let pnlPct = isClosed ? (t.realized_pnl_pct ?? null) : (t.unrealized_pnl_pct ?? null);
                                         if (pnl == null && isOpen && currentPrice && t.entry_price) {
                                             const size = t.position_size || 100;
                                             pnl = (currentPrice - t.entry_price) * size;
