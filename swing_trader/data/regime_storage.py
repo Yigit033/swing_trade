@@ -52,9 +52,9 @@ def _connect():
     global _MODE
     if _MODE == "pg":
         try:
-            import psycopg2
-            conn = psycopg2.connect(DATABASE_URL, connect_timeout=5)
-            return conn
+            from swing_trader.utils.pg_connect import connect as pg_connect
+
+            return pg_connect(DATABASE_URL)
         except Exception as e:
             logger.warning(f"PostgreSQL connection failed ({e.__class__.__name__}): {e}")
             raise

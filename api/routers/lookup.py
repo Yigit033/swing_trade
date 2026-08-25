@@ -8,14 +8,12 @@ with the exact rejection stage reported for each ticker.
 
 import logging
 from datetime import datetime
-import pandas as pd
-import yfinance as yf
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List
 
 from api.deps import get_smallcap_engine, get_fetcher
-from api.utils import flatten_yf_df, sanitize_for_json
+from api.utils import sanitize_for_json
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -229,6 +227,9 @@ def lookup_tickers(body: LookupRequest):
             from swing_trader.utils.market_calendar import (
                 last_completed_session, sessions_behind,
             )
+            import pandas as pd
+            import yfinance as yf
+
             _bar_date = pd.to_datetime(df["Date"].iloc[-1]).date()
             _behind = sessions_behind(_bar_date)
 

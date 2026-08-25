@@ -34,28 +34,54 @@ _PENDING_SCHEDULER_ENABLED = _os.environ.get("ENABLE_PENDING_SCHEDULER", "1").st
 )
 _PENDING_INTERVAL_SEC = int(_os.environ.get("PENDING_CONFIRM_INTERVAL_SEC", "300"))
 
+# CORS — credentials=true için "*" kullanılamaz. Varsayılanlara production
+# frontend'i de dahil: secret set edilmemiş olsa bile Vercel preflight geçsin.
+_DEFAULT_CORS_ORIGINS = (
+    "http://localhost:5000",
+    "http://127.0.0.1:5000",
+    "http://localhost:3000",
+    "https://swingtrade.vercel.app",
+)
+
+
+def cors_allow_origins(raw: str | None = None) -> list[str]:
+    """Merge explicit CORS_ORIGINS with localhost + the production Vercel origin."""
+    origins = list(_DEFAULT_CORS_ORIGINS)
+    text = (raw if raw is not None else _os.environ.get("CORS_ORIGINS", "")).strip()
+    if not text or text == "*":
+        return origins
+    for part in text.split(","):
+        origin = part.strip().rstrip("/")
+        if origin and origin not in origins:
+            origins.append(origin)
+    return origins
+
+
+_origins = cors_allow_origins()
+
+
+def _run_scheduled_pending_and_exits() -> tuple[int, list]:
+    """Sync yfinance/Postgres work — must not run on the asyncio event loop."""
+    from api.deps import get_paper_tracker
+
+    tracker = get_paper_tracker()
+    processed = tracker.confirm_pending_trades(None)
+    updated = tracker.update_all_open_trades(None)
+    closed = [
+        t for t in (updated or [])
+        if t.get("status") not in ("OPEN", "PENDING")
+    ]
+    return len(processed or []), closed
+
 
 async def _scheduled_pending_confirm_loop() -> None:
     """Periodically run pending confirmation for all users (no UI required)."""
     await asyncio.sleep(15)
     while True:
         try:
-            from api.deps import get_paper_tracker
-
-            tracker = get_paper_tracker()
-            processed = tracker.confirm_pending_trades(None)
-            n = len(processed or [])
+            n, closed = await asyncio.to_thread(_run_scheduled_pending_and_exits)
             if n:
                 logger.info("Scheduled pending confirm: processed %d trade(s)", n)
-            # Exit lifecycle must not depend on the UI being open: check
-            # stop/T1/T2/trailing/timeout on OPEN trades in the background too.
-            # (Previously this ran only on POST /api/trades/update-prices, so
-            # exits were evaluated only when the user visited the page.)
-            updated = tracker.update_all_open_trades(None)
-            closed = [
-                t for t in (updated or [])
-                if t.get("status") not in ("OPEN", "PENDING")
-            ]
             if closed:
                 logger.info(
                     "Scheduled exit check: %d trade(s) closed (%s)",
@@ -115,12 +141,6 @@ async def global_exception_handler(request: Request, exc: Exception):
     return resp
 
 
-# CORS — credentials=true için "*" kullanılamaz, localhost açıkça eklenmeli
-_cors_origins = _os.environ.get("CORS_ORIGINS", "*")
-if _cors_origins == "*":
-    _origins = ["http://localhost:5000", "http://127.0.0.1:5000"]
-else:
-    _origins = [o.strip() for o in _cors_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,

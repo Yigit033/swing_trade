@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -6,6 +6,25 @@ export const api = axios.create({
     baseURL: API_BASE,
     timeout: 120000, // 2 min for scan operations
 });
+
+const FLY_WAKE_RETRIES = 3;
+const FLY_WAKE_STATUSES = new Set([502, 503, 504]);
+
+type RetryConfig = InternalAxiosRequestConfig & { _retryCount?: number };
+
+function isFlyWakeFailure(err: AxiosError): boolean {
+    const status = err.response?.status;
+    if (status && FLY_WAKE_STATUSES.has(status)) return true;
+    // Fly 502 often surfaces as CORS / ERR_NETWORK because the proxy page has no ACAO header.
+    if (!err.response && (err.code === "ERR_NETWORK" || err.message === "Network Error")) {
+        return true;
+    }
+    return false;
+}
+
+function flyWakeDelayMs(attempt: number): number {
+    return 2000 * 2 ** (attempt - 1); // 2s, 4s, 8s
+}
 
 // Add Supabase JWT to requests when auth is configured
 api.interceptors.request.use(async (config) => {
@@ -27,14 +46,15 @@ api.interceptors.request.use(async (config) => {
 
 // 401 + token gönderildiyse → token reddedildi, sign out ve login'e yönlendir
 // Token GÖNDERİLMEDİYSE → timing/race (session henüz hazır değil), sign out YAPMA
+// 502/network: Fly scale-to-zero wake — 2–3 kez bekle ve tekrar dene
 api.interceptors.response.use(
     (res) => res,
-    async (err) => {
+    async (err: AxiosError) => {
         if (typeof window !== "undefined" && err?.response?.status === 401) {
             const hadToken = !!err?.config?.headers?.Authorization;
             // Debug: 401 sebebini logla (Fly.io logs + backend auth_configured kontrolü)
             if (hadToken) {
-                const detail = err?.response?.data?.detail ?? "unknown";
+                const detail = (err.response?.data as { detail?: string } | undefined)?.detail ?? "unknown";
                 console.error(
                     "[Auth 401] Backend token reddetti.",
                     "URL:", err?.config?.url,
@@ -53,6 +73,18 @@ api.interceptors.response.use(
                     // ignore
                 }
                 window.location.href = "/login";
+            }
+            return Promise.reject(err);
+        }
+
+        const config = err.config as RetryConfig | undefined;
+        if (config && isFlyWakeFailure(err)) {
+            const n = config._retryCount ?? 0;
+            if (n < FLY_WAKE_RETRIES && !config.signal?.aborted) {
+                const attempt = n + 1;
+                config._retryCount = attempt;
+                await new Promise((r) => setTimeout(r, flyWakeDelayMs(attempt)));
+                return api.request(config);
             }
         }
         return Promise.reject(err);

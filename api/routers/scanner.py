@@ -7,12 +7,11 @@ GET  /api/scanner/smallcap/job/{job_id} - poll status + result when done
 POST /api/scanner/track          - add a signal to paper trades via tracker (duplicate-safe)
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 import datetime
-import yfinance as yf
-import pandas as pd
-import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -26,7 +25,7 @@ from api.deps import (
     get_signal_history_storage,
 )
 from api.auth import get_current_user_id
-from api.utils import flatten_yf_df, sanitize_for_json, fetch_ticker_history
+from api.utils import sanitize_for_json
 from api.scanner_jobs import (
     create_exclusive_scan_job,
     get_job_public,
@@ -188,6 +187,8 @@ def get_chart_data(ticker: str = Query(...), period: str = Query("3mo")):
         if df is None or len(df) < 5:
             return {"error": f"Veri alınamadı ({ticker}). Yahoo Finance geçici olarak rate limit uygulamış olabilir — birkaç dakika sonra tekrar deneyin.", "ticker": ticker}
 
+        import numpy as np
+
         close = df["Close"].astype(float)
         vol   = df["Volume"].astype(float)
 
@@ -307,6 +308,8 @@ def _assess_data_staleness(data_dict: dict, now=None) -> dict:
     """
     from collections import Counter
 
+    import pandas as pd
+
     from swing_trader.utils.market_calendar import last_completed_session, sessions_behind
 
     expected = last_completed_session(now)
@@ -374,7 +377,7 @@ def _execute_smallcap_scan(
     # yakındı — tek eksik bar (halt, yeni listing) sessiz insufficient_data
     # reddiydi. Ölçüm harness'ı da >=60 bar kullanıyor; 6mo ikisini de bol
     # marjla karşılar. Maliyet: aynı istek sayısı, biraz büyük payload.
-    data_dict: dict[str, pd.DataFrame] = fetcher.fetch_multiple_stocks_batch(tickers, period="6mo")
+    data_dict = fetcher.fetch_multiple_stocks_batch(tickers, period="6mo")
 
     # ── Data-quality devre kesici ─────────────────────────────────────────
     # Fetch başarısı eşiğin altındaysa evren toplu bozulmuş demektir (ticker
@@ -390,7 +393,7 @@ def _execute_smallcap_scan(
         )
         prog(12, "fetch", "Evren verisi bozuk görünüyor — static evrenle yeniden deneniyor…")
         static_tickers = engine.get_small_cap_universe(use_finviz=False)
-        static_data: dict[str, pd.DataFrame] = fetcher.fetch_multiple_stocks_batch(static_tickers, period="3mo")
+        static_data = fetcher.fetch_multiple_stocks_batch(static_tickers, period="3mo")
         static_ratio = len(static_data) / len(static_tickers) if static_tickers else 0.0
 
         if static_ratio >= MIN_FETCH_SUCCESS_RATIO:

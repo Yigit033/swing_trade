@@ -50,9 +50,9 @@ _MODE = _url_mode()
 
 def _connect():
     if _MODE == "pg":
-        import psycopg2
+        from swing_trader.utils.pg_connect import connect as pg_connect
 
-        return psycopg2.connect(DATABASE_URL, connect_timeout=5)
+        return pg_connect(DATABASE_URL)
     import sqlite3
 
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)

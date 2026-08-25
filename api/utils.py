@@ -1,12 +1,16 @@
 """Shared utilities for API routers."""
 
+from __future__ import annotations
+
 import logging
 import math
 import time
-import pandas as pd
-import numpy as np
+from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 # In-memory TTL cache for yfinance data (avoids rate limiting)
@@ -25,8 +29,9 @@ def fetch_ticker_history(ticker: str, period: str = "3mo", interval: str = "1d",
     Returns a flat DataFrame with columns: Date, Open, High, Low, Close, Volume
     or empty DataFrame on failure.
     """
-    import yfinance as yf
+    import pandas as pd
     import requests as req
+    import yfinance as yf
 
     ticker = ticker.upper().strip()
     cache_key = (ticker, period, interval)
@@ -77,6 +82,8 @@ def flatten_yf_df(df: pd.DataFrame) -> pd.DataFrame:
         Date, Open, High, Low, Close, Volume
     and integer index.
     """
+    import pandas as pd
+
     if df is None or df.empty:
         return df
 
@@ -100,7 +107,7 @@ def flatten_yf_df(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def sanitize_for_json(obj):
+def sanitize_for_json(obj: Any) -> Any:
     """
     Recursively convert numpy / pandas types to plain Python types so
     that FastAPI's json.dumps doesn't crash on numpy.bool_, float64, etc.
@@ -112,6 +119,17 @@ def sanitize_for_json(obj):
         return {k: sanitize_for_json(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [sanitize_for_json(i) for i in obj]
+    # Native Python float: NaN VE ±Infinity → None. (2026-07-26: /update-prices
+    # NaN'lı bir hisseden hesaplanan unrealized_pnl'i Infinity yapabiliyordu;
+    # eski kod yalnız NaN'ı yakalıyordu, Infinity 500 hatasına yol açtı.)
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return None
+    if isinstance(obj, (str, int, bool)) or obj is None:
+        return obj
+
+    import numpy as np
+    import pandas as pd
+
     if isinstance(obj, np.bool_):
         return bool(obj)
     if isinstance(obj, (np.integer,)):
@@ -123,14 +141,8 @@ def sanitize_for_json(obj):
         return f if math.isfinite(f) else None
     if isinstance(obj, np.ndarray):
         return sanitize_for_json(obj.tolist())
-    if hasattr(obj, 'item'):                  # any remaining numpy scalar
-        return sanitize_for_json(obj.item())
-    # pandas NaT / NaN
     if obj is pd.NaT:
         return None
-    # Native Python float: NaN VE ±Infinity → None. (2026-07-26: /update-prices
-    # NaN'lı bir hisseden hesaplanan unrealized_pnl'i Infinity yapabiliyordu;
-    # eski kod yalnız NaN'ı yakalıyordu, Infinity 500 hatasına yol açtı.)
-    if isinstance(obj, float) and not math.isfinite(obj):
-        return None
+    if hasattr(obj, "item"):  # any remaining numpy scalar
+        return sanitize_for_json(obj.item())
     return obj

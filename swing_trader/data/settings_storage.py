@@ -65,9 +65,9 @@ def _connect():
     url = _database_url()
     if not url:
         return None
-    import psycopg2
+    from swing_trader.utils.pg_connect import connect as pg_connect
 
-    return psycopg2.connect(url, connect_timeout=5)
+    return pg_connect(url)
 
 
 def load_patch() -> Dict[str, Any]:

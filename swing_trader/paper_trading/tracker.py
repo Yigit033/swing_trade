@@ -12,16 +12,19 @@ V4 Improvements (over V3):
 - PENDING state → confirm at next-day Open with gap filter — unchanged
 """
 
+from __future__ import annotations
+
 import logging
 import math
-from typing import Dict, List, Tuple, Optional
+from typing import TYPE_CHECKING, Dict, List, Tuple, Optional
 from datetime import datetime, timedelta, date
-import yfinance as yf
-import pandas as pd
 
 from zoneinfo import ZoneInfo
 
 from .storage import PaperTradeStorage
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +179,9 @@ class PaperTradeTracker:
         Returns:
             DataFrame with OHLCV data
         """
+        import pandas as pd
+        import yfinance as yf
+
         try:
             stock = yf.Ticker(ticker)
 
@@ -402,6 +408,8 @@ class PaperTradeTracker:
     
     def get_current_price(self, ticker: str) -> Optional[float]:
         """Get current/last price for a ticker. Uses period='5d' to handle weekends."""
+        import yfinance as yf
+
         try:
             stock = yf.Ticker(ticker)
             hist = stock.history(period='5d')
@@ -628,6 +636,8 @@ class PaperTradeTracker:
         atr = 0
         try:
             from ..small_cap.risk import SmallCapRisk
+            import yfinance as yf
+
             risk = SmallCapRisk()
             ticker = signal['ticker']
             stock = yf.Ticker(ticker)

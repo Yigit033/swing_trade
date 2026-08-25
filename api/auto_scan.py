@@ -176,7 +176,7 @@ async def auto_scan_loop() -> None:
 
     while True:
         try:
-            us = load_settings().auto_scan
+            us = (await asyncio.to_thread(load_settings)).auto_scan
             if not us.enabled:
                 await asyncio.sleep(300)  # kapalıyken 5dk'da bir ayar değişmiş mi diye bak
                 continue
