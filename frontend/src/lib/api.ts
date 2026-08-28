@@ -290,7 +290,14 @@ export type SmallcapScanRunMeta = {
 };
 
 export type SmallcapScanRunDetail = SmallcapScanRunMeta & {
-    stats?: Record<string, unknown>;
+    stats?: Record<string, unknown> & {
+        scanned_members?: ScannedMember[];
+        universe_no_signal?: number;
+        stocks_scanned?: number;
+        stocks_with_data?: number;
+        raw_signals?: number;
+        filtered_signals?: number;
+    };
     signals?: Signal[];
     stale_fallback?: boolean;
 };
@@ -544,6 +551,25 @@ export type EdgeSignal = {
     mfe10: number | null;
     mae10: number | null;
     status: string;
+    kind?: "signal" | "universe" | string | null;
+    reject_reason?: string | null;
+};
+
+export type EdgeRejectReason = {
+    reason: string;
+    n: number;
+    pending: number;
+    n_mature: number;
+    mean: number | null;
+    win_rate: number | null;
+};
+
+export type EdgeUniverse = {
+    n_tracked: number;
+    n_complete: number;
+    aggregates: Record<string, EdgeAgg>;
+    r10: EdgeSide;
+    reject_reasons: EdgeRejectReason[];
 };
 
 export type EdgeTracking = {
@@ -560,6 +586,37 @@ export type EdgeTracking = {
     };
     harness_expectation: Record<string, string>;
     signals: EdgeSignal[];
+    universe?: EdgeUniverse;
+    cohort_split?: {
+        signal: EdgeSide;
+        universe: EdgeSide;
+    };
+    universe_rows?: EdgeSignal[];
+};
+
+export const REJECT_REASON_LABELS: Record<string, string> = {
+    no_trigger: "Tetik yok",
+    filter_failed: "Filtre",
+    rsi_gate: "RSI kapısı",
+    swing_not_ready: "Swing hazır değil",
+    stage_rejected: "Weinstein evresi",
+    insufficient_data: "Veri yetersiz",
+    no_data: "Fiyat alınamadı",
+    scan_error: "Tarama hatası",
+    quality_type_a: "Tip A tabanı",
+    quality_type_b: "Tip B tabanı",
+    quality_type_c: "Tip C tabanı",
+    quality_type_s: "Tip S tabanı",
+    unknown: "Bilinmiyor",
+};
+
+export type ScannedMember = {
+    ticker: string;
+    kind: "signal" | "universe" | string;
+    date?: string | null;
+    quality?: number | null;
+    reject_reason?: string | null;
+    pathway?: string | null;
 };
 
 export const getEdgeTracking = (refresh = false) =>

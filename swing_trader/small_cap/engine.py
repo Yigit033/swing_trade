@@ -31,6 +31,40 @@ def _bump_scan_reject(reject_counts: Optional[MutableMapping[str, int]], key: st
     reject_counts[key] = reject_counts.get(key, 0) + 1
 
 
+def _bar_date_str(df: Optional[pd.DataFrame]) -> Optional[str]:
+    """Last completed bar date (YYYY-MM-DD) if the frame has a Date column/index."""
+    if df is None or len(df) == 0:
+        return None
+    try:
+        raw = df["Date"].iloc[-1] if "Date" in df.columns else df.index[-1]
+        if isinstance(raw, pd.Timestamp):
+            return raw.strftime("%Y-%m-%d")
+        return str(raw)[:10]
+    except Exception:
+        return None
+
+
+def _note_scan_reject(
+    reject_counts: Optional[MutableMapping[str, int]],
+    outcomes: Optional[List[Dict]],
+    ticker: str,
+    key: str,
+    *,
+    bar_date: Optional[str] = None,
+    quality: Optional[float] = None,
+) -> None:
+    """Count a reject and, when collecting, keep the ticker-level reason (no fake Q)."""
+    _bump_scan_reject(reject_counts, key)
+    if outcomes is None:
+        return
+    row: Dict = {"ticker": ticker, "reject_reason": key}
+    if bar_date:
+        row["date"] = bar_date
+    if quality is not None:
+        row["quality"] = quality
+    outcomes.append(row)
+
+
 class SmallCapEngine:
     """
     Small Cap Momentum Engine - Independent trading engine.
@@ -282,6 +316,7 @@ class SmallCapEngine:
         portfolio_value: float = 10000,
         spy_df_window: Optional[pd.DataFrame] = None,
         reject_counts: Optional[MutableMapping[str, int]] = None,
+        outcomes: Optional[List[Dict]] = None,
         regime: str = '',
         earnings_dates=None,
     ) -> Optional[Dict]:
@@ -299,7 +334,10 @@ class SmallCapEngine:
         """
         if df is None or len(df) < 20:
             logger.debug(f"{ticker}: Insufficient data")
-            _bump_scan_reject(reject_counts, "insufficient_data")
+            _note_scan_reject(
+                reject_counts, outcomes, ticker, "insufficient_data",
+                bar_date=_bar_date_str(df),
+            )
             return None
         
         try:
@@ -345,7 +383,10 @@ class SmallCapEngine:
             
             if not filter_passed:
                 logger.debug(f"{ticker}: Failed filter - {filter_results.get('filters', {})}")
-                _bump_scan_reject(reject_counts, "filter_failed")
+                _note_scan_reject(
+                    reject_counts, outcomes, ticker, "filter_failed",
+                    bar_date=signal_date_str,
+                )
                 return None
             
             # Step 2: Check signal triggers (v13: VCE squeeze-breakout is primary)
@@ -353,7 +394,10 @@ class SmallCapEngine:
 
             if not triggered:
                 logger.debug(f"{ticker}: No trigger - {trigger_details.get('triggers', {})}")
-                _bump_scan_reject(reject_counts, "no_trigger")
+                _note_scan_reject(
+                    reject_counts, outcomes, ticker, "no_trigger",
+                    bar_date=signal_date_str,
+                )
                 return None
 
             # Step 3: Get boosters (includes swing confirmation)
@@ -378,7 +422,10 @@ class SmallCapEngine:
                     f"{ticker}: Failed swing confirmation - "
                     f"5d_mom={five_day.get('passed')}, ma20={ma20.get('passed')}"
                 )
-                _bump_scan_reject(reject_counts, "swing_not_ready")
+                _note_scan_reject(
+                    reject_counts, outcomes, ticker, "swing_not_ready",
+                    bar_date=signal_date_str,
+                )
                 return None
             
             # Step 4: Calculate quality score (includes penalties)
@@ -471,7 +518,10 @@ class SmallCapEngine:
             _is_vce = trigger_details.get('trigger_pathway') == 'vce_breakout'
             if rsi > max_rsi and not _is_vce:
                 logger.debug(f"{ticker}: RSI {rsi:.0f} > {max_rsi} — rejected (overbought, not squeeze)")
-                _bump_scan_reject(reject_counts, "rsi_gate")
+                _note_scan_reject(
+                    reject_counts, outcomes, ticker, "rsi_gate",
+                    bar_date=signal_date_str,
+                )
                 return None
 
             # GEÇ GİRİŞ KAPISI SİLİNDİ — 2026-08-04 (measure_gate_value.py):
@@ -513,14 +563,20 @@ class SmallCapEngine:
                     logger.debug(
                         f"{ticker}: Weinstein Stage 4 (Decline) — hard reject"
                     )
-                    _bump_scan_reject(reject_counts, "stage_rejected")
+                    _note_scan_reject(
+                        reject_counts, outcomes, ticker, "stage_rejected",
+                        bar_date=signal_date_str,
+                    )
                     return None
                 if sg.reject_stage3 and _wstage == 3:
                     logger.debug(
                         f"{ticker}: Weinstein Stage 3 (Distribution) — hard reject "
                         f"(type={swing_type})"
                     )
-                    _bump_scan_reject(reject_counts, "stage_rejected")
+                    _note_scan_reject(
+                        reject_counts, outcomes, ticker, "stage_rejected",
+                        bar_date=signal_date_str,
+                    )
                     return None
 
             quality_score = self.scoring.calculate_quality_score(
@@ -589,7 +645,11 @@ class SmallCapEngine:
                     f"{ticker}: Q={quality_score:.1f} < type_{swing_type} min {_type_min_q} "
                     f"(regime={regime} floor) — rejected"
                 )
-                _bump_scan_reject(reject_counts, f"quality_type_{swing_type.lower()}")
+                _note_scan_reject(
+                    reject_counts, outcomes, ticker, f"quality_type_{swing_type.lower()}",
+                    bar_date=signal_date_str,
+                    quality=round(quality_score, 1),
+                )
                 return None
 
             type_labels = {
@@ -757,7 +817,10 @@ class SmallCapEngine:
             
         except Exception as e:
             logger.error(f"Error scanning {ticker}: {e}", exc_info=True)
-            _bump_scan_reject(reject_counts, "scan_error")
+            _note_scan_reject(
+                reject_counts, outcomes, ticker, "scan_error",
+                bar_date=_bar_date_str(df),
+            )
             return None
     
     def scan_universe(
@@ -785,6 +848,7 @@ class SmallCapEngine:
         signals = []
         scanned = 0
         reject_counts: Dict[str, int] = {}
+        outcomes: List[Dict] = []
 
         logger.info(f"SmallCapEngine: Scanning {len(tickers)} stocks")
 
@@ -803,12 +867,17 @@ class SmallCapEngine:
                     pass        # ilerleme raporu taramayı asla düşürmemeli
 
             if ticker not in data_dict:
+                outcomes.append({"ticker": ticker, "reject_reason": "no_data"})
+                _bump_scan_reject(reject_counts, "no_data")
                 continue
 
             df = data_dict[ticker]
             scanned += 1
 
-            signal = self.scan_stock(ticker, df, reject_counts=reject_counts, regime=current_regime)
+            signal = self.scan_stock(
+                ticker, df, reject_counts=reject_counts, outcomes=outcomes,
+                regime=current_regime,
+            )
 
             if signal:
                 signal['market_regime'] = current_regime
@@ -826,6 +895,7 @@ class SmallCapEngine:
                      reverse=True)
 
         self._last_scan_reject_counts = reject_counts
+        self._last_scan_outcomes = outcomes
         no_signal = scanned - len(signals)
         top_rejects = sorted(reject_counts.items(), key=lambda kv: -kv[1])[:5]
         reject_summary = ", ".join(f"{k}={v}" for k, v in top_rejects) if top_rejects else ""

@@ -483,7 +483,7 @@ def _execute_smallcap_scan(
         prog(pct, "scan", f"Momentum motoru: {done}/{total} hisse")
 
     signals = engine.scan_universe(
-        tickers=list(data_dict.keys()),
+        tickers=list(tickers),
         data_dict=data_dict,
         portfolio_value=body.portfolio_value,
         progress_cb=_scan_progress,
@@ -581,6 +581,31 @@ def _execute_smallcap_scan(
     if err:
         stats["regime_detect_error"] = err
 
+    from swing_trader.data.forward_returns import assemble_scan_membership
+
+    scanned_members: list = []
+    try:
+        fallback_date = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        for _df in data_dict.values():
+            try:
+                if _df is not None and len(_df) and "Date" in _df.columns:
+                    fallback_date = str(_df["Date"].iloc[-1])[:10]
+                    break
+            except Exception:
+                pass
+        scanned_members = assemble_scan_membership(
+            universe_tickers=list(tickers),
+            signals=signals,
+            outcomes=getattr(engine, "_last_scan_outcomes", None) or [],
+            fallback_date=fallback_date,
+        )
+        stats["scanned_members"] = scanned_members
+        stats["universe_no_signal"] = sum(
+            1 for m in scanned_members if m.get("kind") == "universe"
+        )
+    except Exception:
+        logger.debug("Scan membership snapshot skipped (non-critical)")
+
     # Persist scan result for future analysis (non-critical).
     try:
         get_signal_history_storage().save_run(
@@ -609,6 +634,7 @@ def _execute_smallcap_scan(
 
         tracker = get_forward_tracker()
         tracker.record_signals(job_id, signals)
+        tracker.record_universe(job_id, scanned_members, regime=actual_regime)
         tracker.update_pending()
     except Exception:
         logger.debug("Forward-return tracking skipped (non-critical)")
@@ -734,16 +760,15 @@ def get_smallcap_scan_history(
 @router.get("/smallcap/edge-tracking")
 def get_edge_tracking(refresh: bool = Query(False)):
     """
-    Live signal forward-return tracking (v13 feedback loop).
+    Live signal + universe forward-return tracking.
 
-    Returns R3/R5/R10 + MFE/MAE aggregates for every live signal produced by
-    the scanner, alongside the harness expectation — answers "are our live
-    signals actually performing like the measured edge?" with data.
-    Set refresh=true to fill matured returns before reading.
+    Signal cohort: every engine-produced signal (display-threshold misses included).
+    Universe cohort: scanned names that never became a signal (reject_reason, Q only if scored).
+    Set refresh=true to fill matured R3/R5/R10 (signals first, then universe).
     """
     from swing_trader.data.forward_returns import get_forward_tracker
 
     tracker = get_forward_tracker()
     if refresh:
-        tracker.update_pending()
+        tracker.update_pending(max_tickers=80)
     return sanitize_for_json(tracker.get_stats())

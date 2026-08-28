@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getSmallcapScanHistory, getSmallcapScanHistoryRun } from "@/lib/api";
-import type { SmallcapScanRunMeta, SmallcapScanRunDetail, Signal } from "@/lib/api";
+import { getSmallcapScanHistory, getSmallcapScanHistoryRun, REJECT_REASON_LABELS } from "@/lib/api";
+import type { SmallcapScanRunMeta, SmallcapScanRunDetail, Signal, ScannedMember } from "@/lib/api";
 import { Calendar, RefreshCw, Search, Shield, Target, TrendingUp } from "lucide-react";
 
 function fmtTs(ts?: string | null): string {
@@ -95,7 +95,7 @@ function RunDetail({ run }: { run: SmallcapScanRunDetail }) {
 
             {signals.length === 0 ? (
                 <div style={{ padding: 30, textAlign: "center", color: "var(--text-muted)" }}>
-                    Bu run’da kaydedilmiş sinyal yok.
+                    Bu run’da kaydedilmiş (eşiği geçen) sinyal yok.
                 </div>
             ) : (
                 <div style={{ overflowX: "auto" }}>
@@ -118,6 +118,8 @@ function RunDetail({ run }: { run: SmallcapScanRunDetail }) {
                 </div>
             )}
 
+            <ScannedMembersPanel members={(stats as { scanned_members?: ScannedMember[] }).scanned_members} />
+
             {signals.some((s) => !!s.narrative_text) ? (
                 <div style={{ marginTop: 14 }}>
                     <div style={{ fontWeight: 900, marginBottom: 10 }}>Sinyal notları (narrative)</div>
@@ -136,6 +138,102 @@ function RunDetail({ run }: { run: SmallcapScanRunDetail }) {
                     </div>
                 </div>
             ) : null}
+        </div>
+    );
+}
+
+function ScannedMembersPanel({ members }: { members?: ScannedMember[] }) {
+    const [open, setOpen] = useState(false);
+    const [q, setQ] = useState("");
+    if (!members || members.length === 0) {
+        return (
+            <div style={{ marginTop: 14, fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                Bu kayıtta evren isimleri yok (özellik eklenmeden önceki taramalar). Yeni bir tarama koşunca 86 isim burada durur.
+            </div>
+        );
+    }
+    const qq = q.trim().toUpperCase();
+    const filtered = !qq
+        ? members
+        : members.filter((m) => {
+            const blob = `${m.ticker} ${m.kind} ${m.reject_reason || ""} ${m.quality ?? ""}`.toUpperCase();
+            return blob.includes(qq);
+        });
+    const nUni = members.filter((m) => m.kind === "universe").length;
+    const nSig = members.filter((m) => m.kind === "signal").length;
+    return (
+        <div style={{ marginTop: 16 }}>
+            <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                style={{
+                    width: "100%",
+                    textAlign: "left",
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid var(--border-muted)",
+                    borderRadius: 10,
+                    padding: "10px 12px",
+                    cursor: "pointer",
+                    color: "var(--text-primary)",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 10,
+                }}
+            >
+                <span style={{ fontWeight: 800 }}>Taranan evren ({members.length})</span>
+                <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                    {nSig} sinyal · {nUni} tetik yok · {open ? "gizle" : "göster"}
+                </span>
+            </button>
+            {open && (
+                <div style={{ marginTop: 10 }}>
+                    <input
+                        value={q}
+                        onChange={(e) => setQ(e.target.value)}
+                        placeholder="Hisse / neden / sinyal…"
+                        style={{
+                            width: "100%",
+                            marginBottom: 10,
+                            background: "rgba(255,255,255,0.03)",
+                            border: "1px solid var(--border-muted)",
+                            borderRadius: 8,
+                            padding: "8px 10px",
+                            color: "var(--text-primary)",
+                        }}
+                    />
+                    <div style={{ overflowX: "auto", maxHeight: 360 }}>
+                        <table className="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Ticker</th>
+                                    <th>Kohort</th>
+                                    <th>Q</th>
+                                    <th>Neden</th>
+                                    <th>Bar</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filtered.map((m) => (
+                                    <tr key={`${m.ticker}-${m.kind}-${m.date || ""}`}>
+                                        <td style={{ fontWeight: 800, color: "var(--accent)" }}>{m.ticker}</td>
+                                        <td>{m.kind === "signal" ? "sinyal" : "evren"}</td>
+                                        <td>{m.quality != null ? Number(m.quality).toFixed(0) : "—"}</td>
+                                        <td style={{ color: "var(--text-muted)" }}>
+                                            {m.kind === "signal"
+                                                ? (m.pathway === "vce_breakout" ? "VCE" : m.pathway === "rvol_thrust" ? "RVOL" : "—")
+                                                : (REJECT_REASON_LABELS[m.reject_reason || ""] || m.reject_reason || "—")}
+                                        </td>
+                                        <td style={{ color: "var(--text-muted)" }}>{m.date || "—"}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                        {filtered.length === 0 ? (
+                            <div style={{ padding: 12, color: "var(--text-muted)", fontSize: "0.8rem" }}>Eşleşme yok.</div>
+                        ) : null}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
