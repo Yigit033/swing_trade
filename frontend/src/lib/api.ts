@@ -46,7 +46,8 @@ api.interceptors.request.use(async (config) => {
 
 // 401 + token gönderildiyse → token reddedildi, sign out ve login'e yönlendir
 // Token GÖNDERİLMEDİYSE → timing/race (session henüz hazır değil), sign out YAPMA
-// 502/network: Fly scale-to-zero wake — 2–3 kez bekle ve tekrar dene
+// 502/network: Fly scale-to-zero wake — 2s/4s/8s retry so a cold 502 is hidden
+// from the UI. Backend thin-boot should bind :8000 before this budget is spent.
 api.interceptors.response.use(
     (res) => res,
     async (err: AxiosError) => {

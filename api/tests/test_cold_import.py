@@ -20,6 +20,8 @@ def test_import_api_main_does_not_load_pandas_numpy_yfinance():
         "from api.main import app\n"
         "heavy = [m for m in ('pandas', 'numpy', 'yfinance') if m in sys.modules]\n"
         "assert not heavy, heavy\n"
+        "routers = [m for m in sys.modules if m.startswith('api.routers.')]\n"
+        "assert not routers, routers\n"
         "assert any(getattr(r, 'path', None) == '/api/health' for r in app.routes)\n"
     )
     env = os.environ.copy()

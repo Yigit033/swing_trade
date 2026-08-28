@@ -6,6 +6,7 @@ Serves as the API layer between Next.js frontend and Python trading engine.
 import sys
 import asyncio
 import logging
+import threading
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -24,8 +25,6 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.routers import trades, pending, performance, lookup, scanner, genai, backtest, regime, settings as settings_router
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -43,6 +42,15 @@ _DEFAULT_CORS_ORIGINS = (
     "https://swingtrade.vercel.app",
 )
 
+# Routers are imported after TCP bind (see lifespan). Fly's proxy waits ~8s for
+# 0.0.0.0:8000; importing scanners/pandas at module load loses that race.
+# threading.Event: asyncio.Event created at import binds to the wrong loop
+# under TestClient / reload.
+_routers_ready = threading.Event()
+_routers_mounted = False
+_mount_lock = threading.Lock()
+_HEALTH_PATHS = frozenset({"/api/health", "/api/health/"})
+
 
 def cors_allow_origins(raw: str | None = None) -> list[str]:
     """Merge explicit CORS_ORIGINS with localhost + the production Vercel origin."""
@@ -58,6 +66,60 @@ def cors_allow_origins(raw: str | None = None) -> list[str]:
 
 
 _origins = cors_allow_origins()
+
+
+def _import_router_modules():
+    """Heavy import — run in a worker thread so the event loop can bind :8000."""
+    from api.routers import (
+        backtest,
+        genai,
+        lookup,
+        pending,
+        performance,
+        regime,
+        scanner,
+        trades,
+        settings as settings_router,
+    )
+
+    return (
+        trades,
+        pending,
+        performance,
+        lookup,
+        scanner,
+        genai,
+        backtest,
+        settings_router,
+        regime,
+    )
+
+
+def _include_routers(app: FastAPI, modules: tuple) -> None:
+    global _routers_mounted
+    if _routers_mounted:
+        return
+    (
+        trades,
+        pending,
+        performance,
+        lookup,
+        scanner,
+        genai,
+        backtest,
+        settings_router,
+        regime,
+    ) = modules
+    app.include_router(trades.router, prefix="/api/trades", tags=["trades"])
+    app.include_router(pending.router, prefix="/api/pending", tags=["pending"])
+    app.include_router(performance.router, prefix="/api/performance", tags=["performance"])
+    app.include_router(lookup.router, prefix="/api/lookup", tags=["lookup"])
+    app.include_router(scanner.router, prefix="/api/scanner", tags=["scanner"])
+    app.include_router(genai.router, prefix="/api/genai", tags=["genai"])
+    app.include_router(backtest.router, prefix="/api/backtest", tags=["backtest"])
+    app.include_router(settings_router.router)
+    app.include_router(regime.router)
+    _routers_mounted = True
 
 
 def _run_scheduled_pending_and_exits() -> tuple[int, list]:
@@ -95,11 +157,29 @@ async def _scheduled_pending_confirm_loop() -> None:
         await asyncio.sleep(max(60, _PENDING_INTERVAL_SEC))
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    tasks = []
+async def ensure_routers_mounted(app: FastAPI) -> None:
+    """Load routers if needed. Safe from TestClient (no lifespan) and from _boot."""
+    if _routers_ready.is_set():
+        return
+    modules = await asyncio.to_thread(_import_router_modules)
+    with _mount_lock:
+        if not _routers_mounted:
+            _include_routers(app, modules)
+        _routers_ready.set()
+
+
+async def _boot(app: FastAPI) -> None:
+    """Import routers off the event loop, then start background schedulers."""
+    try:
+        await ensure_routers_mounted(app)
+        logger.info("API routers mounted (port already listening)")
+    except Exception:
+        logger.exception("Failed to mount API routers")
+        return
+
     if _PENDING_SCHEDULER_ENABLED:
-        tasks.append(asyncio.create_task(_scheduled_pending_confirm_loop()))
+        t = asyncio.create_task(_scheduled_pending_confirm_loop())
+        app.state.bg_tasks.append(t)
         logger.info(
             "Pending scheduler enabled (interval=%ss, disable with ENABLE_PENDING_SCHEDULER=0)",
             _PENDING_INTERVAL_SEC,
@@ -107,13 +187,22 @@ async def lifespan(app: FastAPI):
 
     from api.auto_scan import auto_scan_loop
 
-    tasks.append(asyncio.create_task(auto_scan_loop()))
+    t = asyncio.create_task(auto_scan_loop())
+    app.state.bg_tasks.append(t)
     logger.info("Auto-scan loop started (enable/configure via settings: auto_scan.enabled)")
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Yield immediately so uvicorn can bind :8000 before router imports.
+    # Heavy work runs in a background task (thread) after this yield.
+    app.state.bg_tasks = []
+    boot = asyncio.create_task(_boot(app))
+    app.state.bg_tasks.append(boot)
     yield
-    for task in tasks:
+    for task in list(app.state.bg_tasks):
         task.cancel()
-    for task in tasks:
+    for task in list(app.state.bg_tasks):
         with suppress(asyncio.CancelledError):
             await task
 
@@ -141,6 +230,16 @@ async def global_exception_handler(request: Request, exc: Exception):
     return resp
 
 
+@app.middleware("http")
+async def wait_until_routers_ready(request: Request, call_next):
+    """Health answers immediately; other routes wait for deferred router import."""
+    if request.url.path in _HEALTH_PATHS:
+        return await call_next(request)
+    await ensure_routers_mounted(request.app)
+    return await call_next(request)
+
+
+# Added last so it wraps the wait middleware — 503 during boot still gets CORS.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
@@ -149,21 +248,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register routers
-app.include_router(trades.router,      prefix="/api/trades",      tags=["trades"])
-app.include_router(pending.router,     prefix="/api/pending",     tags=["pending"])
-app.include_router(performance.router, prefix="/api/performance", tags=["performance"])
-app.include_router(lookup.router,      prefix="/api/lookup",      tags=["lookup"])
-app.include_router(scanner.router,     prefix="/api/scanner",     tags=["scanner"])
-app.include_router(genai.router,       prefix="/api/genai",       tags=["genai"])
-app.include_router(backtest.router,    prefix="/api/backtest",    tags=["backtest"])
-app.include_router(settings_router.router)
-app.include_router(regime.router)
-
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "version": "2.1.0"}
+    return {
+        "status": "ok",
+        "version": "2.1.0",
+        "routers_ready": _routers_ready.is_set(),
+    }
 
 
 @app.get("/api/auth/status")
@@ -177,4 +269,5 @@ async def auth_status():
         "has_supabase_url": bool(auth_mod.SUPABASE_URL),
         "has_jwt_secret": bool(auth_mod.SUPABASE_JWT_SECRET),
         "cors_origins_count": len(_origins),
+        "routers_ready": _routers_ready.is_set(),
     }
