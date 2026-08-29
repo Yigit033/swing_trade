@@ -32,7 +32,7 @@ from api.scanner_jobs import (
     run_scan_worker,
     current_scan_job_id,
 )
-from swing_trader.utils.market_calendar import us_market_session
+from swing_trader.utils.market_calendar import last_completed_session, us_market_session
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -250,6 +250,9 @@ class ScanRequest(BaseModel):
     portfolio_value: float = 10000
     min_quality: int = 65
     top_n: int = 10
+    # "auto" = GitHub/cron daily-run. UI leaves this unset so a manual look
+    # around after close does not cancel the auto-track pass.
+    scan_source: Optional[str] = None
 
 
 def _scan_regime_and_thresholds(
@@ -553,6 +556,7 @@ def _execute_smallcap_scan(
         "stocks_with_data": len(data_dict),
         "fetch_success_ratio": round(fetch_ratio, 3),
         "market_session": market_session,
+        "bar_session": last_completed_session().isoformat(),
         "raw_signals": len(signals),
         "filtered_signals": len(filtered),
         "reject_counts": dict(sorted(reject_counts.items(), key=lambda kv: (-kv[1], kv[0]))),
@@ -564,6 +568,8 @@ def _execute_smallcap_scan(
         "request_min_quality": body.min_quality,
         "request_top_n": body.top_n,
     }
+    if body.scan_source:
+        stats["scan_source"] = body.scan_source
     if session_warning:
         stats["session_warning"] = session_warning
     if universe_fallback:

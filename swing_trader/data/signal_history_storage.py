@@ -232,6 +232,47 @@ class SmallCapSignalHistoryStorage:
             if conn:
                 conn.close()
 
+    def list_recent_stats(self, limit: int = 24) -> List[Dict[str, Any]]:
+        """Recent runs with parsed stats — used by daily-run skip (same NYSE session)."""
+        ph = _ph()
+        conn = None
+        try:
+            conn = _connect()
+            cur = conn.cursor()
+            cur.execute(
+                f"""
+                SELECT id, created_at, stats_json
+                FROM smallcap_signal_runs
+                ORDER BY id DESC
+                LIMIT {ph}
+                """,
+                (limit,),
+            )
+            out: List[Dict[str, Any]] = []
+            for row in _rows_to_dicts(cur, cur.fetchall()):
+                stats: Dict[str, Any] = {}
+                raw = row.get("stats_json") or "{}"
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, dict):
+                        stats = parsed
+                except Exception:
+                    stats = {}
+                out.append(
+                    {
+                        "id": row.get("id"),
+                        "created_at": row.get("created_at") or "",
+                        "stats": stats,
+                    }
+                )
+            return out
+        except Exception as e:
+            logger.error("Failed to list recent run stats: %s", e)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
     def get_run(self, run_id: int, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         ph = _ph()
         conn = None

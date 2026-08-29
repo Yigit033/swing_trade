@@ -10,11 +10,16 @@
 # Kapanış sonrası tek koşu yeni bilginin tamamını görür.
 #
 # SAAT: GitHub cron yalnız UTC kabul eder, ET ise yaz/kış (EDT/EST) kayıyor.
-# İki koşu tanımlı — biri EDT'de, diğeri EST'de kapanış sonrasına denk gelir:
+# Hafta içi iki koşu — biri EDT'de, diğeri EST'de kapanış sonrasına denk gelir:
 #   21:30 UTC = 17:30 EDT (yaz)  /  16:30 EST (kış)
 #   22:30 UTC = 18:30 EDT (yaz)  /  17:30 EST (kış)
-# İkisi de kapanıştan (16:00 ET) sonra. Çift koşma sorun değil: endpoint aynı
-# gün ikinci taramayı "already_ran_today" diyerek atlar (_last_run_date guard).
+# GitHub schedule sıklıkla saatler gecikir. Cuma 21:30 UTC Cumartesi'ye kayarsa
+# eski kod `not_a_trading_day` deyip Cuma kapanışını kaçırıyordu. Cumartesi
+# 03:00 UTC yakalama + endpoint'in last_completed_session mantığı bunu kapatır.
+#   03:00 UTC Cumartesi = 23:00 EDT Cuma / 22:00 EST Cuma
+#
+# Çift koşma sorun değil: endpoint aynı seansın ikinci auto taramasını
+# "already_ran_session" diyerek atlar (DB: scan_source=auto + bar_session).
 #
 # GEREKLİ SECRET (repo → Settings → Secrets → Actions):
 #   CRON_SECRET  — fly secret'ı ile AYNI değer:  fly secrets set CRON_SECRET=...
@@ -23,12 +28,13 @@ name: Daily Run
 
 on:
   schedule:
-    - cron: '30 21 * * 1-5'   # Pzt-Cum
+    - cron: '30 21 * * 1-5'   # Pzt-Cum kapanış
     - cron: '30 22 * * 1-5'
+    - cron: '0 3 * * 6'       # Cumartesi yakalama (geç kalmış Cuma cron)
   workflow_dispatch:           # elle tetikleme (test için)
     inputs:
       force:
-        description: 'Aynı gün tekrar taramaya zorla'
+        description: 'Aynı seans tekrar taramaya zorla'
         type: boolean
         default: false
 
@@ -36,9 +42,9 @@ jobs:
   daily-run:
     name: Trigger daily maintenance
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
-      - name: Call daily-run endpoint
+      - name: Wake machine, then call daily-run
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           FORCE: ${{ inputs.force && 'true' || 'false' }}
@@ -49,13 +55,30 @@ jobs:
             exit 1
           fi
 
+          HEALTH="https://swing-trade.fly.dev/api/health"
           URL="https://swing-trade.fly.dev/api/scanner/daily-run?force=${FORCE}"
 
-          # Makine askıda olabilir: ilk istek onu uyandırır ve soğuk başlangıç
-          # (Python import zinciri) birkaç saniye sürer. Tarama da dakikalar
-          # alabildiği için uzun timeout + tek yeniden deneme veriyoruz.
-          for attempt in 1 2; do
-            echo "Deneme $attempt ..."
+          # 1) Önce /api/health — Fly proxy soğuk başlangıçta POST'u 502/503
+          #    ile kesiyordu. Health thin-boot ile hızlı açılır; routers_ready
+          #    olana kadar bekleriz, sonra asıl işi göndeririz.
+          ready=0
+          for i in 1 2 3 4 5 6 7 8; do
+            echo "Uyanış denemesi $i ..."
+            body="$(curl -sS --max-time 45 --connect-timeout 20 "$HEALTH" || true)"
+            echo "$body"
+            if echo "$body" | grep -q '"routers_ready": *true'; then
+              ready=1
+              break
+            fi
+            sleep $((5 + i * 5))
+          done
+          if [ "$ready" != "1" ]; then
+            echo "::warning::routers_ready görülmedi — yine de daily-run denenecek"
+          fi
+
+          # 2) Bakım + tarama dakikalar sürebilir; 502/503'te backoff.
+          for attempt in 1 2 3 4; do
+            echo "daily-run deneme $attempt ..."
             HTTP=$(curl -sS -o response.json -w '%{http_code}' \
                    --max-time 900 --connect-timeout 60 \
                    -X POST "$URL" \
@@ -68,7 +91,9 @@ jobs:
             fi
             echo "::warning::HTTP $HTTP"
             [ -s response.json ] && cat response.json || true
-            [ "$attempt" = "1" ] && sleep 30
+            if [ "$attempt" -lt 4 ]; then
+              sleep $((20 * attempt))
+            fi
           done
 
           echo "::error::Günlük tetikleyici başarısız"
