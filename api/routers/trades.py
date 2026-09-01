@@ -46,6 +46,14 @@ class CloseTradeIn(BaseModel):
     notes: str = ""
 
 
+class TradePatch(BaseModel):
+    """Paper Trades UI 'Fiyat Güncelle' — only these columns are writable."""
+    stop_loss: Optional[float] = None
+    target: Optional[float] = None
+    max_hold_days: Optional[int] = None
+    notes: Optional[str] = None
+
+
 # Short-TTL price cache so listing 40-50 trades (mostly closed) doesn't hammer
 # yfinance on every page load. One batch request per cold ticker set / 5 min.
 _PRICE_CACHE: dict = {}  # ticker -> (price, fetched_at_epoch)
@@ -207,14 +215,24 @@ def add_trade(
 @router.patch("/{trade_id}")
 def update_trade(
     trade_id: int,
-    updates: dict,
+    body: TradePatch,
     user_id: Optional[str] = Depends(get_current_user_id),
 ):
     storage = get_paper_storage()
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
     ok = storage.update_trade(trade_id, updates, user_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Trade not found")
-    return {"message": "Updated"}
+    trade = storage.get_trade_by_id(trade_id, user_id)
+    # Re-run exits so a raised stop that is already through the market
+    # (ASST: stop $25.50, last close $24) closes now, not on the next cron.
+    if trade and trade.get("status") == "OPEN" and (
+        "stop_loss" in updates or "target" in updates or "max_hold_days" in updates
+    ):
+        trade = get_paper_tracker().update_trade_status(trade, user_id)
+    return sanitize_for_json({"message": "Updated", "trade": trade})
 
 
 @router.delete("/{trade_id}")

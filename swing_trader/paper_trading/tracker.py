@@ -333,7 +333,9 @@ class PaperTradeTracker:
         TRAIL_ACTIVATE_ATR = 1.5
         peak_high = entry_price
 
-        for _, row in price_history.iloc[1:].iterrows():
+        bars = price_history.iloc[1:]
+        last_i = len(bars) - 1
+        for i, (_, row) in enumerate(bars.iterrows()):
             current_date = row['Date']
             today_open = row['Open']
             low = row['Low']
@@ -342,6 +344,18 @@ class PaperTradeTracker:
             trading_days_held += 1
 
             active_stop = trailing_stop
+            # UI "Fiyat Güncelle" writes `stop_loss` but replay is seeded from
+            # `initial_stop` (persisted trailing_stop is display-only — KYMR).
+            # Applying a RAISED stop to every historical bar would stop out on
+            # day one (entry $19 vs new stop $25.50). Honor it on the last
+            # completed bar only — that is the stop the trader sees today.
+            if i == last_i:
+                try:
+                    user_stop = float(stop_loss or 0)
+                except (TypeError, ValueError):
+                    user_stop = 0.0
+                if user_stop > active_stop:
+                    active_stop = user_stop
 
             # ── 1. CHECK STOP LOSS first (before trail update — correct temporal order) ──
             if low <= active_stop:
@@ -349,13 +363,19 @@ class PaperTradeTracker:
                 # If Open > stop (stock opened above stop, traded down intraday), exit at stop.
                 # This accurately models overnight gap risk (e.g. UMAC -16%: gap opened below stop).
                 if today_open <= active_stop:
-                    exit_price = today_open
+                    exit_price = round(float(today_open), 2)
                     exit_date = _exit_ts(current_date, 9, 30)  # gap-down: gapped through at open
                 else:
-                    exit_price = active_stop
+                    exit_price = round(float(active_stop), 2)
                     exit_date = _exit_ts(current_date, 16, 0)  # intraday breach: proxy to close
 
-                is_trail = active_stop > initial_stop
+                user_stop_f = 0.0
+                try:
+                    user_stop_f = float(stop_loss or 0)
+                except (TypeError, ValueError):
+                    pass
+                is_user_floor = i == last_i and user_stop_f > initial_stop and abs(active_stop - user_stop_f) < 1e-9
+                is_trail = active_stop > initial_stop and not is_user_floor
                 pnl_pct = ((exit_price / entry_price) - 1) * 100
 
                 if is_trail:

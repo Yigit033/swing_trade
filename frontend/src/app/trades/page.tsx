@@ -329,9 +329,16 @@ export default function TradesPage() {
         if (!editModal) return;
         setEditSaving(true);
         const updates: Record<string, unknown> = {};
-        if (editStop) updates.stop_loss = parseFloat(editStop);
-        if (editTarget) updates.target = parseFloat(editTarget);
-        if (editHoldDays) updates.max_hold_days = parseInt(editHoldDays);
+        const parseMoney = (raw: string) => {
+            const n = parseFloat(String(raw).trim().replace(",", "."));
+            return Number.isFinite(n) ? n : undefined;
+        };
+        const stop = parseMoney(editStop);
+        const target = parseMoney(editTarget);
+        const hold = parseInt(editHoldDays, 10);
+        if (stop != null) updates.stop_loss = stop;
+        if (target != null) updates.target = target;
+        if (Number.isFinite(hold)) updates.max_hold_days = hold;
         if (editNotes) updates.notes = editNotes;
         try {
             await updateTrade(editModal.id, updates);
