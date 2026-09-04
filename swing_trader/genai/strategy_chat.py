@@ -94,15 +94,31 @@ class StrategyChat:
             # 3. Prompt oluştur
             prompt = build_strategy_chat_prompt(question, context, verbosity=verbosity)
 
-            # 4. LLM'e gönder
+            # 4. LLM'e gönder (Tool Calling destekli)
             # max_tokens: Detaylı analiz/özet için yeterli olmalı (1200 → 3000)
-            # Önceki değer yanıtları "bu tipten gel" gibi yarıda kesiyordu
-            answer = self.client.complete(
-                prompt=prompt,
-                system_prompt=STRATEGY_CHAT_SYSTEM,
-                max_tokens=3000,
-                temperature=0.3,   # Düşük — veriyle tutarlı cevap istiyoruz
-            )
+            if hasattr(self.client, "chat_with_tools"):
+                from swing_trader.genai.tools import GET_LIVE_STOCK_DATA_SCHEMA, execute_get_live_stock_data
+                
+                tools_schema = [GET_LIVE_STOCK_DATA_SCHEMA]
+                tool_callbacks = {
+                    "get_live_stock_data": execute_get_live_stock_data
+                }
+                
+                answer = self.client.chat_with_tools(
+                    prompt=prompt,
+                    system_prompt=STRATEGY_CHAT_SYSTEM,
+                    tools_schema=tools_schema,
+                    tool_callbacks=tool_callbacks,
+                    max_tokens=3000,
+                    temperature=0.3,
+                )
+            else:
+                answer = self.client.complete(
+                    prompt=prompt,
+                    system_prompt=STRATEGY_CHAT_SYSTEM,
+                    max_tokens=3000,
+                    temperature=0.3,   # Düşük — veriyle tutarlı cevap istiyoruz
+                )
 
             if not answer:
                 # Boş yanıt — fallback istatistik ver

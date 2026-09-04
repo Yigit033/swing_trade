@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",   # Daha ucuz ama güçlü
     "gemini": "gemini-2.5-flash",  # Updated: 2.0-flash deprecated
+    "groq": "qwen/qwen3.8-27b", # Groq ultra-hızlı Qwen 3.8
 }
 
 
@@ -85,6 +86,8 @@ class LLMClient:
             self._setup_openai()
         elif self.provider == "gemini":
             self._setup_gemini()
+        elif self.provider == "groq":
+            self._setup_groq()
         else:
             logger.warning(f"Bilinmeyen LLM provider: {self.provider}")
 
@@ -100,6 +103,25 @@ class LLMClient:
             self._client = OpenAI(api_key=api_key)
             self.available = True
             logger.info(f"OpenAI client hazır: {self.model}")
+        except ImportError:
+            logger.warning("openai paketi yüklü değil. Kur: pip install openai")
+
+    def _setup_groq(self):
+        """Groq (Llama 3.3) client kurulumu."""
+        api_key = os.getenv("GROQ_API_KEY", "")
+        if not api_key:
+            logger.info("GROQ_API_KEY bulunamadı — AI rapor özelliği pasif")
+            return
+
+        try:
+            from openai import OpenAI
+            # Groq, OpenAI SDK'sı ile %100 uyumludur. Sadece base_url değiştirilir.
+            self._client = OpenAI(
+                api_key=api_key,
+                base_url="https://api.groq.com/openai/v1"
+            )
+            self.available = True
+            logger.info(f"Groq client hazır: {self.model}")
         except ImportError:
             logger.warning("openai paketi yüklü değil. Kur: pip install openai")
 
@@ -152,7 +174,7 @@ class LLMClient:
             return None
 
         try:
-            if self.provider == "openai":
+            if self.provider in ["openai", "groq"]:
                 result = self._complete_openai(prompt, system_prompt, max_tokens, temperature)
             elif self.provider == "gemini":
                 result = self._complete_gemini(prompt, system_prompt, max_tokens, temperature)
@@ -170,6 +192,93 @@ class LLMClient:
                 raise RuntimeError("Gemini API rate limited — birkaç dakika bekleyip tekrar deneyin.") from e
             logger.error(f"LLM complete hatası ({self.provider}): {e}", exc_info=True)
             raise
+
+    def chat_with_tools(
+        self,
+        prompt: str,
+        system_prompt: str,
+        tools_schema: list,
+        tool_callbacks: dict,
+        max_tokens: int = 4096,
+        temperature: float = 0.5,
+    ) -> Optional[str]:
+        """
+        Tool (Function) Calling destekli LLM sohbet döngüsü.
+        Eğer LLM bir tool çağırmak isterse, Python callback'i çalıştırılır ve
+        sonuç tekrar LLM'e gönderilir. Bu döngü LLM metin üretene kadar devam eder.
+        
+        Şu an için sadece OpenAI ve Groq (OpenAI API uyumlu) desteklenmektedir.
+        """
+        if not self.available or self._client is None:
+            return None
+
+        if self.provider not in ["openai", "groq"]:
+            logger.warning(f"Tool calling is not implemented for provider: {self.provider}. Falling back to standard complete.")
+            return self.complete(prompt, system_prompt, max_tokens, temperature)
+            
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        # Maksimum 5 tur (Tool loop guard)
+        for _ in range(5):
+            try:
+                response = self._client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    tools=tools_schema,
+                    tool_choice="auto",
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+            except Exception as e:
+                logger.error(f"LLM Tool Calling API Error: {e}", exc_info=True)
+                raise
+                
+            response_message = response.choices[0].message
+            
+            # 1. Eğer tool call yoksa (düz metin döndüyse), sürec biter.
+            if not response_message.tool_calls:
+                return response_message.content.strip() if response_message.content else ""
+                
+            # 2. Tool call(lar) varsa, cevapları geçmişe ekle
+            messages.append(response_message)
+            
+            # 3. Gerekli Python fonksiyonlarını çalıştır
+            for tool_call in response_message.tool_calls:
+                function_name = tool_call.function.name
+                
+                try:
+                    import json
+                    function_args = json.loads(tool_call.function.arguments)
+                except Exception as e:
+                    logger.error(f"Failed to parse tool arguments: {e}")
+                    function_args = {}
+                    
+                logger.info(f"LLM requested tool: {function_name} with args: {function_args}")
+                
+                if function_name in tool_callbacks:
+                    # Callback'i çalıştır
+                    try:
+                        function_response = tool_callbacks[function_name](**function_args)
+                    except Exception as e:
+                        logger.error(f"Tool execution failed: {e}")
+                        function_response = f"Error executing tool: {str(e)}"
+                else:
+                    function_response = f"Error: Tool '{function_name}' not found."
+                    
+                # 4. Sonucu LLM'e (mesaj geçmişine) geri ver
+                messages.append({
+                    "tool_call_id": tool_call.id,
+                    "role": "tool",
+                    "name": function_name,
+                    "content": str(function_response),
+                })
+                
+        # 5 turda hala cevap dönmediyse
+        logger.warning("LLM tool calling loop exceeded maximum iterations.")
+        return "Üzgünüm, verileri analiz ederken çok fazla islem yapmak zorunda kaldım. Lütfen tekrar dener misin?"
 
     def _complete_openai(self, prompt, system_prompt, max_tokens, temperature) -> str:
         messages = []
