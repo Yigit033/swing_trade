@@ -27,10 +27,9 @@ This system combines two different AI approaches into a **hybrid architecture**:
 - **Backtesting Engine**: Tests strategies against historical data
 
 ### 🚀 SmallCap Momentum System (Senior Trader v2.1)
-- **4-Tier Classification**: S (Squeeze), C (Early/Continuation), B (Momentum), A (Continuation)
+- **3-Tier Classification**: C (Early/Continuation), B (Momentum), A (Continuation)
 - **Float Tiering**: Atomic (≤15M), Micro (15-30M), Small (30-50M), Tight (50-60M)
 - **RSI Bullish Divergence**: Early reversal detection
-- **Short Squeeze Detection**: SI ≥ 20%, Days-to-Cover ≥ 5
 - **Sector RS Analysis**: Highlights sector leaders (+12 bonus score)
 - **Finviz Integration**: Live momentum universe
 
