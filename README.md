@@ -1,72 +1,72 @@
 # 📈 Swing Trading System — AI-Powered
 
-Kişisel kullanım için geliştirilmiş, üretim kalitesinde Python tabanlı swing trade sistemi. Teknik analiz, risk yönetimi, paper trading, backtesting ve **çok katmanlı yapay zeka** (XGBoost + Generative AI) içerir.
+A production-grade Python-based swing trade system developed for personal use. It features technical analysis, risk management, paper trading, backtesting, and a **multi-layered artificial intelligence** architecture (XGBoost + Agentic AI).
 
 ---
 
-## 🧠 AI Mimarisi — İki Katmanlı
+## 🧠 AI Architecture — Two-Tiered
 
-Bu sistem, iki farklı AI yaklaşımını **hibrid bir mimariyle** birleştirir:
+This system combines two different AI approaches into a **hybrid architecture**:
 
-| Katman | Teknoloji | Ne Yapar |
+| Layer | Technology | Function |
 |--------|-----------|----------|
-| **Katman 1** | XGBoost (Klasik ML) | Geçmiş trade verilerinden win probability tahmini (**%72 kazanma ihtimali** gibi) |
-| **Katman 2** | LLM / GenAI | Sayıları Türkçe yoruma çevirir — haftalık rapor, sinyal brifingi, strateji Q&A |
+| **Layer 1** | XGBoost (Classical ML) | Predicts win probability from historical closed trades (e.g., **72% win probability**) |
+| **Layer 2** | LLM / Agentic AI | Translates numbers into human-readable insights — generates weekly reports, signal briefings, and acts as an autonomous Strategy Advisor with live market access |
 
-> **Hibrid Prensip:** Tüm hesaplamalar (R/R, ATR%, profit factor, risk%) Python'da yapılır. LLM sadece yorumlama ve raporlama yapar — asla sayısal karar vermez.
+> **Hybrid Principle:** All numerical calculations (R/R, ATR%, profit factor, risk%) are executed in Python. The LLM handles interpretation, reporting, and live data retrieval — it never makes direct numerical trading decisions on its own.
 
 ---
 
-## 🎯 Özellikler
+## 🎯 Features
 
-### 🔬 Klasik Teknik Analiz
-- **Otomatik Hisse Tarama**: 200+ hisse, 15 saniyede
-- **Kullanılan göstergeler**: ATR (10/14), RVOL + hacim patlaması, SMA 20/50, RSI (14) + bullish divergence, MACD (12/26/9), OBV trendi, higher-low yapısı, MA20 eğimi. **Kullanılmayan**: ADX, Bollinger, VWAP, stokastik — hiçbiri kodda yok (ölçülebilir kenar katmadıkları için eklenmedi).
-- **Çoklu Faktörlü Skorlama**: 0–100+ skala
-- **Risk Yönetimi**: Position sizing, stop-loss, take-profit otomasyonu
-- **Backtesting Motoru**: Geçmiş verilerle strateji testi
+### 🔬 Classical Technical Analysis
+- **Automated Stock Scanner**: Scans 200+ stocks in under 15 seconds
+- **Indicators Used**: ATR (10/14), RVOL + volume spikes, SMA 20/50, RSI (14) + bullish divergence, MACD (12/26/9), OBV trend, higher-low structure, MA20 slope. **Not Used**: ADX, Bollinger, VWAP, stochastic — none are in the codebase (omitted as they don't provide a measurable edge).
+- **Multi-Factor Scoring**: 0–100+ scale
+- **Risk Management**: Automated position sizing, stop-loss, and take-profit
+- **Backtesting Engine**: Tests strategies against historical data
 
-### 🚀 SmallCap Momentum Sistemi (Senior Trader v2.1)
-- **4 Tip Sınıflandırma**: S (Squeeze), C (Erken), B (Momentum), A (Devam)
+### 🚀 SmallCap Momentum System (Senior Trader v2.1)
+- **4-Tier Classification**: S (Squeeze), C (Early/Continuation), B (Momentum), A (Continuation)
 - **Float Tiering**: Atomic (≤15M), Micro (15-30M), Small (30-50M), Tight (50-60M)
-- **RSI Bullish Divergence**: Erken dönüş tespiti
-- **Kısa Sıkışma Tespiti**: SI ≥ %20, Days-to-Cover ≥ 5
-- **Sektor RS Analizi**: Sektör liderlerini öne çıkarır (+12 bonus)
-- **Finviz Entegrasyonu**: Canlı momentum evreni
+- **RSI Bullish Divergence**: Early reversal detection
+- **Short Squeeze Detection**: SI ≥ 20%, Days-to-Cover ≥ 5
+- **Sector RS Analysis**: Highlights sector leaders (+12 bonus score)
+- **Finviz Integration**: Live momentum universe
 
-### 🤖 Generative AI Özellikleri
-| Özellik | Tetiklenme | Çıktı |
+### 🤖 Agentic & Generative AI Features
+| Feature | Trigger | Output |
 |---------|-----------|-------|
-| **📝 Haftalık Rapor** | Performance sekmesi → "Rapor Oluştur" | Trader tarzı Türkçe özet + stratejik tavsiye |
-| **🤖 Sinyal Brifingi** | Manual Lookup → hisse tarandığında | 2-3 cümle setup yorumu ("R/R güçlü, volatilite yüksek...") |
-| **💬 Strateji Danışmanı** | Performance sekmesi → serbest soru | RAG-lite Q&A — tüm trade geçmişi context olarak LLM'e verilir |
+| **📝 Weekly Report** | Performance tab → "Generate Report" | Trader-style summary + strategic advice |
+| **🤖 Signal Briefing** | Manual Lookup → when a stock is scanned | 2-3 sentence setup interpretation ("Strong R/R, high volatility...") |
+| **💬 Strategy Advisor (Agentic)** | Performance tab → free text chat | Autonomous AI that can fetch **live stock data** (Price, Volume, MA20/50) via Tool Calling, combined with your full trade history |
 
-> API key olmadan tüm GenAI özellikleri **deterministik fallback** modunda çalışır.
+> Without an API key, all AI features operate in **deterministic fallback** mode.
 
-### 🧮 XGBoost ML Sinyal Tahmini
-- Geçmiş kapalı trade'lerden eğitilir (`ml/trainer.py`)
-- Her sinyal için **win probability** hesaplar (0–100%)
-- **SHAP** ile feature importance açıklaması
-- Manual Lookup'ta XGBoost badge olarak gösterilir: `🤖 AI Tahmin: %72 — High Confidence`
-- 50+ kapalı trade sonrası aktif hale gelir
+### 🧮 XGBoost ML Signal Prediction
+- Trained on historical closed trades (`ml/trainer.py`)
+- Calculates **win probability** (0–100%) for each signal
+- Feature importance explanation via **SHAP**
+- Displayed as a badge in Manual Lookup: `🤖 AI Forecast: 72% — High Confidence`
+- Unlocks after 50+ closed trades
 
-### 📊 Paper Trading Sistemi
-- **Ertesi Gün Onay Mekanizması**: Sinyaller PENDING olarak girer, ertesi gün Open fiyatında onaylanır
-- **Gap Filtresi**: Gap-up > +5% veya Gap-down > -3% → Otomatik REJECT
-- **Modern Kart Arayüzü**: Her bekleyen sinyal için Entry / Stop / Target / R/R metrikleri
-- **Manuel Onay/Ret Butonları**: Tek tıkla ✅ Onayla veya ❌ İptal Et
-- **Trailing Stop**: ATR bazlı, pozisyon olgunlaşınca aktif
-- **Otomatik Kapanma**: Target hit, Stop hit, Timeout, Trailing stop
+### 📊 Paper Trading System
+- **Next-Day Confirmation Mechanism**: Signals enter as PENDING, confirmed at the Open price the next day
+- **Gap Filter**: Gap-up > +5% or Gap-down < -3% → Auto-REJECT
+- **Modern Card UI**: Entry / Stop / Target / R/R metrics for each pending signal
+- **Manual Approve/Reject Buttons**: One-click ✅ Approve or ❌ Cancel
+- **Trailing Stop**: ATR-based, activates as the position matures
+- **Auto-Close Triggers**: Target hit, Stop hit, Timeout, Trailing stop hit
 
 ---
 
-## 🚀 Kurulum
+## 🚀 Installation
 
-### 1. Gereksinimler
+### 1. Requirements
 - Python 3.8+
-- Internet bağlantısı (piyasa verisi için)
+- Internet connection (for market data)
 
-### 2. Kurulum
+### 2. Setup
 ```bash
 git clone https://github.com/Yigit033/swing_trade.git
 cd swing_trade
@@ -78,145 +78,148 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 3. `.env` Dosyası (Opsiyonel — GenAI için)
+### 3. `.env` File (Optional — for AI Features)
 ```env
-# AI Provider (ikisinden birini seç)
-LLM_PROVIDER=gemini          # veya: openai
+# AI Provider (choose one)
+LLM_PROVIDER=groq          # or: openai, gemini
 
-# API Keyler
+# API Keys
+GROQ_API_KEY=your_key
 GEMINI_API_KEY=your_key
 OPENAI_API_KEY=your_key
 ```
-> API key olmadan sistem çalışmaya devam eder — GenAI özellikleri deterministik fallback kullanır.
+> The system will continue to work without an API key — AI features will gracefully fall back to deterministic responses.
 
-### 4. Uygulamayı Başlat
+### 4. Start the Application
 ```bash
 # Backend (FastAPI)
 uvicorn api.main:app --reload --port 8000
 
-# Frontend (Next.js) — ayrı terminalde
+# Frontend (Next.js) — in a separate terminal
 cd frontend && npm run dev
 ```
-Tarayıcıda `http://localhost:5000` açılır. (Windows'ta `SwingTrade_Dashboard.bat` ikisini birden başlatır.)
+Opens `http://localhost:5000` in your browser. (On Windows, `SwingTrade_Dashboard.bat` starts both simultaneously.)
 
 ---
 
-## 🖥️ Dashboard Sayfaları (Next.js)
+## 🖥️ Dashboard Pages (Next.js)
 
-| Sayfa | İçerik |
+| Page | Content |
 |-------|--------|
-| **🚀 Scanner** | SmallCap momentum tarama (arka plan job + canlı ilerleme) |
-| **🗂 Scanner History** | Geçmiş taramalar + forward-return takibi |
-| **📝 Manual Lookup** | Tek hisse, aşama aşama tanı (filtre → tetik → skor) |
-| **📊 Paper Trades** | Aktif/Bekleyen/Kapalı trade takibi, pending onay akışı |
-| **📉 Performance** | Win rate, profit factor, haftalık rapor |
-| **⚙️ Settings** | Motor parametreleri (JSON tabanlı, UI'dan düzenlenir) |
-| **🤖 AI / Chat** | XGBoost eğitim-tahmin + strateji sohbeti |
+| **🚀 Scanner** | SmallCap momentum scan (background job + live progress) |
+| **🗂 Scanner History** | Historical scans + forward-return tracking |
+| **📝 Manual Lookup** | Single stock, step-by-step diagnosis (filter → trigger → score) |
+| **📊 Paper Trades** | Active/Pending/Closed trade tracking, pending approval flow |
+| **📉 Performance** | Win rate, profit factor, weekly report |
+| **⚙️ Settings** | Engine parameters (JSON based, editable via UI) |
+| **🤖 AI / Chat** | XGBoost train/predict + autonomous strategy chat |
 
 ---
 
-## 📁 Proje Yapısı
+## 📁 Project Structure
 
 ```
 swing_trade/
-├── api/                   # FastAPI backend (9 router)
+├── api/                   # FastAPI backend (9 routers)
 ├── frontend/              # Next.js dashboard
 ├── swing_trader/
-│   ├── genai/             # Generative AI modülleri
-│   │   ├── llm_client.py      # OpenAI/Gemini provider-agnostic client
-│   │   ├── prompts.py         # Tüm prompt builder'lar
-│   │   ├── reporter.py        # Haftalık rapor orchestrator
-│   │   ├── signal_briefer.py  # Sinyal brifingi orchestrator
-│   │   ├── strategy_chat.py   # Strateji Q&A orchestrator
-│   │   └── data_collector.py  # DB'den deterministik veri toplama
-│   ├── ml/                # Klasik ML
-│   │   ├── trainer.py         # XGBoost eğitim
-│   │   ├── predictor.py       # Win probability tahmini
+│   ├── genai/             # Generative & Agentic AI modules
+│   │   ├── llm_client.py      # Provider-agnostic client (Groq/OpenAI/Gemini)
+│   │   ├── prompts.py         # Prompt builders
+│   │   ├── reporter.py        # Weekly report orchestrator
+│   │   ├── signal_briefer.py  # Signal briefing orchestrator
+│   │   ├── strategy_chat.py   # Strategy Q&A orchestrator
+│   │   ├── tools.py           # LLM Tool Calling definitions and callbacks
+│   │   └── data_collector.py  # Deterministic data collection from DB
+│   ├── ml/                # Classical ML
+│   │   ├── trainer.py         # XGBoost training
+│   │   ├── predictor.py       # Win probability prediction
 │   │   └── features.py        # Feature engineering
-│   ├── small_cap/         # SmallCap Momentum motoru
-│   │   ├── engine.py          # Ana tarama motoru
-│   │   ├── scoring.py         # Kalite skoru (0-100+)
-│   │   ├── narrative.py       # Metin analiz üretimi
-│   │   └── risk.py            # ATR bazlı risk hesaplamaları
-│   ├── paper_trading/     # Paper Trade sistemi
-│   │   ├── tracker.py         # Trade takibi, gap filtresi, trailing stop
-│   │   ├── storage.py         # SQLite CRUD operasyonları
-│   │   └── reporter.py        # Performans özeti
-│   └── data/              # Fetcher + tarama geçmişi storage'ları
+│   ├── small_cap/         # SmallCap Momentum engine
+│   │   ├── engine.py          # Core scanning engine
+│   │   ├── scoring.py         # Quality scoring (0-100+)
+│   │   ├── narrative.py       # Textual analysis generation
+│   │   └── risk.py            # ATR-based risk calculations
+│   ├── paper_trading/     # Paper Trade system
+│   │   ├── tracker.py         # Trade tracking, gap filters, trailing stop
+│   │   ├── storage.py         # SQLite CRUD operations
+│   │   └── reporter.py        # Performance summary
+│   └── data/              # Fetcher + scan history storage
 ├── data/
-│   └── paper_trades.db    # SQLite veritabanı
-├── config.yaml            # Ayarlar
+│   └── paper_trades.db    # SQLite database
+├── config.yaml            # Global configurations
 ├── requirements.txt
-└── .env                   # API keyleri (git'e commit edilmez)
+└── .env                   # API keys (ignored by git)
 ```
 
 ---
 
-## 📋 Günlük İş Akışı
+## 📋 Daily Workflow
 
 ```bash
-# 1. Dashboard'u başlat (backend + frontend)
-SwingTrade_Dashboard.bat   # veya: uvicorn api.main:app --port 8000  +  cd frontend && npm run dev
+# 1. Start Dashboard (backend + frontend)
+SwingTrade_Dashboard.bat   # or: uvicorn api.main:app --port 8000  +  cd frontend && npm run dev
 
-# 2. SmallCap veya Manual Lookup'tan sinyal tara
-# → Beğendiğin sinyalli "📌 Track" ile PENDING'e ekle
+# 2. Scan via SmallCap or Manual Lookup
+# → Pin favorable signals to PENDING using "📌 Track"
 
-# 3. Ertesi gün Update Prices'a bas
-# → Sistem ertesi gün açılış fiyatını çeker, gap filtresini uygular
-# → Onaylananlar OPEN olur, reddedilenler REJECTED olarak kayıt düşer
+# 3. Next day, click Update Prices
+# → System fetches next day's open price, applies gap filter
+# → Approved trades become OPEN, rejected trades are logged as REJECTED
 
-# 4. Aktif trade'leri takip et
-# → Stop/Target/Timeout otomatik kapanma
-# → Trailing stop devreye girer (ATR bazlı, pozisyon olgunlaşınca)
+# 4. Monitor Active Trades
+# → Auto-closes on Stop/Target/Timeout
+# → Trailing stop activates (ATR-based, once position matures)
 
-# 5. Performance sekmesinde haftalık rapor al
-# → "Rapor Oluştur" → LLM, trade geçmişini analiz eder
-# → Strateji Danışmanı'na serbest soru sor
+# 5. Get Weekly Report in Performance Tab
+# → "Generate Report" → LLM analyzes trade history
+# → Ask the Strategy Advisor free-form questions (e.g., about specific tickers)
 ```
 
 ---
 
-## 🔧 ML Model Eğitimi
+## 🔧 ML Model Training
 
-XGBoost modeli 50+ kapalı trade'den sonra eğitilebilir:
+The XGBoost model can be trained after 50+ closed trades:
 
 ```bash
-# Dashboard'da → 🤖 AI Model sekmesi → "Modeli Eğit"
-# Veya:
+# In Dashboard → 🤖 AI Model tab → "Train Model"
+# Or via CLI:
 python -c "from swing_trader.ml.trainer import ModelTrainer; ModelTrainer().train()"
 ```
 
-Eğitim sonrası Manual Lookup'ta `🤖 AI Tahmin: %XX — Confidence` badge'i görünür.
+After training, the `🤖 AI Forecast: XX% — Confidence` badge will appear in Manual Lookup.
 
 ---
 
-## 🛡️ Risk Parametreleri
+## 🛡️ Risk Parameters
 
-| Parametre | Large Cap | SmallCap |
+| Parameter | Large Cap | SmallCap |
 |-----------|-----------|---------|
-| Max risk / trade | %2 | %0.5 |
-| Max pozisyon | %20 portföy | %5 portföy |
-| Stop loss | ATR × 2.0 | ATR × 1.0 (cap %12) |
-| Gap-up reject | — | > %5 |
-| Gap-down reject | — | < -%3 |
-| Trailing stop | — | ATR bazlı (2+ ATR kârda) |
+| Max risk / trade | 2% | 0.5% |
+| Max position size | 20% portfolio | 5% portfolio |
+| Stop loss | ATR × 2.0 | ATR × 1.0 (capped at 12%) |
+| Gap-up reject | — | > 5% |
+| Gap-down reject | — | < -3% |
+| Trailing stop | — | ATR-based (at 2+ ATR profit) |
 
 ---
 
-## ⚠️ Risk Uyarısı
+## ⚠️ Risk Warning
 
-> Hisse senedi alım satımı önemli kayıp riski taşır. Geçmiş performans gelecekteki sonuçları garanti etmez. Bu yazılım yalnızca eğitim amaçlıdır. Yatırım kararları almadan önce bir finansal danışmana başvurun.
+> Trading stocks carries significant risk of loss. Past performance does not guarantee future results. This software is for educational purposes only. Always consult a financial advisor before making investment decisions.
 
-**Gerçek para kullanmadan önce en az 3 ay paper trading yapın.**
+**Paper trade for at least 3 months before using real capital.**
 
 ---
 
-## 📄 Sürüm Geçmişi
+## 📄 Version History
 
-| Versiyon | İçerik |
+| Version | Features |
 |----------|--------|
-| v3.0 | GenAI özellikleri (Signal Briefer, Strategy Chat, Weekly Reporter), modern Pending UI, kalite skoru düzeltmeleri |
-| v2.1 | SmallCap Senior Trader: sektor RS, insider bonus, kısa sıkışma, trailing stop |
-| v2.0 | Paper Trading sistemi, gap filtresi, ertesi gün onay |
-| v1.5 | XGBoost ML sinyal tahmini, SHAP feature importance |
-| v1.0 | Temel tarama, teknik analiz, backtesting, ilk web dashboard |
+| v3.1 | **Agentic AI**: Added Tool Calling to Strategy Advisor for live market data retrieval (Groq/OpenAI) |
+| v3.0 | GenAI features (Signal Briefer, Strategy Chat, Weekly Reporter), modern Pending UI, quality score fixes |
+| v2.1 | SmallCap Senior Trader: sector RS, insider bonus, short squeeze, trailing stop |
+| v2.0 | Paper Trading system, gap filter, next-day confirmation |
+| v1.5 | XGBoost ML signal prediction, SHAP feature importance |
+| v1.0 | Basic scanning, technical analysis, backtesting, initial web dashboard |
