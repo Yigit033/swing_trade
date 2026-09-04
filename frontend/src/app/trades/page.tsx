@@ -356,11 +356,17 @@ export default function TradesPage() {
         const closed = trades.filter(t => CLOSED_STATUSES.has(t.status));
         const open = trades.filter(t => t.status === "OPEN");
         const pending = trades.filter(t => t.status === "PENDING");
-        const wins = closed.filter(t => (t.realized_pnl || 0) > 0);
-        const losses = closed.filter(t => (t.realized_pnl || 0) < 0);
-        const totalPnl = closed.reduce((s, t) => s + (t.realized_pnl || 0), 0);
-        const winRate = closed.length > 0 ? (wins.length / closed.length) * 100 : 0;
-        const avgPnl = closed.length > 0 ? totalPnl / closed.length : 0;
+        
+        // Sadece REJECTED olmayan kapanmış tradeler üzerinden performans hesaplanır
+        const validClosed = closed.filter(t => t.status !== "REJECTED");
+        const wins = validClosed.filter(t => (t.realized_pnl || 0) > 0);
+        const losses = validClosed.filter(t => (t.realized_pnl || 0) < 0);
+        const totalPnl = validClosed.reduce((s, t) => s + (t.realized_pnl || 0), 0);
+        
+        // Win Rate sadece kâr ve zarar eden işlemler üzerinden hesaplanır (Breakeven hariç)
+        const totalDecisive = wins.length + losses.length;
+        const winRate = totalDecisive > 0 ? (wins.length / totalDecisive) * 100 : 0;
+        const avgPnl = validClosed.length > 0 ? totalPnl / validClosed.length : 0;
 
         // By status for donut
         const statusCounts: Record<string, number> = {};

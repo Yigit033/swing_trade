@@ -87,15 +87,18 @@ def get_performance(user_id: Optional[str] = Depends(get_current_user_id)):
     # (Optional: check if user wants this. Usually in trading, rejected/canceled are ignored)
     valid_closed = [t for t in closed_trades if t.get("status") != "REJECTED"]
     
-    wins   = [t for t in valid_closed if is_win(t)]
-    losses = [t for t in valid_closed if not is_win(t)]
+    wins   = [t for t in valid_closed if (t.get("realized_pnl") or 0) > 0]
+    losses = [t for t in valid_closed if (t.get("realized_pnl") or 0) < 0]
+    breakeven = [t for t in valid_closed if (t.get("realized_pnl") or 0) == 0]
 
     wins_pnl   = [t.get("realized_pnl") or 0 for t in wins]
-    losses_pnl = [abs(t.get("realized_pnl") or 0) for t in losses if (t.get("realized_pnl") or 0) < 0]
+    losses_pnl = [abs(t.get("realized_pnl") or 0) for t in losses]
 
     total_pnl   = sum((t.get("realized_pnl") or 0) for t in valid_closed)
     total_closed = len(valid_closed)
-    win_rate     = round(len(wins) / total_closed * 100, 1) if total_closed else 0
+    total_decisive = len(wins) + len(losses)
+    
+    win_rate     = round(len(wins) / total_decisive * 100, 1) if total_decisive > 0 else 0
     avg_win      = sum(wins_pnl)  / len(wins_pnl)   if wins_pnl   else 0
     avg_loss     = -sum(losses_pnl) / len(losses_pnl) if losses_pnl else 0
 
@@ -123,8 +126,8 @@ def get_performance(user_id: Optional[str] = Depends(get_current_user_id)):
             "pending_trades": len(pending_trades),
             "closed_trades":  total_closed,
             "wins":   len(wins),
-            "losses": len([t for t in losses if (t.get("realized_pnl") or 0) < 0]),
-            "breakeven": len([t for t in losses if (t.get("realized_pnl") or 0) == 0]),
+            "losses": len(losses),
+            "breakeven": len(breakeven),
             "win_rate":     win_rate,
             "total_pnl":    round(total_pnl, 2),
             "total_pnl_pct": total_pnl_pct,
