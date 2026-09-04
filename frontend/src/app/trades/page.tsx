@@ -137,14 +137,15 @@ function DonutChart({ data, total }: { data: { label: string; value: number; col
 function BarChart({ data }: { data: { label: string; wins: number; losses: number; color: string }[] }) {
     const maxVal = Math.max(...data.map(d => d.wins + d.losses), 1);
     return (
-        <div style={{ display: "flex", gap: 12, alignItems: "flex-end", height: 120 }}>
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-end", height: 140 }}>
             {data.map(d => {
                 const total = d.wins + d.losses;
-                const barH = (total / maxVal) * 100;
+                // Max bar height is 70px to leave room for labels top and bottom
+                const barH = (total / maxVal) * 70;
                 const winH = total > 0 ? (d.wins / total) * barH : 0;
                 const lossH = barH - winH;
                 return (
-                    <div key={d.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                    <div key={d.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
                         <div style={{ fontSize: "0.7rem", fontWeight: 700 }}>{total}</div>
                         <div style={{ width: "100%", maxWidth: 40, display: "flex", flexDirection: "column", borderRadius: 4, overflow: "hidden" }}>
                             <div style={{ height: lossH, background: "rgba(239,68,68,0.6)", transition: "height 0.3s" }} />
