@@ -21,9 +21,10 @@ primary_region = 'fra'
 
   [http_service.http_options]
     # Cron POST /daily-run holds the connection until scan finishes (often
-    # 8–15 min). Below this, Fly proxy drops an idle request and GitHub
+    # 8-15 min). Below this, Fly proxy drops an idle request and GitHub
     # sees 502/000 even though the scan may still be running on the VM.
-    idle_timeout = 1800
+    # Fly.io has a hard maximum limit of 900s for HTTP options Idle timeout.
+    idle_timeout = 900
 
   [[http_service.checks]]
     interval = '30s'
