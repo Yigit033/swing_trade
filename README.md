@@ -77,7 +77,7 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 3. `.env` File (Optional — for AI Features)
+### 3. `.env` File (Optional — for AI Features & PostgreSQL)
 ```env
 # AI Provider (choose one)
 LLM_PROVIDER=groq          # or: openai, gemini
@@ -86,8 +86,13 @@ LLM_PROVIDER=groq          # or: openai, gemini
 GROQ_API_KEY=your_key
 GEMINI_API_KEY=your_key
 OPENAI_API_KEY=your_key
+
+# Database (Optional - defaults to local SQLite if omitted)
+# Set to use Supabase / PostgreSQL in production:
+DATABASE_URL=postgresql://...
 ```
 > The system will continue to work without an API key — AI features will gracefully fall back to deterministic responses.
+> **Database Architecture:** The system uses a **Dual-Mode** database architecture. It uses **SQLite** by default for local development. If a `DATABASE_URL` is detected in the `.env` file, it automatically switches to **PostgreSQL** (e.g., Supabase) for production.
 
 ### 4. Start the Application
 ```bash
@@ -141,14 +146,14 @@ swing_trade/
 │   │   └── risk.py            # ATR-based risk calculations
 │   ├── paper_trading/     # Paper Trade system
 │   │   ├── tracker.py         # Trade tracking, gap filters, trailing stop
-│   │   ├── storage.py         # SQLite CRUD operations
+│   │   ├── storage.py         # Dual-mode DB storage (SQLite & PostgreSQL)
 │   │   └── reporter.py        # Performance summary
 │   └── data/              # Fetcher + scan history storage
 ├── data/
-│   └── paper_trades.db    # SQLite database
+│   └── paper_trades.db    # SQLite database (Local default fallback)
 ├── config.yaml            # Global configurations
 ├── requirements.txt
-└── .env                   # API keys (ignored by git)
+└── .env                   # API keys & DB URLs (ignored by git)
 ```
 
 ---
