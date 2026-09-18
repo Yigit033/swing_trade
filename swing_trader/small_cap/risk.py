@@ -19,9 +19,10 @@ class SmallCapRisk:
     Risk management for Small Cap Momentum Engine.
 
     v3.0 Improvements:
-    - Type-specific stop loss caps (%8-12)
+    - Type-specific stop loss caps (C 14% / A 15% / B 16%)
     - Realistic T1/T2 dual profit targets (reduced for better hit rate)
     - Clean position sizing: 1.5% risk, no artificial factor, only type cap
+      (A/C 25%, B 20%; Type S 2026-08-04'te kaldırıldı)
     """
     
     # Defaults documented in settings_config.SmallCapSettings; instance values set in __init__.

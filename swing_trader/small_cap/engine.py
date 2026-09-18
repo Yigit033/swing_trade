@@ -116,35 +116,31 @@ class SmallCapEngine:
         macd_bullish: bool = False
     ) -> tuple:
         """
-        Classify swing into Type S, C, B, or A (SENIOR TRADER 4-TYPE SYSTEM).
-        
-        PRIORITY ORDER: S → C → B → A
-        
-        TYPE S - Short Squeeze (1-4 days) - AGGRESSIVE:
-        - Short Interest ≥ 20%
-        - Days to Cover ≥ 5
-        - Volume surge ≥ 4x
-        - 5-day return: +15% to +60%
-        - RSI: 60-80
-        - VERY HIGH RISK, HIGH REWARD
-        
+        Classify swing into Type C, B, or A.
+
+        PRIORITY ORDER: parabolic-B (chase protection) → C → B → A.
+
+        Type S (short squeeze) 2026-08-04'te kaldırıldı — short-interest
+        backtest'te yoktu, sınıflandırma hiç oluşmuyordu. Gate muafiyetleri
+        (RSI / Weinstein Stage 3 / kalite eşiği) de onunla gitti.
+
         TYPE C - Early Stage (2-4 days) - BEST R/R:
         - 5-day return: -5% to +15% (pullback entry allowed!)
         - RSI: 40-60
         - Volume: 1.8x to 4x
         - RSI Divergence: BONUS
         - MA20 distance: -3% to +8%
-        
+
         TYPE B - Momentum (2-6 days) - TIGHTENED:
         - 5-day return: +30% to +70%
         - RSI: 68-85
         - Volume: ≥ 3.5x
-        
+
         TYPE A - Continuation (4-10 days) - STANDARD:
         - 5-day return: +10% to +35%
         - RSI: 50-68
         - Higher lows: Required
-        
+
         Returns:
             (swing_type, (min_days, max_days), reason)
         """
@@ -181,7 +177,7 @@ class SmallCapEngine:
         # kaldırıldı (RSI, Weinstein Stage 3, kalite eşiği).
 
         # ============================================================
-        # TYPE C CHECK - Early Stage Breakout (PRIORITY 2 - Best R/R)
+        # TYPE C CHECK - Early Stage Breakout (first remaining type — best R/R)
         # ============================================================
         type_c_score = 0
 
@@ -323,9 +319,9 @@ class SmallCapEngine:
         """
         Scan a single stock for small-cap momentum signal.
 
-        backtest_mode: skip live yfinance fundamentals and catalysts
-        (short/insider/news bonuses zero); optional spy_df_window for
-        point-in-time RS vs SPY; skip narrative/LLM.
+        backtest_mode: skip live yfinance fundamentals; optional spy_df_window
+        for point-in-time RS vs SPY; skip narrative/LLM. (short/insider/news
+        katalizör bonusları 2026-08-04'te silindi — backtest/canlı parite.)
 
         earnings_dates: önceden çekilmiş bilanço tarihleri. Verilirse bilanço
         kapısı backtest'te de CANLI ile aynı şekilde uygulanır (parite). Ölçüm
@@ -549,8 +545,8 @@ class SmallCapEngine:
             # Stage 3 (distribution topping) and Stage 4 (decline) are hard
             # rejected — high-volume spikes in these stages are dead-cat
             # bounces or seller-driven, not the start of a new trend.
-            # Type S exempt from Stage 3 only (squeeze can ignite in distribution).
             # Stage 0 = insufficient data → pass through (don't penalize data gaps).
+            # (Type S Stage-3 muafiyeti 2026-08-04'te tipin kendisiyle silindi.)
             # ================================================================
             _wstage = stage_data.get('stage', 0)
             # GATE DENETİMİ (2026-08-04, measure_gate_value.py — GATE_AUDIT.md):
@@ -629,14 +625,14 @@ class SmallCapEngine:
             # (scripts/measure_score_edge.py) BULL Q60-70'in ~0% getiri
             # verdiğini gösterdi. Artık motor-içi floor da API ile AYNI
             # regime_thresholds değerlerinden okunuyor — scan_stock'u doğrudan
-            # çağıran backtest/edge yolları da aynı korumaya sahip. Type S muaf.
+            # çağıran backtest/edge yolları da aynı korumaya sahip.
+            # (Type S muafiyeti 2026-08-04'te tipin kendisiyle silindi; her tip floor'a tabi.)
             _rt = self.settings.regime_thresholds
             _regime_floor = {
                 "BULL": _rt.bull_min_quality,
                 "CAUTION": _rt.caution_other_min_quality,
                 "BEAR": _rt.bear_tentative_min_quality,
             }.get(regime, 0)  # UNKNOWN → 0 (rejim belirsiz, floor yok)
-            # Type S (short squeeze) her rejimde muaf; diğerleri regime floor.
             _type_min_q = _regime_floor
             if quality_score < _type_min_q:
                 # INFO level — surface quality scores in normal logs so we can see
@@ -652,6 +648,7 @@ class SmallCapEngine:
                 )
                 return None
 
+            # 'S' yalnız eski kayıtlarda görünsün diye duruyor; yeni sinyal Type S üretmez.
             type_labels = {
                 'S': 'Short Squeeze',
                 'A': 'Continuation',

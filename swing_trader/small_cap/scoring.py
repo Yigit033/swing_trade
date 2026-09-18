@@ -21,34 +21,34 @@ class SmallCapScoring:
     """
     Quality scoring for Small Cap Momentum Engine.
 
-    SENIOR TRADER SCORING SYSTEM v5.0 (Directional Rebalance):
+    Runtime weights come from ``scoring_tuning`` (not the class-level
+    constants below). Current defaults:
 
     BASE SCORE (max 100 — weighted):
-    - Volume Explosion:    20% weight (raw 0-30, normalized) [was 30%]
-    - Volatility (ATR%):   15% weight (raw 0-25, normalized) [was 20%]
-    - Float Tightness:     15% weight (raw 0-20, normalized) [was 20%]
-    - Momentum Continuity: 20% weight (raw 0-15, normalized) [was 15%]
-    - Risk Control:        10% weight (raw 0-15, normalized) [was 15%]
-    - Trend Quality:       20% weight (raw 0-25, normalized) [NEW]
+    - Float Tightness:     25%
+    - Momentum Continuity: 25%
+    - Trend Quality:       15%
+    - Volatility (ATR%):   13%
+    - Volume Explosion:    12%
+    - Risk Control:        10%
 
-    KEY CHANGE: Directional information now = 40% (Momentum + Trend)
-    vs old 15%. Non-directional (Volume + ATR + Float) = 50% → 50%.
+    BONUS: sabit ``bonus_cap`` (+30). 14 koşullu bonus 2026-08-05'te
+    silindi — her sinyal tavanı dolduruyordu, ayırt etme gücü sıfırdı.
 
-    CATALYST BONUS (max +40 pts, capped):
-    PENALTY SYSTEM (max -60 pts, expanded)
+    PENALTY: yalnız ölçülmüş 5 kural (Type A/C RSI merdiveni + today>10).
+    Type B'de RSI cezası yok.
 
-    FINAL RANGE: 0 to 140
+    FINAL RANGE: 0 to ``final_score_max`` (140).
     """
     
-    # SCORING WEIGHTS v5.0 — Directional Rebalance
-    # Directional info (Momentum + Trend) = 40% of base score.
-    # This ensures "which direction" matters more than "how much it moved."
-    WEIGHT_VOLUME = 0.20          # 20% importance [was 30%]
-    WEIGHT_VOLATILITY = 0.15      # 15% importance [was 20%]
-    WEIGHT_FLOAT = 0.15           # 15% importance [was 20%]
-    WEIGHT_MOMENTUM = 0.20        # 20% importance [was 15%]
-    WEIGHT_RISK = 0.10            # 10% importance [was 15%]
-    WEIGHT_TREND = 0.20           # 20% importance [NEW]
+    # Class-level fallbacks only — __init__ overwrites from scoring_tuning.
+    # Live defaults: float 25 / mom 25 / trend 15 / ATR 13 / vol 12 / risk 10.
+    WEIGHT_VOLUME = 0.20
+    WEIGHT_VOLATILITY = 0.15
+    WEIGHT_FLOAT = 0.15
+    WEIGHT_MOMENTUM = 0.20
+    WEIGHT_RISK = 0.10
+    WEIGHT_TREND = 0.20
 
     # Raw score maximums (for normalization to 0-100)
     MAX_VOLUME_SCORE = 30
@@ -303,18 +303,10 @@ class SmallCapScoring:
         boosters: Dict = None
     ) -> float:
         """
-        Calculate composite quality score (0-140).
-        
-        v5.0 Components (Directional Rebalance):
-        - Volume Explosion:    20% [was 30%]
-        - Volatility (ATR%):   15% [was 20%]
-        - Float Tightness:     15% [was 20%]
-        - Momentum Continuity: 20% [was 15%]
-        - Risk Control:        10% [was 15%]
-        - Trend Quality:       20% [NEW — directional health]
-        
-        + Bonuses (catalyst, sector RS, OBV, etc.)
-        - Penalties (RSI overbought, overextension, trend weakness)
+        Calculate quality score (0 to ``final_score_max``).
+
+        Weighted base (from scoring_tuning) + sabit bonus_cap − 5 ölçülmüş ceza.
+        Koşullu bonus / katalizör / spread-risk yok — 2026-08 denetiminde silindi.
         """
         # Calculate raw component scores
         volume_score_raw = self.score_volume_explosion(
@@ -327,7 +319,7 @@ class SmallCapScoring:
         risk_score_raw = self.score_risk_control(df, atr_percent)
         trend_score_raw = self.score_trend_quality(df, boosters)
 
-        # Normalize each to 0-100, then apply weights (v5.0)
+        # Normalize each to 0-100, then apply scoring_tuning weights
         volume_score = (max(volume_score_raw, 0) / self.MAX_VOLUME_SCORE) * 100 * self.WEIGHT_VOLUME
         volatility_score = (max(volatility_score_raw, 0) / self.MAX_VOLATILITY_SCORE) * 100 * self.WEIGHT_VOLATILITY
         float_score = (float_score_raw / self.MAX_FLOAT_SCORE) * 100 * self.WEIGHT_FLOAT

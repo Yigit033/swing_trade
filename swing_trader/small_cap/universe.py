@@ -343,9 +343,9 @@ class SmallCapUniverse:
             top_cols = ['Ticker', 'Price', 'Change', 'Volume', 'dollar_volume']
             available_cols = [c for c in top_cols if c in df.columns]
             top_10 = df.head(10)[available_cols]
-            logger.info(f"Top 10 momentum candidates:\n{top_10.to_string()}")
+            logger.info(f"Top 10 by dollar volume:\n{top_10.to_string()}")
             logger.info(
-                f"Selected {len(tickers)} tickers by COMPOSITE SCORE "
+                f"Selected {len(tickers)} tickers by dollar volume "
                 f"(from {len(df)} after filters)"
             )
 
@@ -489,7 +489,7 @@ class SmallCapUniverse:
             force_refresh: If False, may reuse in-memory cache when within TTL.
 
         Returns:
-            List of ticker symbols sorted by COMPOSITE MOMENTUM SCORE
+            List of ticker symbols sorted by dollar volume (most liquid first)
         """
         us = self._us
         uf = us.use_finviz if use_finviz is None else use_finviz
@@ -507,7 +507,7 @@ class SmallCapUniverse:
             logger.info(f"Using cached universe ({len(self._cache)} tickers, cap={cap})")
             return self._cache[:cap]
 
-        logger.info("Fetching FRESH momentum-ranked universe (cache bypassed)")
+        logger.info("Fetching FRESH liquidity-ranked universe (cache bypassed)")
 
         if uf:
             finviz_tickers = self.get_finviz_universe(cap)
@@ -525,6 +525,6 @@ class SmallCapUniverse:
             self._last_rank_info = None
             return merged[:cap]
 
-        self._last_rank_info = None  # static path: composite sıralama yok
+        self._last_rank_info = None  # static path: dolar-hacim sıralaması yok
         return self.get_static_universe()[:cap]
 

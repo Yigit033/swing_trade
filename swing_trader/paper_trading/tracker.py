@@ -2,11 +2,12 @@
 Paper Trading Tracker - Position tracking and exit detection logic.
 
 V4 Improvements (over V3):
-- Stop at confirmation: 1.5 ATR with type-specific caps (was 1.0 ATR / flat 15%)
+- Stop at confirmation: 2.5 ATR with type-specific caps (was 1.5, then 1.0)
 - Target at confirmation: 2R (was 3R — unrealistic for swing timeframe)
 - Trailing stop: chandelier (peak − 3 ATR), activates after 1.5 ATR gain
 - Same-bar ordering: check stop BEFORE updating trail (was inverted)
 - Timeout uses trading days (was calendar days including weekends)
+- T1 partial: ``partial_at_t1_fraction`` (default 33%; was hardcoded 50%)
 - initial_stop updated to entry on T1 partial (was stale)
 - Gap-down slippage (exit at Open if Open < stop) — unchanged
 - PENDING state → confirm at next-day Open with gap filter — unchanged
@@ -288,8 +289,9 @@ class PaperTradeTracker:
 
         Per-bar priority:
         1. Stop loss / trailing stop (with gap-down slippage) — checked BEFORE trail update
-        2. T1 partial exit — sell 50 %, move stop to breakeven, target T2
-        3. T2 full exit — sell remaining 50 %
+        2. T1 partial exit — sell ``partial_at_t1_fraction`` (default 33 %),
+           move stop to breakeven, target T2
+        3. T2 full exit — sell remaining shares
         4. Trailing stop update — using Close (after stop/target checks)
         5. Timeout — close at market (trading days, not calendar)
 
