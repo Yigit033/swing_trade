@@ -111,15 +111,10 @@ class SmallCapScoring:
     
     def score_float_tightness(self, float_shares: float) -> float:
         """
-        Score float tightness (0-20 points) - SENIOR TRADER TIERING.
-        
-        Float Tiering (SENIOR TRADER):
-        - ≤15M:  ATOMIC (+20 pts) - Parabolic potential
-        - 15-30M: MICRO (+15 pts) - Explosive potential
-        - 30-45M: SMALL (+10 pts) - Strong potential
-        - 45-60M: TIGHT (+5 pts) - Good potential
-        - 60-80M: Accept (+0 pts) - No bonus
-        - >80M:  REJECT (filtered out)
+        Score float tightness (0-20 raw points) from scoring_tuning bands.
+
+        Not a reject: > max band returns ``float_score_above_max_band`` (default −8).
+        Hard float ceiling was removed in v13 — VCE edge includes large-float names.
         """
         st = self._st
         if float_shares is None or float_shares <= 0:

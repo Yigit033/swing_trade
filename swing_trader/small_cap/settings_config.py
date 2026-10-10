@@ -127,7 +127,7 @@ class SmallCapSettings(BaseModel):
         default=0.03,
         ge=0.01,
         le=0.2,
-        description="Minimum ATR/close for filters and trigger (0.03 = 3%%).",
+        description="ATR/close (0.03 = 3%%). Not a scan hard-gate; used in trigger display and scoring context.",
     )
 
     # --- Risk ---
@@ -354,6 +354,9 @@ _REMOVED_KEYS = {
     # ($5M/gün). UI'da ayarlanabiliyordu ve değiştirmek hiçbir şey yapmıyordu.
     # (Önceki ölü-ayar taramam bunu kaçırmıştı: ATAMA satırını "okuma" sayıyordu.)
     "universe_filters.min_avg_volume",
+    # 2026-09-18: float hard-reject v13'te ölmüştü; ayar yalnız UI'da yaşıyordu
+    # (filters.apply_all_filters passed=True zorluyordu). Skor float_tightness.
+    "universe_filters.max_float_shares",
     # 2026-08-06: hiçbir göç/migrasyon mantığı okumuyordu. UI'da bilgi olarak
     # gösteriliyordu ama dosyada 1, kodda 3 yazıyordu — kullanıcıya çelişkili ve
     # eyleme dönüşmeyen bir sayı. Sürüm uyumu zaten _REMOVED_KEYS ile sağlanıyor.

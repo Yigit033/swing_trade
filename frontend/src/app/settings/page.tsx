@@ -1012,7 +1012,7 @@ export default function SettingsPage() {
                     Gerçek hacim barajları: yukarıdaki tetik eşiği + VCE'nin zorunlu RVOL≥1.5x. */}
                 <FieldNum
                     label="Min ATR % (ondalık, örn. 0.03 = %3)"
-                    hint="Filtre + tetikleyici"
+                    hint="Tarama hard-gate değil (VCE düşük ATR ister). Lookup tetik satırında gösterilir; stop boyutu risk modülünde canlı ATR kullanır."
                     value={num("min_atr_percent", 0.03)}
                     onChange={(v) => setNum("min_atr_percent", v)}
                     step="0.005"
@@ -1440,7 +1440,7 @@ export default function SettingsPage() {
                 <FieldNum
                     label="Max piyasa değeri ($)"
                     hint="Çok büyük şirketleri small-cap dışı bırakmak için üst sınır."
-                    value={nn(["universe_filters", "max_market_cap"], 2500000000)}
+                    value={nn(["universe_filters", "max_market_cap"], 10_000_000_000)}
                     onChange={(v) => sn(["universe_filters", "max_market_cap"], Math.round(v))}
                     step={1_000_000}
                     min={1}
@@ -1452,7 +1452,7 @@ export default function SettingsPage() {
                 <FieldNum
                     label="Min fiyat ($)"
                     hint="Penny / çok düşük fiyatları kesmek için."
-                    value={nn(["universe_filters", "min_price"], 3)}
+                    value={nn(["universe_filters", "min_price"], 7)}
                     onChange={(v) => sn(["universe_filters", "min_price"], v)}
                     step="0.5"
                     min={0.5}
@@ -1467,18 +1467,12 @@ export default function SettingsPage() {
                     min={1}
                     max={2000}
                 />
-                <FieldNum
-                    label="Max float (adet)"
-                    hint="Dolaşımdaki pay üst sınırı; dar float odağı için."
-                    value={nn(["universe_filters", "max_float_shares"], 150000000)}
-                    onChange={(v) => sn(["universe_filters", "max_float_shares"], Math.round(v))}
-                    step={1_000_000}
-                    min={1}
-                    max={2_000_000_000}
-                />
+                {/* Max float 2026-09-18'de kaldırıldı: v13'ten beri hard gate değildi
+                    (apply_all_filters her zaman geçiriyordu). Ayar değiştirmek hiçbir
+                    hisseyi elemiyordu. Sıkılık scoring.score_float_tightness. */}
                 <FieldNum
                     label="Kazanç hariç gün"
-                    hint="Kazanç tarihine bu kadar gün içindeyse hisse elenebilir."
+                    hint="Sinyal gününden 0–N gün sonraki bilanço hard reject (bilanço sonrası serbest)."
                     value={nn(["universe_filters", "earnings_exclusion_days"], 3)}
                     onChange={(v) => sn(["universe_filters", "earnings_exclusion_days"], Math.round(v))}
                     step={1}

@@ -266,7 +266,9 @@ class UniverseFilterSettings(BaseModel):
     max_market_cap: int = 10_000_000_000
     min_price: float = 7.0
     max_price: float = 200.0
-    max_float_shares: int = 80000000
+    # max_float_shares SİLİNDİ (2026-09-18): filters.check_float v13'ten beri
+    # advisory — apply_all_filters her zaman passed=True yazıyordu. Ayar UI'da
+    # duruyordu ama kapı hiç reddetmiyordu. Float sıkılığı scoring'de.
     earnings_exclusion_days: int = 3
     atr_period: int = 10
 
