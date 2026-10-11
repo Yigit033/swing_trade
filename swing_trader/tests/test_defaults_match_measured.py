@@ -110,7 +110,6 @@ def test_losing_the_file_layer_does_not_change_calibration(monkeypatch):
 @pytest.mark.parametrize("dotted,expected,kaynak", [
     ("universe_filters.min_price", 7.0, "measure_price_band.py — $3 penny bandı elendi"),
     ("universe_filters.max_price", 200.0, "evren bandı"),
-    ("universe_filters.max_float_shares", 80_000_000, "float tavanı (advisory)"),
     ("max_gap_down_pct", 7.0, "measure_gap_filter.py — 5→7 gevşetildi, R10 +1.86→+2.24"),
     ("max_gap_up_pct", 5.0, "measure_gap_filter.py — pump-open koruması"),
     ("partial_at_t1_fraction", 0.33, "measure_t1_fraction.py — %50→%33, +0.42 puan"),
@@ -122,6 +121,12 @@ def test_measured_value_is_the_code_default(dotted, expected, kaynak):
     """Bu değerler ölçümle belirlendi; varsayılan onlardan sapmamalı."""
     got = _flat(SmallCapSettings().model_dump(mode="json"))[dotted]
     assert got == expected, f"{dotted}={got}, beklenen {expected} ({kaynak})"
+
+
+def test_removed_float_ceiling_stays_removed():
+    """VCE edge cap-agnostic ölçüldü; eski 80M float alanı geri gelmemeli."""
+    flat = _flat(SmallCapSettings().model_dump(mode="json"))
+    assert "universe_filters.max_float_shares" not in flat
 
 
 # ── Dosya katmanı YAMA tutmalı, tam görüntü DEĞİL (2026-08-06) ───────────

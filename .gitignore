@@ -87,6 +87,18 @@ data/genai_cache/
 
 swing_trader/tests/*
 
+# Keep one production-safe aggregate audit; ignore the remaining local research
+# scripts unless they were already committed.
 scripts
+!scripts/
+scripts/*
+!scripts/audit_live_edge.py
 
 tests
+
+# Ship the correctness regressions; retain unrelated local-test exclusions.
+!/tests/
+/tests/*
+!/tests/test_trading_correctness.py
+!/swing_trader/tests/
+!/swing_trader/tests/test_tracker_trail_replay.py
