@@ -153,6 +153,7 @@ def _analyze_smallcap_ticker(ticker: str, df, info: dict, engine, portfolio_valu
     result["target_1"]      = signal.get("target_1")
     result["target_2"]      = signal.get("target_2")
     result["position_size"] = signal.get("position_size")
+    result["atr"]           = signal.get("atr")
 
     # ── v3.0: OBV Trend ─────────────────────────────────────────────────────
     obv_data = boosters.get("obv_trend", {})

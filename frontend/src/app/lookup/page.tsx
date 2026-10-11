@@ -68,6 +68,7 @@ type AnalysisResult = {
     position_size?: number;
     volume_surge?: number;
     atr_percent?: number;
+    atr?: number;
     // OBV Trend (v3.0)
     obv_accumulation?: boolean;
     obv_distribution?: boolean;
@@ -508,7 +509,7 @@ export default function LookupPage() {
     };
 
     const handleAdd = async (r: AnalysisResult) => {
-        if (r.entry_price == null || r.stop_loss == null || r.target_1 == null) {
+        if (!r.data_as_of || r.entry_price == null || r.stop_loss == null || r.target_1 == null) {
             setMsg(`❌ ${r.ticker}: eksik risk verisi (entry/stop/target) — eklenemedi`);
             return;
         }
@@ -521,15 +522,18 @@ export default function LookupPage() {
             // eklenebildiği (kontrolsüz endpoint) tespit edildi.
             const res = await trackSignal({
                 ticker: r.ticker,
+                date: r.data_as_of,
                 entry_price: r.entry_price,
                 stop_loss: r.stop_loss,
                 target_1: r.target_1,
                 target_2: r.target_2,
                 quality_score: r.quality_score ?? 0,
                 swing_type: r.swing_type || "A",
-                atr: 0,
+                atr: r.atr ?? 0,
+                position_size: r.position_size,
+                hold_days_max: r.hold_days?.[1],
                 target: r.target_1,
-            });
+            }, portfolioValue);
             if (res?.status === "added") {
                 const sz = res.position_size;
                 setMsg(`✅ ${r.ticker} PENDING olarak eklendi!${sz ? ` (boyut ${sz} hisse — risk tavanı)` : ""}`);

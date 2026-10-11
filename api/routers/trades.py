@@ -92,7 +92,9 @@ def _enrich_open_trades_inline(trades: list) -> list:
                 close = data["Close"]  # DataFrame: columns = ticker names
                 for tk in missing:
                     try:
-                        col = close[tk] if tk in close.columns else close.iloc[:, 0]
+                        if tk not in close.columns:
+                            continue  # A missing symbol must never inherit another price.
+                        col = close[tk]
                         val = col.dropna()
                         if not val.empty:
                             p = round(float(val.iloc[-1].item()), 4)

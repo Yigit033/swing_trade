@@ -93,6 +93,8 @@ export function useUpdatePrices() {
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: queryKeys.trades });
             qc.invalidateQueries({ queryKey: queryKeys.tradesLastUpdate });
+            qc.invalidateQueries({ queryKey: queryKeys.performance });
+            qc.invalidateQueries({ queryKey: queryKeys.pending });
         },
     });
 }

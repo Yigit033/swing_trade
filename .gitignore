@@ -98,5 +98,6 @@ tests
 !/tests/
 /tests/*
 !/tests/test_trading_correctness.py
+!/tests/test_integration_audit.py
 !/swing_trader/tests/
 !/swing_trader/tests/test_tracker_trail_replay.py

@@ -128,6 +128,7 @@ export interface Trade {
     target_2?: number;
     partial_exit_price?: number;
     partial_exit_pct?: number;
+    execution_warning?: string | null;
     created_at?: string;
     updated_at?: string;
 }
@@ -239,13 +240,13 @@ export const deleteTrade = (id: number) =>
     api.delete(`/api/trades/${id}`).then((r) => r.data);
 
 export const updateTrade = (id: number, updates: Partial<Trade>) =>
-    api.patch(`/api/trades/${id}`, updates).then((r) => r.data);
+    api.patch(`/api/trades/${id}`, updates).then((r) => r.data as { message: string; trade: Trade | null });
 
 export const closeTrade = (id: number, exit_price: number, notes = "") =>
     api.post(`/api/trades/${id}/close`, { exit_price, notes }).then((r) => r.data);
 
 export const updatePrices = () =>
-    api.post("/api/trades/update-prices").then((r) => r.data);
+    api.post("/api/trades/update-prices").then((r) => r.data as { message: string; trades: Trade[] });
 
 export const getTradesLastUpdate = () =>
     api.get("/api/trades/last-update").then((r) => r.data);

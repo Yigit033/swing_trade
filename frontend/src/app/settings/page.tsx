@@ -766,7 +766,7 @@ export default function SettingsPage() {
         });
     };
 
-    if (isLoading || !draft) {
+    if (!isError && (isLoading || !draft)) {
         return (
             <div style={{ padding: 48, display: "flex", alignItems: "center", gap: 12, color: "var(--text-secondary)" }}>
                 <Loader2 className="animate-spin" size={22} />
@@ -1564,7 +1564,7 @@ export default function SettingsPage() {
             <Section
                 id="settings-section-auto-scan"
                 title="Otomatik günlük tarama"
-                help="Kapanış sonrası, kullanıcı etkileşimi olmadan çalışan zamanlanmış tarama. Manuel taramayla AYNI motoru kullanır — tetikleyicisi saat olan bir manuel tarama. Bulunan her sinyal, buradaki min-quality eşiğini geçerse otomatik PENDING paper trade olarak açılır (Scanner sayfasındaki Auto-Track ayarından BAĞIMSIZDIR — gece kimse izlemezken ekranda ne göründüğüne bağlı olmasın diye bilerek ayrı tutulur)."
+                help="Kapanış sonrası zamanlanmış tarama. Kalite eşiğini geçen adaylar giriş kontrollerine tabidir; BEAR giriş engeli ve CAUTION kapasitesi de uygulanır. Bu iki kural aşağıdaki backtest_loop ayarlarıyla ortaktır. Scanner sayfasındaki kullanıcı Auto-Track akışı ayrı çalışır."
             >
                 <p style={{ margin: "0 0 12px", fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5, gridColumn: "1 / -1" }}>
                     Hedef saat ET (NYSE) cinsindendir. Varsayılan 16:30 ET = kapanıştan 60 dk sonra — Finviz&apos;in günlük
@@ -1597,7 +1597,7 @@ export default function SettingsPage() {
                 />
                 <FieldNum
                     label="Min quality (otomatik auto-track eşiği)"
-                    hint="Bu eşiği geçen her sinyal otomatik PENDING olur — Scanner sayfasındaki Auto-Track slider'ından bağımsız, sabit bir değer."
+                    hint="Kalite eşiği tek başına PENDING garantisi değildir; rejim, kapasite, duplicate ve giriş zamanı kontrolleri uygulanır."
                     value={nn(["auto_scan", "min_quality"], 70)}
                     onChange={(v) => sn(["auto_scan", "min_quality"], Math.round(v))}
                     step={1}
@@ -1668,13 +1668,13 @@ export default function SettingsPage() {
             >
                 <FieldBool
                     label="BEAR’da yeni giriş yok"
-                    hint="Simülasyonda ayı onaylandığında yeni pozisyon açılmaz."
+                    hint="Hem backtest hem zamanlanmış auto-scan için BEAR’da yeni girişleri engeller; kullanıcı Scanner Auto-Track akışından ayrıdır."
                     value={nb(["backtest_loop", "bear_block_new_entries"], true)}
                     onChange={(v) => sb(["backtest_loop", "bear_block_new_entries"], v)}
                 />
                 <FieldNum
                     label="CAUTION max eşzamanlı"
-                    hint="CAUTION rejiminde aynı anda en fazla kaç açık pozisyon."
+                    hint="Backtest pozisyon sınırı; zamanlanmış auto-scan’de otomatik hesaba ait OPEN + PENDING kayıtları kapasiteyi tüketir."
                     value={nn(["backtest_loop", "caution_max_concurrent"], 1)}
                     onChange={(v) => sn(["backtest_loop", "caution_max_concurrent"], Math.round(v))}
                     step={1}

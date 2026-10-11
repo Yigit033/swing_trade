@@ -339,7 +339,7 @@ function SignalCard({ s, onTrack, tracking }: { s: Signal; onTrack: (s: Signal) 
                             {s.swing_type === "A" && "📊 Trend devamı — Mevcut trende uygun giriş. Planlı kâr al."}
                         </div>
                         {s.target_2 != null && s.target_1 != null && s.target_2 > s.target_1 && (
-                            <div>🎯 T1&apos;de %50 sat (${s.target_1.toFixed(2)}), kalan %50&apos;yi T2&apos;ye taşı (${s.target_2.toFixed(2)}). Stop → breakeven.</div>
+                            <div>🎯 T1 (${s.target_1.toFixed(2)}): ayarlardaki kısmi çıkış oranı uygulanır; kalan pozisyon T2 (${s.target_2.toFixed(2)}) / stop kurallarıyla izlenir.</div>
                         )}
                         {(s.rsi || 50) > 70 && (
                             <div style={{ color: "var(--yellow)" }}>⚠️ RSI yüksek ({s.rsi?.toFixed(0)}) — kademeli kâr al, tam pozisyon girme.</div>

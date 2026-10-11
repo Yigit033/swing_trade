@@ -39,7 +39,9 @@ def _fetch_live_prices(tickers: list) -> dict:
         close = data["Close"]  # DataFrame: columns = ticker names
         for t in tickers:
             try:
-                col = close[t] if t in close.columns else close.iloc[:, 0]
+                if t not in close.columns:
+                    continue
+                col = close[t]
                 val = col.dropna()
                 if not val.empty:
                     p = round(float(val.iloc[-1].item()), 4)

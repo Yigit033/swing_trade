@@ -65,7 +65,7 @@ const CumTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function PerformancePage() {
-    const { data, isLoading } = usePerformance();
+    const { data, isLoading, isError, refetch } = usePerformance();
     const { invalidatePerformance } = useInvalidateQueries();
     const [deletingId, setDeletingId] = useState<number | null>(null);
     const [msg, setMsg] = useState("");
@@ -87,9 +87,11 @@ export default function PerformancePage() {
     if (isLoading && !data) return (
         <div style={{ textAlign: "center", padding: 80 }}><span className="spinner" style={{ width: 40, height: 40 }} /></div>
     );
+    if (isError) return <div role="alert" className="card">Performans verisi yüklenemedi; boş işlem geçmişi sonucu değildir. <button onClick={() => refetch()}>Tekrar dene</button></div>;
 
     const s = data?.summary;
-    const closed = data?.recent_closed || [];
+    const closed = (data?.recent_closed || []).filter(t =>
+        t.status !== "REJECTED" && t.realized_pnl != null && t.realized_pnl_pct != null);
 
     const sortedClosed = [...closed].sort((a, b) => (a.exit_date || "").localeCompare(b.exit_date || ""));
     let cumPnl = 0;
@@ -109,14 +111,14 @@ export default function PerformancePage() {
 
     // Best / worst trade
     const bestTrade = closed.reduce((best: Trade | undefined, t: Trade) =>
-        (t.realized_pnl_pct || 0) > (best?.realized_pnl_pct || -Infinity) ? t : best, closed[0]);
+        (t.realized_pnl_pct ?? -Infinity) > (best?.realized_pnl_pct ?? -Infinity) ? t : best, closed[0]);
     const worstTrade = closed.reduce((worst: Trade | undefined, t: Trade) =>
-        (t.realized_pnl_pct || 0) < (worst?.realized_pnl_pct || Infinity) ? t : worst, closed[0]);
+        (t.realized_pnl_pct ?? Infinity) < (worst?.realized_pnl_pct ?? Infinity) ? t : worst, closed[0]);
 
     return (
         <div>
             <h1 className="page-title gradient-text">Performance Analytics</h1>
-            <p className="page-subtitle">Closed trade deep-dive · historical P&amp;L analysis</p>
+            <p className="page-subtitle">Grafikler ve en iyi/kötü işlem, API’nin son 30 kapanış kaydı içindeki gerçekleşmiş işlemlerle sınırlıdır.</p>
 
             {msg && (
                 <div style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 10, padding: "10px 16px", marginBottom: 16, fontSize: "0.875rem", color: "var(--accent)" }}>
@@ -127,7 +129,7 @@ export default function PerformancePage() {
             {/* KPI grid */}
             <div className="metrics-grid" style={{ marginBottom: 28 }}>
                 <MetricCard
-                    label="Total P&L %"
+                    label="İşlem getirileri toplamı % (portföy getirisi değil)"
                     value={s ? `${(s.total_pnl_pct >= 0 ? "+" : "")}${s.total_pnl_pct.toFixed(2)}%` : "—"}
                     sub={s ? `Avg: ${s.avg_pnl_pct.toFixed(2)}% / trade` : undefined}
                     color={s && s.total_pnl_pct >= 0 ? "#22c55e" : "#ef4444"}
@@ -154,7 +156,7 @@ export default function PerformancePage() {
                                 <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>🏆 Best Trade</div>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                                     <span style={{ fontWeight: 700, color: "var(--accent)" }}>{bestTrade.ticker}</span>
-                                    <span style={{ color: "var(--green)", fontWeight: 700 }}>+{bestTrade.realized_pnl_pct?.toFixed(2)}%</span>
+                                    <span style={{ color: (bestTrade.realized_pnl_pct ?? 0) >= 0 ? "var(--green)" : "var(--red)", fontWeight: 700 }}>{(bestTrade.realized_pnl_pct ?? 0) >= 0 ? "+" : ""}{bestTrade.realized_pnl_pct?.toFixed(2)}%</span>
                                 </div>
                                 <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 4 }}>{fmtDate(bestTrade.exit_date)}</div>
                             </div>
@@ -164,7 +166,7 @@ export default function PerformancePage() {
                                 <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>💀 Worst Trade</div>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                                     <span style={{ fontWeight: 700, color: "var(--accent)" }}>{worstTrade.ticker}</span>
-                                    <span style={{ color: "var(--red)", fontWeight: 700 }}>{worstTrade.realized_pnl_pct?.toFixed(2)}%</span>
+                                    <span style={{ color: (worstTrade.realized_pnl_pct ?? 0) >= 0 ? "var(--green)" : "var(--red)", fontWeight: 700 }}>{(worstTrade.realized_pnl_pct ?? 0) >= 0 ? "+" : ""}{worstTrade.realized_pnl_pct?.toFixed(2)}%</span>
                                 </div>
                                 <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 4 }}>{fmtDate(worstTrade.exit_date)}</div>
                             </div>
@@ -173,7 +175,7 @@ export default function PerformancePage() {
 
                     {/* Cumulative PnL curve */}
                     <div className="glass-card chart-card">
-                        <h3 style={{ margin: "0 0 20px", fontSize: "0.95rem", fontWeight: 700 }}>📈 Cumulative P&L ($)</h3>
+                        <h3 style={{ margin: "0 0 20px", fontSize: "0.95rem", fontWeight: 700 }}>📈 Gösterilen işlemlerin kümülatif P&amp;L’i ($)</h3>
                         <div className="chart-container">
                         <ResponsiveContainer width="100%" height={220} minHeight={180}>
                             <LineChart data={pnlCurve}>

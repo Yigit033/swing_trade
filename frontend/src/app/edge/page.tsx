@@ -107,7 +107,7 @@ export default function EdgePage() {
     const matched = data.matched_edge;
     const gateVerdict = matched && matched.matched_dates > 0
         ? {
-            text: `Aynı-gün kontrolüne karşı excess R10 ${pct(matched.mean)} (${matched.matched_dates} bağımsız tarih).`,
+            text: `Aynı-gün kontrolüne karşı excess R10 ${pct(matched.mean)} (${matched.matched_dates} farklı tarih; outcome pencereleri örtüşebilir).`,
             color: (matched.ci95_low ?? -1) > 0
                 ? "var(--success)"
                 : (matched.mean ?? 0) > 0

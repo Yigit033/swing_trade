@@ -226,7 +226,7 @@ const PAGE_SIZE = 10;
 
 /* ─── MAIN PAGE ───────────────────────────────────── */
 export default function TradesPage() {
-    const { data: trades = [], isLoading: tradesLoading } = useTrades();
+    const { data: trades = [], isLoading: tradesLoading, isError: tradesError, refetch } = useTrades();
     const { data: lastUpdate } = useTradesLastUpdate();
     const updatePricesMutation = useUpdatePrices();
     const { invalidateTrades, invalidatePerformance } = useInvalidateQueries();
@@ -282,7 +282,7 @@ export default function TradesPage() {
         if (shouldAutoUpdate()) {
             setAutoUpdateDone(true);
             runUpdatePrices(undefined, {
-                onError: () => console.error("Auto price update failed"),
+                onError: () => setMsg("❌ Otomatik fiyat güncellemesi başarısız; veriler güncel olmayabilir."),
             });
         }
     }, [trades, lastUpdate, autoUpdateDone, runUpdatePrices]);
@@ -342,8 +342,10 @@ export default function TradesPage() {
         if (Number.isFinite(hold)) updates.max_hold_days = hold;
         if (editNotes) updates.notes = editNotes;
         try {
-            await updateTrade(editModal.id, updates);
-            setMsg(`✅ ${editModal.ticker} güncellendi!`);
+            const result = await updateTrade(editModal.id, updates);
+            setMsg(result.trade?.execution_warning
+                ? `⚠️ ${editModal.ticker}: ${result.trade.execution_warning}`
+                : `✅ ${editModal.ticker} güncellendi!`);
             setEditModal(null);
             invalidateTrades();
             invalidatePerformance();
@@ -426,10 +428,16 @@ export default function TradesPage() {
     }, [lastUpdate]);
 
     if (tradesLoading && trades.length === 0) return <div style={{ padding: 80, textAlign: "center" }}><span className="spinner" /></div>;
+    if (tradesError) return <div role="alert" className="card">İşlemler yüklenemedi; boş portföy sonucu değildir. <button onClick={() => refetch()}>Tekrar dene</button></div>;
 
     return (
         <div>
             {/* ─── Header ──────────────────────────────────── */}
+            {updatePricesMutation.data?.trades.filter(t => t.execution_warning).map(t => (
+                <div role="alert" key={t.id} style={{ color: "var(--yellow)", marginBottom: 8 }}>
+                    ⚠️ {t.ticker}: {t.execution_warning}
+                </div>
+            ))}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
                 <div>
                     <h1 className="page-title gradient-text">Paper Trades</h1>
@@ -561,15 +569,9 @@ export default function TradesPage() {
                                         const isClosed = CLOSED_STATUSES.has(t.status);
                                         const currentPrice = t.current_price ?? null;
                                         const exitPrice = isClosed ? t.exit_price : null;
-                                        // Compute P&L: use realized for closed, unrealized for open
-                                        // If unrealized is null but we have current_price, compute client-side
+                                        // Backend owns partial-exit accounting; never reconstruct a full-size PnL.
                                         let pnl = isClosed ? (t.realized_pnl ?? null) : (t.unrealized_pnl ?? null);
                                         let pnlPct = isClosed ? (t.realized_pnl_pct ?? null) : (t.unrealized_pnl_pct ?? null);
-                                        if (pnl == null && isOpen && currentPrice && t.entry_price) {
-                                            const size = t.position_size || 100;
-                                            pnl = (currentPrice - t.entry_price) * size;
-                                            pnlPct = ((currentPrice / t.entry_price) - 1) * 100;
-                                        }
                                         // PENDING trades: no position yet, show 0
                                         if (isPending) { pnl = 0; pnlPct = 0; }
                                         const isPos = (pnl || 0) >= 0;
@@ -614,7 +616,7 @@ export default function TradesPage() {
                                                         <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>...</span>
                                                     ) : isOpen ? (
                                                         <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>
-                                                            ${(t.entry_price || 0).toFixed(2)}
+                                                            —
                                                         </span>
                                                     ) : isPending ? (
                                                         currentPrice != null && currentPrice > 0 ? (
