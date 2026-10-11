@@ -68,3 +68,11 @@ Migration: `initial_risk`, `r_multiple`, `partial_exit_date`, `execution_state`,
 3. Deploy edilecek diff’in yalnız bu rapordaki dosyaları kapsadığını doğrula; mevcut ilgisiz kullanıcı değişikliklerini dahil etme. Dondurulmuş tek örnekte entry→T1→BE/T2/timeout ve tekrar çağrı smoke kontrolünü yap. Tarihsel paper veya arşiv backtest sonucunu overwrite etme.
 
 **Yerel düzeltme ve doğrulama sona erdi. Kârlılık artışı ölçülmedi/iddia edilmedi; production’a aktarım yapılmadı.**
+
+## Commit kapsamı doğrulaması — 11 Ekim 2026
+
+- `fix/trading-correctness-validation` dalı kullanıldı. `main` push'u Fly deployment tetiklediği için main'e push/merge yapılmadı.
+- `b486676` commit'inin temiz, detached çalışma ağacında `python -m pytest tests swing_trader/tests api/tests swing_trader/discovery -q -p no:cacheprovider --basetemp output/isolated_commit_tests_retry --junitxml output/isolated_commit_tests_retry.xml`: **505 passed, 7 deprecation warnings, 10,01 saniye**. İlk denemede eksik `output` üst klasörü 52 fixture setup hatasına neden oldu; klasör oluştuktan sonra tekrar geçti. Uygulama kodu değiştirilmedi.
+- Önceki **533 passed** tam yerel çalışma ağacına aittir; commit edilmiş test kapsamıyla aynı değildir. Önceden mevcut auto-scan kapasite/politika, Edge UI, forward-return/fetcher değişiklikleri ve bunlara bağlı audit script'i bu teslimata alınmadı, yerelde korundu. Storage'daki ilgili owner-capacity yardımcı metodu da commit dışında bırakıldı.
+- Discovery Phase 1–3 kodu/raporları ayrı commit'te korundu. Veri tabanları, `.env`, OHLCV cache ve üretilmiş araştırma çıktıları commit edilmedi. 45 değişen dosyada sınırlı secret-pattern taraması ve `git diff --check` temiz; bu tarama kapsamlı güvenlik denetimi değildir.
+- PostgreSQL staging doğrulaması ve yukarıdaki production aktarım engelleri değişmedi.
