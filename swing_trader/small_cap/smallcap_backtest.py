@@ -69,6 +69,21 @@ class SmallCapBacktester:
             "entries_opened": 0,
         }
 
+    def _entry_limit(self, regime, max_concurrent, drawdown):
+        """Existing regime/DD rules, evaluated at each decision's own timestamp."""
+        bl = self.settings.backtest_loop
+        name = regime.get('regime', 'UNKNOWN')
+        limit = max_concurrent
+        if name == 'BEAR' and bl.bear_block_new_entries:
+            limit = 0
+        elif name == 'CAUTION':
+            limit = min(limit, bl.caution_max_concurrent)
+        if drawdown > bl.drawdown_pause_entries_fraction:
+            return 0
+        if drawdown > bl.drawdown_reduce_to_one_position_fraction:
+            limit = min(limit, 1)
+        return limit
+
     def run_backtest(
         self,
         tickers: List[str],
@@ -138,43 +153,38 @@ class SmallCapBacktester:
             progress_callback(30, f"Data ready: {len(data_dict)} stocks. Starting simulation...")
         
         # Step 2: Walk forward day by day
-        trading_days = pd.bdate_range(start_dt, end_dt)
+        from ..utils.market_calendar import is_trading_day
+        trading_days = [d for d in pd.bdate_range(start_dt, end_dt) if is_trading_day(d.date())]
         total_days = len(trading_days)
         
         for day_idx, current_date in enumerate(trading_days):
             current_date_dt = current_date.to_pydatetime()
             
-            # 2a: Check exits on open trades
-            self._check_exits(current_date_dt, data_dict)
-            
-            # Compute regime BEFORE entry decisions
-            regime, eff_min, eff_top, spy_rs = self._daily_regime_bundle(current_date_dt)
-            
-            # Regime-aware concurrent limit for entries
-            regime_name = regime.get('regime', 'UNKNOWN')
-            regime_conf = regime.get('confidence', 'TENTATIVE')
-            bl = self.settings.backtest_loop
-            if regime_name == 'BEAR' and bl.bear_block_new_entries:
-                entry_max = 0
-            elif regime_name == 'CAUTION':
-                entry_max = min(max_concurrent, bl.caution_max_concurrent)
-            else:
-                entry_max = max_concurrent
+            # Open decisions precede ALL of today's high/low/close outcomes.
+            # Yesterday's completed regime/equity only (not today's EOD exits).
+            prior_instant = current_date_dt - timedelta(microseconds=1)
+            regime, eff_min, eff_top, spy_rs = self._daily_regime_bundle(prior_instant)
             
             # Drawdown circuit breaker: reduce size or pause if losing too much
-            portfolio_value = self._calculate_portfolio_value(current_date_dt, data_dict)
+            portfolio_value = self._calculate_portfolio_value(prior_instant, data_dict)
             current_dd = (self._peak_equity - portfolio_value) / self._peak_equity if self._peak_equity > 0 else 0
             if portfolio_value > self._peak_equity:
                 self._peak_equity = portfolio_value
             
-            if current_dd > bl.drawdown_pause_entries_fraction:
-                entry_max = 0
-            elif current_dd > bl.drawdown_reduce_to_one_position_fraction:
-                entry_max = min(entry_max, 1)
+            entry_max = self._entry_limit(regime, max_concurrent, current_dd)
             
             # 2b: Process pending signals from YESTERDAY (next-day-open entry)
             if self.pending_signals and entry_max > 0 and len(self.open_trades) < entry_max:
                 self._process_pending_entries(current_date_dt, data_dict, entry_max)
+            else:
+                self.pending_signals = []  # next-open opportunities cannot roll forward
+
+            # Entry-day stops are eligible, exactly once per completed bar.
+            self._check_exits(current_date_dt, data_dict)
+            portfolio_value = self._calculate_portfolio_value(current_date_dt, data_dict)
+            regime, eff_min, eff_top, spy_rs = self._daily_regime_bundle(current_date_dt)
+            eod_dd = (self._peak_equity - portfolio_value) / self._peak_equity if self._peak_equity > 0 else 0
+            scan_limit = self._entry_limit(regime, max_concurrent, eod_dd)
             
             # 2c: Record equity (+ daily regime / thresholds for UI)
             self.equity_curve.append({
@@ -190,7 +200,7 @@ class SmallCapBacktester:
             })
             
             # 2d: Scan for new signals → queue as PENDING (enter tomorrow)
-            if entry_max > 0 and len(self.open_trades) < max_concurrent:
+            if scan_limit > 0 and len(self.open_trades) < max_concurrent:
                 self._scan_for_signals(
                     current_date_dt,
                     data_dict,
@@ -462,13 +472,16 @@ class SmallCapBacktester:
             if full_df is None:
                 continue
             
-            # Find today's bar
-            mask = full_df['Date'] <= current_date
-            df_today = full_df[mask]
-            if len(df_today) < 2:
+            # Require the actual next session, never a stale previous Open.
+            from ..utils.market_calendar import next_trading_day
+            if next_trading_day(pd.Timestamp(pending['signal_date']).date()) != current_date.date():
                 continue
-            
-            today_open = float(df_today['Open'].iloc[-1])
+            today_bars = full_df[full_df['Date'].dt.date == current_date.date()]
+            if len(today_bars) != 1:
+                continue
+            today_open = float(today_bars['Open'].iloc[0])
+            if not np.isfinite(today_open) or today_open <= 0:
+                continue
             
             # ── ADIM 1: Gap filter — skip if gap too large ──
             gap_pct = ((today_open - signal_close) / signal_close) * 100
@@ -493,13 +506,14 @@ class SmallCapBacktester:
             # ── All filters passed: Enter at today's Open (+ adverse slippage) ──
             entry_price = self._entry_fill_price(today_open)
             
-            # Use entry-day data (not signal-day) for accurate stop/target
-            full_df = data_dict.get(ticker)
-            df_entry = full_df[full_df['Date'] <= current_date].copy() if full_df is not None else pending['df_window']
+            # Only completed PRE-entry bars can determine indicators or risk.
+            df_entry = full_df[full_df['Date'].dt.date < current_date.date()].copy()
+            if df_entry.empty:
+                continue
             
             # EMA trend: completed bars only (no same-day close lookahead)
             min_b = be.trend_min_bars
-            df_prior = df_entry.iloc[:-1] if len(df_entry) > min_b else df_entry
+            df_prior = df_entry
             if len(df_prior) >= min_b:
                 ema10 = float(
                     df_prior["Close"]
@@ -604,7 +618,7 @@ class SmallCapBacktester:
             # tipe özgü T2 tavanları zaten R:R(T2) > 2.0 üretiyor.
             # Canlıda silinip burada bırakılsa backtest ürünü ölçmez olurdu.
 
-            self._open_trade(sig, current_date, df_today)
+            self._open_trade(sig, current_date, df_entry)
             self._diag["entries_opened"] += 1
         
         # Expire all pending signals (1-day validity)
@@ -663,6 +677,7 @@ class SmallCapBacktester:
             'entry_price': round(entry_price, 2),
             'stop_loss': round(stop_loss, 2),
             'initial_stop': round(stop_loss, 2),
+            'initial_risk': shares * (round(entry_price, 2) - round(stop_loss, 2)),
             'trailing_stop': round(stop_loss, 2),
             'target': round(target, 2),
             'target_2': round(target_2, 2),
@@ -717,7 +732,8 @@ class SmallCapBacktester:
             shares = trade['shares']
 
             # ================================================================
-            # ÇIKIŞ MANTIĞI — CANLI tracker.py İLE BİREBİR (2026-08-05 parite)
+            # Shared exit constants, NOT proof of end-to-end production parity.
+            # Entry/risk rules and historical data assumptions still differ.
             # ================================================================
             # Buradaki mantık ÖNCE canlıdan ayrışmıştı ve /backtest sayfası
             # canlıda KULLANILMAYAN bir çıkış stratejisinin sonuçlarını
@@ -796,10 +812,19 @@ class SmallCapBacktester:
                 trade['shares'] = shares - ps
                 trade['partial_done'] = True
                 trade['trailing_stop'] = max(trade['trailing_stop'], entry_price)
-                trade['initial_stop'] = max(trade['initial_stop'], entry_price)
+                # Original entry risk remains immutable after T1.
                 trade['target'] = round(float(trade.get('target_2') or trade['target'] * 1.15), 2)
-                still_open.append(trade)
-                continue
+                shares = trade['shares']
+                # OHLC cannot order Low vs T1. Use the same conservative
+                # newly-active BE-first convention as paper execution.
+                if current_low <= trade['trailing_stop']:
+                    trade['exit_price'] = self._exit_fill_price(trade['trailing_stop'])
+                    trade['exit_date'] = current_date.strftime('%Y-%m-%d')
+                    trade['exit_reason'] = 'Ambiguous T1/BE bar: conservative BE-first'
+                    trade['status'] = 'TRAILED'
+                    trade['days_held'] = days_held
+                    self._close_trade(trade)
+                    continue
             
             if trade.get('partial_done') and current_high >= trade['target']:
                 trade['exit_price'] = self._exit_fill_price(float(trade['target']))
@@ -863,28 +888,22 @@ class SmallCapBacktester:
             trade['pnl_pct'] = round(((last_exit / entry) - 1) * 100, 2) if entry > 0 else 0
         
         trade['shares'] = init_sh
+        initial_risk = trade.get('initial_risk')
+        trade['r_multiple'] = trade['pnl_dollar'] / initial_risk if initial_risk and initial_risk > 0 else None
         self.trades.append(trade)
     
     def _force_close_all(self, end_date: datetime, data_dict: Dict):
-        """Force close all remaining open trades at end of backtest.
-        CRITICAL: Cap exit price at stop loss — can't lose more than stop allows.
-        """
+        """End-of-test liquidation; no future bar or invented stop-price floor."""
         for trade in self.open_trades:
             ticker = trade['ticker']
             df = data_dict.get(ticker)
+            if df is not None:
+                df = df[df['Date'] <= end_date]
             
             if df is not None and len(df) > 0:
                 last_close = float(df['Close'].iloc[-1])
-                stop_loss = trade.get('trailing_stop', trade.get('stop_loss', 0))
-                
-                # CRITICAL: If last close is below stop, cap at stop price
-                # In real trading, stop would have fired before reaching this price
-                if stop_loss > 0 and last_close < stop_loss:
-                    trade['exit_price'] = self._exit_fill_price(stop_loss)
-                    trade['exit_reason'] = 'Backtest End (Stop Capped)'
-                else:
-                    trade['exit_price'] = self._exit_fill_price(last_close)
-                    trade['exit_reason'] = 'Backtest End'
+                trade['exit_price'] = self._exit_fill_price(last_close)
+                trade['exit_reason'] = 'Backtest End (last available completed close)'
             else:
                 trade['exit_price'] = self._exit_fill_price(trade['entry_price'])
                 trade['exit_reason'] = 'Backtest End'

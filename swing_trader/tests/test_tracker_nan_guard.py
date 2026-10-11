@@ -84,6 +84,13 @@ class _RecordingStorage:
 
     def __init__(self):
         self.writes = []
+        self.trade = None
+
+    def get_trade_by_id(self, trade_id, user_id=None):
+        return self.trade
+
+    def apply_execution_updates(self, previous, fields, user_id=None):
+        return self.update_trade(previous['id'], fields, user_id)
 
     def update_trade(self, trade_id, fields, user_id=None):
         self.writes.append((trade_id, dict(fields)))
@@ -104,26 +111,24 @@ def test_nan_close_is_never_persisted(monkeypatch, tracker_with_recorder):
     tracker, storage = tracker_with_recorder
 
     nan_history = pd.DataFrame({
-        "Date": pd.date_range("2026-07-25", periods=2, freq="D").date,
+        "Date": pd.date_range("2026-07-27", periods=2, freq="D").date,
         "Open": [10.0, np.nan], "High": [10.5, np.nan],
         "Low": [9.5, np.nan], "Close": [10.0, np.nan],
         "Volume": [1000, 2000],
     })
     monkeypatch.setattr(tracker, "fetch_price_history", lambda *a, **k: nan_history)
-    # Keep the trade OPEN so we reach the unrealized-P&L branch.
-    monkeypatch.setattr(
-        tracker, "check_exit_conditions",
-        lambda *a, **k: ("OPEN", 0, "", "", None),
-    )
 
     trade = {
         "id": 999, "ticker": "TEST", "status": "OPEN",
-        "entry_date": "2026-07-25", "entry_price": 10.0, "position_size": 100,
-        "stop_loss": 9.0, "target_1": 11.0, "target_2": 12.0,
+        "entry_date": "2026-07-27T13:30:00Z", "entry_price": 10.0, "position_size": 100,
+        "stop_loss": 9.0, "target": 11.0, "target_2": 12.0,
         "atr": 0.5, "hold_days_max": 20, "swing_type": "A",
     }
 
+    storage.trade = trade
     result = tracker.update_trade_status(trade)
+    assert 'INVALID_OHLC' in result['execution_warning']
+    assert storage.writes == []
 
     for field in ("current_price", "unrealized_pnl", "unrealized_pnl_pct"):
         value = result.get(field)

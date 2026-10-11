@@ -8,7 +8,7 @@ V4 Improvements (over V3):
 - Same-bar ordering: check stop BEFORE updating trail (was inverted)
 - Timeout uses trading days (was calendar days including weekends)
 - T1 partial: ``partial_at_t1_fraction`` (default 33%; was hardcoded 50%)
-- initial_stop updated to entry on T1 partial (was stale)
+- initial_stop and initial_risk are immutable after confirmation
 - Gap-down slippage (exit at Open if Open < stop) — unchanged
 - PENDING state → confirm at next-day Open with gap filter — unchanged
 """
@@ -277,156 +277,10 @@ class PaperTradeTracker:
         except Exception:
             return ''
     
-    def check_exit_conditions(
-        self,
-        trade: Dict,
-        price_history: pd.DataFrame
-    ) -> Tuple[str, float, str, str, float]:
-        """
-        Check if trade should be closed.
-
-        V4: Correct bar ordering, earlier trailing stop, trading-day timeout.
-
-        Per-bar priority:
-        1. Stop loss / trailing stop (with gap-down slippage) — checked BEFORE trail update
-        2. T1 partial exit — sell ``partial_at_t1_fraction`` (default 33 %),
-           move stop to breakeven, target T2
-        3. T2 full exit — sell remaining shares
-        4. Trailing stop update — using Close (after stop/target checks)
-        5. Timeout — close at market (trading days, not calendar)
-
-        Returns:
-            Tuple of (status, exit_price, exit_date, reason, trailing_stop)
-            status: 'OPEN' | 'STOPPED' | 'TRAILED' | 'T1_PARTIAL' | 'TARGET' | 'TIMEOUT'
-        """
-        entry_price = trade['entry_price']
-        stop_loss = trade['stop_loss']
-        initial_stop = trade.get('initial_stop') or stop_loss
-        target = trade['target']
-        target_2 = trade.get('target_2') or target
-        max_hold_days = trade.get('max_hold_days', 7)
-        entry_date = datetime.strptime(trade['entry_date'][:10], '%Y-%m-%d').date()
-        atr = trade.get('atr') or 0
-        # Trail is RECOMPUTED from the bar tape every run, seeded from the
-        # initial stop (or breakeven after T1). NEVER from the persisted
-        # `trailing_stop` column.
-        #
-        # KYMR 2026-08-12 (id=83): a later corrupt/incomplete bar ratcheted
-        # trailing_stop to $110.17 (≈ entry). The next run applied that
-        # persisted trail to the Aug 14 wick (Low $110.05) and closed TRAILED
-        # −0.05% — while a fresh replay from initial_stop stays OPEN with
-        # trail $105.62 (Low $110.05 never tagged it). Persisted trail is a
-        # DISPLAY cache, not an input. Same-bar "stop before trail update"
-        # is worthless if yesterday's trail was computed from tomorrow's high.
-        trailing_stop = initial_stop
-        has_partial = (trade.get('partial_exit_price') or 0) > 0
-
-        if len(price_history) <= 1:
-            return ('OPEN', 0, '', '', trailing_stop)
-
-        trading_days_held = 0
-        # v13.4 "let winners run": chandelier trail tracks the highest high seen
-        # since entry and trails TRAIL_ATR_MULT ATR below it (vs the old
-        # +1-ATR-step-from-initial-stop, which choked winners ~1.5 ATR behind
-        # peak). Activated only after the move has TRAIL_ACTIVATE_ATR of profit
-        # so normal early noise doesn't stop us out. Validated on the live
-        # Finviz universe (scripts/exit_strategy_lab.py): EV -0.26% → +0.94%.
-        TRAIL_ATR_MULT = 3.0
-        TRAIL_ACTIVATE_ATR = 1.5
-        peak_high = entry_price
-
-        bars = price_history.iloc[1:]
-        last_i = len(bars) - 1
-        for i, (_, row) in enumerate(bars.iterrows()):
-            current_date = row['Date']
-            today_open = row['Open']
-            low = row['Low']
-            high = row['High']
-            close = row['Close']
-            trading_days_held += 1
-
-            active_stop = trailing_stop
-            # UI "Fiyat Güncelle" writes `stop_loss` but replay is seeded from
-            # `initial_stop` (persisted trailing_stop is display-only — KYMR).
-            # Applying a RAISED stop to every historical bar would stop out on
-            # day one (entry $19 vs new stop $25.50). Honor it on the last
-            # completed bar only — that is the stop the trader sees today.
-            if i == last_i:
-                try:
-                    user_stop = float(stop_loss or 0)
-                except (TypeError, ValueError):
-                    user_stop = 0.0
-                if user_stop > active_stop:
-                    active_stop = user_stop
-
-            # ── 1. CHECK STOP LOSS first (before trail update — correct temporal order) ──
-            if low <= active_stop:
-                # Gap-down through stop: exit at Open (realistic slippage) — VERIFIED CORRECT.
-                # If Open > stop (stock opened above stop, traded down intraday), exit at stop.
-                # This accurately models overnight gap risk (e.g. UMAC -16%: gap opened below stop).
-                if today_open <= active_stop:
-                    exit_price = round(float(today_open), 2)
-                    exit_date = _exit_ts(current_date, 9, 30)  # gap-down: gapped through at open
-                else:
-                    exit_price = round(float(active_stop), 2)
-                    exit_date = _exit_ts(current_date, 16, 0)  # intraday breach: proxy to close
-
-                user_stop_f = 0.0
-                try:
-                    user_stop_f = float(stop_loss or 0)
-                except (TypeError, ValueError):
-                    pass
-                is_user_floor = i == last_i and user_stop_f > initial_stop and abs(active_stop - user_stop_f) < 1e-9
-                is_trail = active_stop > initial_stop and not is_user_floor
-                pnl_pct = ((exit_price / entry_price) - 1) * 100
-
-                if is_trail:
-                    reason = f"Trailing stop at ${exit_price:.2f} ({pnl_pct:+.1f}%)"
-                    return ('TRAILED', exit_price, exit_date, reason, trailing_stop)
-                else:
-                    reason = f"Stop hit at ${exit_price:.2f} ({pnl_pct:+.1f}%)"
-                    return ('STOPPED', exit_price, exit_date, reason, trailing_stop)
-
-            # ── 2. CHECK T1 PARTIAL EXIT ──
-            if not has_partial and target_2 > target * 1.01 and high >= target:
-                exit_date = _exit_ts(current_date, 16, 0)  # target hit intraday; proxy to close
-                pnl_pct = ((target / entry_price) - 1) * 100
-                _frac_pct = _t1_partial_fraction() * 100
-                reason = (
-                    f"T1 partial {_frac_pct:.0f}% at ${target:.2f} ({pnl_pct:+.1f}%) | "
-                    f"Stop->breakeven ${entry_price:.2f} | T2 ${target_2:.2f}"
-                )
-                return ('T1_PARTIAL', target, exit_date, reason, trailing_stop)
-
-            # ── 3. CHECK TARGET (T2 after partial, or T1 if no T2) ──
-            if high >= target:
-                exit_price = target
-                exit_date = _exit_ts(current_date, 16, 0)  # target hit intraday; proxy to close
-                pnl_pct = ((exit_price / entry_price) - 1) * 100
-                label = "T2 target" if has_partial else "Target"
-                reason = f"{label} hit at ${exit_price:.2f} ({pnl_pct:+.1f}%)"
-                return ('TARGET', exit_price, exit_date, reason, trailing_stop)
-
-            # ── 4. CHANDELIER TRAILING STOP UPDATE (peak-based, AFTER stop/target checks) ──
-            if high > peak_high:
-                peak_high = high
-            if atr > 0 and (peak_high - entry_price) / atr >= TRAIL_ACTIVATE_ATR:
-                # Chandelier = peak - 3 ATR. Monotonic (only ratchets up); the
-                # initial 2-ATR stop handles downside until the trail overtakes
-                # it (~+1 ATR gain). Breakeven is locked separately at T1 partial.
-                new_trail = peak_high - TRAIL_ATR_MULT * atr
-                if new_trail > trailing_stop:
-                    trailing_stop = round(new_trail, 2)
-
-            # ── 5. CHECK TIMEOUT (trading days, not calendar) ──
-            if trading_days_held >= max_hold_days:
-                exit_price = close
-                exit_date = _exit_ts(current_date, 16, 0)  # timeout exits at market close
-                pnl_pct = ((exit_price / entry_price) - 1) * 100
-                reason = f"Timeout after {trading_days_held} trading days at ${exit_price:.2f} ({pnl_pct:+.1f}%)"
-                return ('TIMEOUT', exit_price, exit_date, reason, trailing_stop)
-
-        return ('OPEN', 0, '', '', trailing_stop)
+    def check_exit_conditions(self, trade: Dict, price_history) -> Tuple[str, float, str, str, float]:
+        """Compatibility facade over the pure chronological daily-bar evaluator."""
+        from .execution import evaluate
+        return evaluate(trade, price_history, _t1_partial_fraction())[1]
     
     def get_current_price(self, ticker: str) -> Optional[float]:
         """Get current/last price for a ticker. Uses period='5d' to handle weekends."""
@@ -443,165 +297,34 @@ class PaperTradeTracker:
             return None
     
     def update_trade_status(self, trade: Dict, user_id: Optional[str] = None) -> Dict:
-        """
-        Update a single trade's status.
-        
-        V3: Also handles trailing stop updates and PENDING confirmation.
-        
-        Returns:
-            Updated trade dict with current_price and unrealized_pnl
-        """
-        # Skip PENDING trades (handled by confirm_pending_trades)
-        if trade.get('status') == 'PENDING':
-            trade['current_price'] = trade.get('signal_price') or trade['entry_price']
-            trade['unrealized_pnl'] = 0
-            trade['unrealized_pnl_pct'] = 0
-            trade['days_held'] = 0
+        """Commit checkpoint, partial leg and terminal PnL in one CAS transaction."""
+        from .execution import evaluate
+        # Do not trust a caller's stale copy; never replay or overwrite closed rows.
+        fresh = self.storage.get_trade_by_id(trade['id'], user_id)
+        if fresh is None:
             return trade
-        
-        ticker = trade['ticker']
-        entry_date = trade['entry_date'][:10]  # "2026-03-11" — works for both old and ISO format
-        trade_id = trade['id']
-
-        # Fetch price history since entry
+        trade = fresh
+        if trade.get('status') != 'OPEN':
+            return trade
         today = datetime.now(tz=_NYSE_TZ).strftime('%Y-%m-%d')
-        price_history = self.fetch_price_history(ticker, entry_date, today)
-        
-        if price_history is None or len(price_history) == 0:
-            # History fetch failed — try a direct current price lookup
-            cp = self.get_current_price(ticker)
-            if cp and cp > 0:
-                pnl = (cp - trade['entry_price']) * trade['position_size']
-                pnl_pct = ((cp / trade['entry_price']) - 1) * 100
-                trade['current_price'] = round(cp, 2)
-                trade['unrealized_pnl'] = round(pnl, 2)
-                trade['unrealized_pnl_pct'] = round(pnl_pct, 2)
-            else:
-                trade['current_price'] = trade['entry_price']
-                trade['unrealized_pnl'] = 0
-                trade['unrealized_pnl_pct'] = 0
-            trade['days_held'] = 0
-            # Persist so GET /api/trades returns real values
-            self.storage.update_trade(trade_id, {
-                'current_price': trade['current_price'],
-                'unrealized_pnl': trade['unrealized_pnl'],
-                'unrealized_pnl_pct': trade['unrealized_pnl_pct'],
-            }, user_id)
+        history = self.fetch_price_history(trade['ticker'], trade['entry_date'][:10], today)
+        if history is None or len(history) == 0:
+            trade['execution_warning'] = 'REVIEW_REQUIRED: PRICE_HISTORY_UNAVAILABLE'
+            # No fabricated exits, marks or checkpoint advance on missing data.
             return trade
-        
-        # Check exit conditions (V3: returns trailing_stop too)
-        status, exit_price, exit_date, reason, trailing_stop = self.check_exit_conditions(
-            trade, price_history
-        )
-        
-        # Always update trailing stop in storage
-        if trailing_stop != (trade.get('trailing_stop') or trade['stop_loss']):
-            self.storage.update_trade(trade_id, {'trailing_stop': trailing_stop}, user_id)
-            trade['trailing_stop'] = trailing_stop
-
-        if status == 'T1_PARTIAL':
-            target_2 = trade.get('target_2') or trade['target']
-            _partial_pct = _t1_partial_fraction() * 100
-            self.storage.update_trade(trade_id, {
-                'partial_exit_price': exit_price,
-                'partial_exit_pct': _partial_pct,
-                'stop_loss': trade['entry_price'],
-                'trailing_stop': trade['entry_price'],
-                'initial_stop': trade['entry_price'],   # V4: anchor trail math to breakeven
-                'target': target_2,
-                'notes': reason,
-            }, user_id)
-            trade['partial_exit_price'] = exit_price
-            trade['partial_exit_pct'] = _partial_pct
-            trade['stop_loss'] = trade['entry_price']
-            trade['trailing_stop'] = trade['entry_price']
-            trade['initial_stop'] = trade['entry_price']
-            trade['target'] = target_2
-            trade['notes'] = reason
-            trade['status'] = 'OPEN'
-
-            logger.info(
-                f"T1 partial exit {trade['ticker']}: sold {_partial_pct:.0f}% at ${exit_price:.2f}, "
-                f"stop→breakeven ${trade['entry_price']:.2f}, new target T2 ${target_2:.2f}"
-            )
-
-        elif status != 'OPEN':
-            # Trade should be fully closed
-            self.storage.close_trade(
-                trade_id, exit_price, exit_date, status, reason, user_id
-            )
-            trade['status'] = status
-            trade['exit_price'] = exit_price
-            trade['exit_date'] = exit_date
-            trade['notes'] = reason
-
-            # REALİZE P/L — tek kaynak: storage.close_trade().
-            #
-            # 2026-08-05 HATA: burada P/L İKİNCİ KEZ hesaplanıyordu ve kısmi
-            # satışı `position_size // 2` ile, yani %50 varsayımıyla bölüyordu.
-            # Oysa T1 kısmi oranı 2026-08-04'te ölçümle %33'e indirildi
-            # (measure_t1_fraction.py). storage.close_trade() DOĞRU hesaplıyor —
-            # kayıtlı `partial_exit_pct`'i okuyor — ama buradaki kopya sonucu
-            # bellek üstünde EZİYORDU ve API yanıtına yanlış sayı gidiyordu.
-            # Etki tek yönlü değil, YANILTICI yönde: T1 tutup kalanı düşen bir
-            # işlemde (giriş 100, T1 108, çıkış 95) doğru sonuç −0.71/hisse
-            # iken bu kopya +1.50/hisse gösteriyordu. Yani DB'de doğru,
-            # ekranda iyimser bir sayı vardı; sayfa yenilenince değişiyordu.
-            # Çözüm: ikinci hesabı sil, otoriteyi geri oku.
-            _fresh = self.storage.get_trade_by_id(trade_id, user_id) or {}
-            trade['realized_pnl'] = _fresh.get('realized_pnl', 0)
-            trade['realized_pnl_pct'] = _fresh.get('realized_pnl_pct', 0)
-            trade['current_price'] = exit_price
-            trade['unrealized_pnl'] = 0
-            trade['unrealized_pnl_pct'] = 0
+        # Provider fallbacks must obey the same completed-session cutoff.
+        from ..utils.market_calendar import last_completed_session
+        import pandas as pd
+        history = history[pd.to_datetime(history['Date']).dt.date <= last_completed_session()]
+        updates, result = evaluate(trade, history, _t1_partial_fraction())
+        if not updates:
+            trade['execution_warning'] = result[3]
+            return trade
+        if self.storage.apply_execution_updates(trade, updates, user_id):
+            trade.update(updates)
         else:
-            # Still open - calculate unrealized P/L
-            current_price = float(price_history['Close'].iloc[-1])
-
-            # Savunma katmanı: NaN/Inf fiyat DB'ye yazılırsa o satır kalıcı
-            # olarak JSON'lanamaz hale gelir (endpoint 500). Yukarıdaki NaN-drop
-            # bunu zaten elemeli; burası son bariyer.
-            if not math.isfinite(current_price):
-                logger.warning(f"{ticker}: son kapanış NaN/Inf — fiyat ve P&L güncellemesi atlandı")
-            else:
-                # T1 KISMİSİ SONRASI AÇIK İŞLEM — 2026-08-05 düzeltmesi.
-                # Eskiden burada TAM pozisyon büyüklüğü kullanılıyordu, ama T1'de
-                # payların %33'ü zaten satılmıştı (position_size orijinali tutar,
-                # storage.close_trade() de öyle varsayar). İki yönlü hataydı:
-                # kalan pozisyonun P/L'si %50 fazla gösteriliyor, T1'de kilitlenen
-                # kâr ise hiç sayılmıyordu. Artık ikisi ayrı ayrı doğru:
-                #   kilitli  = satılan pay × (T1 fiyatı − giriş)
-                #   açık risk = kalan pay  × (güncel   − giriş)
-                _size = trade['position_size']
-                _entry = trade['entry_price']
-                _ppx = trade.get('partial_exit_price') or 0
-                _ppct = trade.get('partial_exit_pct') or 0
-
-                if _ppx > 0 and _ppct > 0:
-                    _sold = int(_size * (_ppct / 100))
-                    _left = _size - _sold
-                    pnl = (_sold * (_ppx - _entry)) + (_left * (current_price - _entry))
-                else:
-                    pnl = (current_price - _entry) * _size
-
-                _cost = _size * _entry
-                pnl_pct = (pnl / _cost) * 100 if _cost > 0 else 0
-
-                trade['current_price'] = round(current_price, 2)
-                trade['unrealized_pnl'] = round(pnl, 2)
-                trade['unrealized_pnl_pct'] = round(pnl_pct, 2)
-
-                # Persist to DB so GET /api/trades returns live values immediately
-                self.storage.update_trade(trade_id, {
-                    'current_price': trade['current_price'],
-                    'unrealized_pnl': trade['unrealized_pnl'],
-                    'unrealized_pnl_pct': trade['unrealized_pnl_pct'],
-                }, user_id)
-
-            # Calculate days held
-            entry_dt = datetime.strptime(entry_date[:10], '%Y-%m-%d').date()
-            trade['days_held'] = (datetime.now().date() - entry_dt).days
-
+            trade = self.storage.get_trade_by_id(trade['id'], user_id) or trade
+            trade['execution_warning'] = 'CONCURRENT_UPDATE: no duplicate execution committed'
         return trade
     
     def update_all_open_trades(self, user_id: Optional[str] = None) -> List[Dict]:
@@ -889,17 +612,22 @@ class PaperTradeTracker:
                     target_2 = target
 
                 # Confirm the trade
-                self.storage.update_trade(trade_id, {
+                confirmed = self.storage.update_trade(trade_id, {
                     'status': 'OPEN',
                     'entry_price': round(open_price, 2),
                     'entry_date': entry_date,
                     'stop_loss': stop_loss,
                     'initial_stop': stop_loss,
+                    'initial_risk': round((round(open_price, 2) - stop_loss) * trade['position_size'], 8),
                     'trailing_stop': stop_loss,
                     'target': target,
                     'target_2': target_2,
                     'notes': f"Confirmed at Open ${open_price:.2f} (gap {gap_pct:+.1f}%)"
                 }, user_id)
+                if not confirmed:
+                    trade['confirm_status'] = 'concurrent_update'
+                    results.append(trade)
+                    continue
                 
                 trade['confirm_status'] = 'confirmed'
                 trade['entry_price'] = open_price

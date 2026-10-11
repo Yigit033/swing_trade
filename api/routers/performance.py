@@ -68,8 +68,10 @@ def _enrich_open_trades(open_trades: list) -> list:
             size = trade.get("position_size") or 100
             trade["current_price"] = cp
             if entry:
-                trade["unrealized_pnl"] = round((cp - entry) * size, 2)
-                trade["unrealized_pnl_pct"] = round(((cp / entry) - 1) * 100, 2)
+                from swing_trader.paper_trading.execution import mark_pnl
+                pnl, pct = mark_pnl(trade, cp)
+                trade["unrealized_pnl"] = round(pnl, 2)
+                trade["unrealized_pnl_pct"] = round(pct, 2)
         result.append(trade)
     return result
 

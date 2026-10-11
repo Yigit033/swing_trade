@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
 """
+LEGACY / UNVERIFIED PERFORMANCE ARTIFACT — NOT production-equivalent.
+Its exits differ from production and _slippage_bps uses future tail liquidity.
+Historical results must not be used as validated profitability evidence.
+The historical description below is retained for provenance, not endorsement.
+
 CANLI-BİREBİR BACKTEST — ürünü geçmişte GERÇEKTE nasıl kullanıyorsak öyle koştur
 ================================================================================
 Kullanıcının haklı itirazı: önceki backtest (backtest_old_vs_new.py) canlı

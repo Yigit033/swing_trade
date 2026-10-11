@@ -33,7 +33,7 @@ from swing_trader.small_cap import smallcap_backtest as BT
 
 BT_SRC = inspect.getsource(BT)
 TRACKER_SRC = inspect.getsource(
-    __import__("swing_trader.paper_trading.tracker", fromlist=["x"])
+    __import__("swing_trader.paper_trading.execution", fromlist=["x"])
 )
 
 
@@ -103,7 +103,7 @@ def _tracker_exit(bars, entry, stop, target, target_2, atr, max_hold=20):
         "entry_price": entry, "stop_loss": stop, "target": target,
         "target_2": target_2, "atr": atr, "max_hold_days": max_hold,
         "trailing_stop": stop, "initial_stop": stop, "partial_exit_price": 0,
-        "entry_date": "2025-01-02", "ticker": "X",
+        "entry_date": "2025-01-02T14:30:00Z", "ticker": "X", "position_size": 100,
     }
     return PaperTradeTracker.check_exit_conditions(tr, trade, bars)
 

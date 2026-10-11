@@ -13,6 +13,28 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+EXECUTION_COLUMNS = (
+    ('initial_risk', 'REAL'), ('r_multiple', 'REAL'),
+    ('partial_exit_date', 'TEXT'), ('execution_state', 'TEXT'),
+    ('policy_effective_at', 'TEXT'),
+)
+
+
+def _migrate_execution_columns(cursor, postgres: bool):
+    """Add nullable columns transactionally; never update historical rows.
+
+    Unlike legacy best-effort migrations, errors propagate and roll back.
+    """
+    if postgres:
+        for name, kind in EXECUTION_COLUMNS:
+            cursor.execute(f'ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS {name} {kind}')
+    else:
+        cursor.execute('PRAGMA table_info(paper_trades)')
+        existing = {r[1] for r in cursor.fetchall()}
+        for name, kind in EXECUTION_COLUMNS:
+            if name not in existing:
+                cursor.execute(f'ALTER TABLE paper_trades ADD COLUMN {name} {kind}')
+
 # ── Bağlantı modu ─────────────────────────────────────────────────────────────────────────────────
 # .env dosyasını yükle — API ve script'lerin AYNI DB'ye bağlanması için kritik
 try:
@@ -208,6 +230,10 @@ class PaperTradeStorage:
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
+            if not (_MODE == 'pg' and not self._override_path):
+                # sqlite DDL otherwise autocommits; make the additive migration
+                # all-or-nothing just like PostgreSQL's implicit transaction.
+                cursor.execute('BEGIN')
 
             if _MODE == "pg" and not self._override_path:
                 cursor.execute(_CREATE_TABLE_PG)
@@ -284,17 +310,22 @@ class PaperTradeStorage:
                     except _sq.OperationalError:
                         pass
 
+            _migrate_execution_columns(cursor, _MODE == 'pg' and not self._override_path)
             conn.commit()
-            conn.close()
         except Exception as e:
+            if 'conn' in locals():
+                conn.rollback()
             logger.error(f"Error initializing database: {e}")
             raise
+        finally:
+            if 'conn' in locals():
+                conn.close()
 
     # ── CRUD ──────────────────────────────────────────────────────────────────
 
     def add_trade(self, trade: Dict, user_id: Optional[str] = None) -> int:
         """Add a new paper trade. Returns trade ID."""
-        ph = _ph()
+        ph = '?' if self._override_path else _ph()
 
         # ── numpy → native Python dönüşümü (psycopg2 np.float64 tanımıyor) ──
         def _native(v):
@@ -365,6 +396,14 @@ class PaperTradeStorage:
                 cursor.execute(f"INSERT INTO paper_trades {_cols} VALUES ({_vals})", _params)
                 trade_id = cursor.lastrowid
 
+            # New confirmed/manual-open rows only. PENDING risk is captured at
+            # confirmation; legacy records are deliberately never backfilled.
+            if trade.get('status', 'OPEN') == 'OPEN' and not trade.get('partial_exit_price'):
+                initial = trade.get('initial_stop', trade['stop_loss'])
+                risk = (trade['entry_price'] - initial) * trade.get('position_size', 100)
+                if initial > 0 and risk > 0:
+                    cursor.execute(f"UPDATE paper_trades SET initial_risk = {ph} WHERE id = {ph}",
+                                   (risk, trade_id))
             conn.commit()
             logger.info(f"Added paper trade: {trade['ticker']} (ID: {trade_id})")
             return trade_id
@@ -378,7 +417,7 @@ class PaperTradeStorage:
 
     def get_open_trades(self, user_id: Optional[str] = None) -> List[Dict]:
         """Get all OPEN and PENDING trades."""
-        ph = _ph()
+        ph = '?' if self._override_path else _ph()
         conn = None
         try:
             conn = self._get_conn()
@@ -406,7 +445,7 @@ class PaperTradeStorage:
 
     def get_closed_trades(self, limit: int = 50, user_id: Optional[str] = None) -> List[Dict]:
         """Get closed trades."""
-        ph = _ph()
+        ph = '?' if self._override_path else _ph()
         conn = None
         try:
             conn = self._get_conn()
@@ -436,7 +475,7 @@ class PaperTradeStorage:
 
     def get_all_trades(self, user_id: Optional[str] = None) -> List[Dict]:
         """Get all trades."""
-        ph = _ph()
+        ph = '?' if self._override_path else _ph()
         conn = None
         try:
             conn = self._get_conn()
@@ -524,7 +563,7 @@ class PaperTradeStorage:
 
     def get_trade_by_id(self, trade_id: int, user_id: Optional[str] = None) -> Optional[Dict]:
         """Get a specific trade by ID."""
-        ph = _ph()
+        ph = '?' if self._override_path else _ph()
         conn = None
         try:
             conn = self._get_conn()
@@ -554,7 +593,14 @@ class PaperTradeStorage:
         """Update fields on a trade."""
         if not updates:
             return True
-        ph = _ph()
+        updates = dict(updates)
+        if {'initial_stop', 'initial_risk'} & updates.keys():
+            old = self.get_trade_by_id(trade_id, user_id)
+            if not old or old.get('status') != 'PENDING':
+                return False  # entry risk is not a mutable trailing stop
+        if {'stop_loss', 'target', 'max_hold_days'} & updates.keys() and 'status' not in updates:
+            updates['policy_effective_at'] = _utc_now_iso()
+        ph = '?' if self._override_path else _ph()
         conn = None
         try:
             conn = self._get_conn()
@@ -570,15 +616,43 @@ class PaperTradeStorage:
                 query = f"UPDATE paper_trades SET {', '.join(set_clauses)} WHERE id = {ph} AND (user_id IS NULL OR user_id = {ph})"
             else:
                 query = f"UPDATE paper_trades SET {', '.join(set_clauses)} WHERE id = {ph}"
+            if {'initial_stop', 'initial_risk'} & updates.keys():
+                query += " AND status = 'PENDING'"
             cursor.execute(query, values)
             conn.commit()
-            return True
+            return cursor.rowcount == 1
         except Exception as e:
             logger.error(f"Error updating trade {trade_id}: {e}")
             return False
         finally:
             if conn:
                 conn.close()
+
+    def apply_execution_updates(self, previous: Dict, updates: Dict, user_id: Optional[str] = None) -> bool:
+        """Atomically commit one checkpoint; concurrent/stale replays cannot sell twice."""
+        ph = '?' if self._override_path else _ph()
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            assignments = ', '.join(f'{key} = {ph}' for key in updates)
+            query = (f"UPDATE paper_trades SET {assignments}, updated_at = {ph} "
+                     f"WHERE id = {ph} AND status = {ph} "
+                     f"AND COALESCE(updated_at, '') = {ph} "
+                     f"AND COALESCE(execution_state, '') = {ph}")
+            params = list(updates.values()) + [_utc_now_iso(), previous['id'], previous['status'],
+                      previous.get('updated_at') or '', previous.get('execution_state') or '']
+            if user_id:
+                query += f' AND (user_id IS NULL OR user_id = {ph})'
+                params.append(user_id)
+            cur.execute(query, params)
+            success = cur.rowcount == 1
+            conn.commit()
+            return success
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def close_trade(
         self,
@@ -596,40 +670,22 @@ class PaperTradeStorage:
         Oran KAYITLI `partial_exit_pct`'ten okunur — o an geçerli ayardan
         DEĞİL. Sebep: T1 ile nihai çıkış arasında kullanıcı oranı değiştirebilir;
         gerçekleşmiş bir işlemin muhasebesi satıldığı andaki oranla yapılmalı.
-        Bu fonksiyon realize P/L'nin TEK otoritesidir (tracker 2026-08-05'te
-        buradaki hesabı kopyalayıp %50 varsayımıyla eziyordu — kaldırıldı).
+        Otomatik ve manuel kapanışlar aynı mark_pnl muhasebesini kullanır.
         """
         try:
             trade = self.get_trade_by_id(trade_id, user_id)
-            if not trade:
+            if not trade or trade.get('status') not in ('OPEN', 'PENDING'):
                 return False
-            entry_price = trade['entry_price']
-            position_size = trade['position_size']
-            partial_exit_price = trade.get('partial_exit_price')
-            partial_pct = trade.get('partial_exit_pct') or 0
+            from .execution import mark_pnl
+            pnl, pnl_pct = mark_pnl(trade, exit_price)
 
-            if partial_exit_price and partial_pct > 0:
-                # Blended PnL: partial sold at T1, remainder at final exit
-                partial_ratio = partial_pct / 100  # satış anındaki oran (ör. 0.33)
-                remaining_ratio = 1 - partial_ratio
-                partial_shares = int(position_size * partial_ratio)
-                remaining_shares = position_size - partial_shares
-                partial_pnl = partial_shares * (partial_exit_price - entry_price)
-                remaining_pnl = remaining_shares * (exit_price - entry_price)
-                pnl = partial_pnl + remaining_pnl
-                # Blended % = total_pnl / total_cost
-                total_cost = position_size * entry_price
-                pnl_pct = (pnl / total_cost) * 100 if total_cost > 0 else 0
-            else:
-                pnl = (exit_price - entry_price) * position_size
-                pnl_pct = ((exit_price / entry_price) - 1) * 100
-
-            return self.update_trade(trade_id, {
+            return self.apply_execution_updates(trade, {
                 'status': status,
                 'exit_date': exit_date,
                 'exit_price': exit_price,
                 'realized_pnl': round(pnl, 2),
                 'realized_pnl_pct': round(pnl_pct, 2),
+                'r_multiple': pnl / trade['initial_risk'] if trade.get('initial_risk', 0) and trade['initial_risk'] > 0 else None,
                 'current_price': round(float(exit_price), 2),
                 'unrealized_pnl': 0,
                 'unrealized_pnl_pct': 0,
@@ -641,7 +697,7 @@ class PaperTradeStorage:
 
     def delete_trade(self, trade_id: int, user_id: Optional[str] = None) -> bool:
         """Delete a trade permanently."""
-        ph = _ph()
+        ph = '?' if self._override_path else _ph()
         conn = None
         try:
             conn = self._get_conn()
@@ -674,7 +730,7 @@ class PaperTradeStorage:
 
         Correct rule: one active trade per ticker at a time, regardless of date.
         """
-        ph = _ph()
+        ph = '?' if self._override_path else _ph()
         conn = None
         try:
             conn = self._get_conn()
@@ -713,7 +769,7 @@ class PaperTradeStorage:
         """
         from datetime import timedelta
         cutoff = (datetime.now() - timedelta(days=cooldown_days)).strftime('%Y-%m-%d')
-        ph = _ph()
+        ph = '?' if self._override_path else _ph()
         conn = None
         try:
             conn = self._get_conn()

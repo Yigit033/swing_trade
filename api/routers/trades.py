@@ -117,8 +117,10 @@ def _enrich_open_trades_inline(trades: list) -> list:
             entry = t.get("entry_price") or 0
             size = t.get("position_size") or 100
             if entry:
-                t["unrealized_pnl"] = round((cp - entry) * size, 2)
-                t["unrealized_pnl_pct"] = round(((cp / entry) - 1) * 100, 2)
+                from swing_trader.paper_trading.execution import mark_pnl
+                pnl, pct = mark_pnl(t, cp)
+                t["unrealized_pnl"] = round(pnl, 2)
+                t["unrealized_pnl_pct"] = round(pct, 2)
         elif status not in ("OPEN", "PENDING"):
             # Post-exit drift: how far has it moved since we exited?
             # Never leak the last OPEN unrealized P&L (KYMR: +10.15% leftover
@@ -226,8 +228,8 @@ def update_trade(
     if not ok:
         raise HTTPException(status_code=404, detail="Trade not found")
     trade = storage.get_trade_by_id(trade_id, user_id)
-    # Re-run exits so a raised stop that is already through the market
-    # (ASST: stop $25.50, last close $24) closes now, not on the next cron.
+    # Timestamped policy edits never fill against a pre-edit historical Low.
+    # Intraday edits may require finer bars and return an execution warning.
     if trade and trade.get("status") == "OPEN" and (
         "stop_loss" in updates or "target" in updates or "max_hold_days" in updates
     ):
