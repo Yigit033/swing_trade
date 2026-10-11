@@ -18,10 +18,13 @@ signal_history_storage.py.
 from __future__ import annotations
 
 import logging
+import math
 import os
-from datetime import datetime
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from statistics import median
+from typing import Any, Dict, List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,17 @@ DB_PATH = Path(__file__).parent.parent.parent / "data" / "signal_history.db"
 
 HORIZONS = (3, 5, 10)
 MFE_WINDOW = 10
+EDGE_POLICY_VERSION = "regime-quality-v1"
+
+# Legacy rows pre-date persisted effective thresholds.  These fallbacks mirror
+# the current conservative policy; new rows always store the exact threshold
+# used by the scan, so future settings changes do not rewrite history.
+REGIME_QUALITY_FLOORS = {
+    "BULL": 78.0,
+    "CAUTION": 80.0,
+    "BEAR": 80.0,
+    "UNKNOWN": 80.0,
+}
 
 
 def _url_mode() -> str:
@@ -86,6 +100,9 @@ CREATE TABLE IF NOT EXISTS signal_forward_returns (
     status        TEXT DEFAULT 'pending',
     kind          TEXT NOT NULL DEFAULT 'signal',
     reject_reason TEXT,
+    effective_min_quality REAL,
+    is_actionable INTEGER,
+    policy_version TEXT,
     UNIQUE (ticker, signal_date)
 )
 """
@@ -97,14 +114,18 @@ KIND_UNIVERSE = "universe"
 
 
 def _migrate_forward_returns_schema(cur) -> None:
-    """Add kind/reject_reason on existing DBs. Unique stays (ticker, signal_date)."""
+    """Add telemetry columns on existing DBs. Unique stays ticker + session."""
     if _MODE == "pg":
-        cur.execute(
-            "ALTER TABLE signal_forward_returns ADD COLUMN IF NOT EXISTS kind TEXT"
-        )
-        cur.execute(
-            "ALTER TABLE signal_forward_returns ADD COLUMN IF NOT EXISTS reject_reason TEXT"
-        )
+        for name, sql_type in (
+            ("kind", "TEXT"),
+            ("reject_reason", "TEXT"),
+            ("effective_min_quality", "REAL"),
+            ("is_actionable", "INTEGER"),
+            ("policy_version", "TEXT"),
+        ):
+            cur.execute(
+                f"ALTER TABLE signal_forward_returns ADD COLUMN IF NOT EXISTS {name} {sql_type}"
+            )
         cur.execute(
             "UPDATE signal_forward_returns SET kind = %s WHERE kind IS NULL OR kind = ''",
             (KIND_SIGNAL,),
@@ -118,6 +139,260 @@ def _migrate_forward_returns_schema(cur) -> None:
         )
     if "reject_reason" not in cols:
         cur.execute("ALTER TABLE signal_forward_returns ADD COLUMN reject_reason TEXT")
+    if "effective_min_quality" not in cols:
+        cur.execute("ALTER TABLE signal_forward_returns ADD COLUMN effective_min_quality REAL")
+    if "is_actionable" not in cols:
+        cur.execute("ALTER TABLE signal_forward_returns ADD COLUMN is_actionable INTEGER")
+    if "policy_version" not in cols:
+        cur.execute("ALTER TABLE signal_forward_returns ADD COLUMN policy_version TEXT")
+
+
+def _policy_floor(row: Dict[str, Any]) -> float:
+    persisted = row.get("effective_min_quality")
+    if persisted is not None:
+        return float(persisted)
+    return REGIME_QUALITY_FLOORS.get(
+        str(row.get("regime") or "UNKNOWN").upper(),
+        REGIME_QUALITY_FLOORS["UNKNOWN"],
+    )
+
+
+def _is_actionable(row: Dict[str, Any]) -> bool:
+    persisted = row.get("is_actionable")
+    if persisted is not None:
+        return bool(persisted)
+    quality = row.get("quality")
+    return quality is not None and float(quality) >= _policy_floor(row)
+
+
+def _summary(values: Sequence[float]) -> Optional[Dict[str, Any]]:
+    """Distribution summary with a small-sample Student-t confidence interval."""
+    vals = [float(v) for v in values if v is not None and math.isfinite(float(v))]
+    if not vals:
+        return None
+    n = len(vals)
+    mean = sum(vals) / n
+    result: Dict[str, Any] = {
+        "n": n,
+        "mean": round(mean, 2),
+        "median": round(median(vals), 2),
+        "win_rate": round(sum(v > 0 for v in vals) / n * 100, 1),
+        "best": round(max(vals), 2),
+        "worst": round(min(vals), 2),
+        "ci95_low": None,
+        "ci95_high": None,
+        "standard_error": None,
+        "p_value_positive": None,
+    }
+    if n < 2:
+        return result
+    variance = sum((v - mean) ** 2 for v in vals) / (n - 1)
+    se = math.sqrt(variance / n)
+    if se == 0:
+        result.update({
+            "ci95_low": round(mean, 2),
+            "ci95_high": round(mean, 2),
+            "standard_error": 0.0,
+            "p_value_positive": 0.0 if mean > 0 else 1.0,
+        })
+        return result
+    try:
+        from scipy.stats import t as student_t
+
+        critical = float(student_t.ppf(0.975, n - 1))
+        p_positive = float(student_t.sf(mean / se, n - 1))
+    except Exception:
+        critical = 1.96
+        p_positive = None
+    result.update({
+        "ci95_low": round(mean - critical * se, 2),
+        "ci95_high": round(mean + critical * se, 2),
+        "standard_error": round(se, 2),
+        "p_value_positive": round(p_positive, 4) if p_positive is not None else None,
+    })
+    return result
+
+
+def _side(pool: Sequence[Dict[str, Any]], key: str = "r10") -> Dict[str, Any]:
+    return _summary([r[key] for r in pool if r.get(key) is not None]) or {
+        "n": 0,
+        "mean": None,
+        "median": None,
+        "win_rate": None,
+        "best": None,
+        "worst": None,
+        "ci95_low": None,
+        "ci95_high": None,
+        "standard_error": None,
+        "p_value_positive": None,
+    }
+
+
+def _clustered_by(pool: Sequence[Dict[str, Any]], field: str) -> Dict[str, Any]:
+    grouped: Dict[str, List[float]] = defaultdict(list)
+    for row in pool:
+        value = row.get("r10")
+        group = row.get(field)
+        if value is not None and group:
+            grouped[str(group)].append(float(value))
+    values = [sum(vs) / len(vs) for vs in grouped.values()]
+    result = _summary(values) or _side([])
+    result["groups"] = len(grouped)
+    return result
+
+
+def build_edge_report(recs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build statistically honest live-edge telemetry from database records.
+
+    The policy split uses the threshold that was active when available. Legacy
+    rows are evaluated against today's regime floor and explicitly counted.
+    Same-date excess return avoids comparing signals from one market regime to
+    universe rows from a different date.
+    """
+    signal_recs = [r for r in recs if (r.get("kind") or KIND_SIGNAL) != KIND_UNIVERSE]
+    universe_recs = [r for r in recs if (r.get("kind") or KIND_SIGNAL) == KIND_UNIVERSE]
+    eligible = [r for r in signal_recs if _is_actionable(r)]
+    excluded = [r for r in signal_recs if not _is_actionable(r)]
+
+    universe_by_date: Dict[str, List[float]] = defaultdict(list)
+    for row in universe_recs:
+        if row.get("signal_date") and row.get("r10") is not None:
+            universe_by_date[str(row["signal_date"])].append(float(row["r10"]))
+
+    matched_rows: List[Dict[str, Any]] = []
+    for row in eligible:
+        controls = universe_by_date.get(str(row.get("signal_date")), [])
+        if row.get("r10") is None or not controls:
+            continue
+        control_mean = sum(controls) / len(controls)
+        matched_rows.append({
+            "signal_date": row.get("signal_date"),
+            "excess": float(row["r10"]) - control_mean,
+            "control_n": len(controls),
+        })
+    matched_by_date: Dict[str, List[float]] = defaultdict(list)
+    for row in matched_rows:
+        matched_by_date[str(row["signal_date"])].append(float(row["excess"]))
+    matched_daily = [sum(vs) / len(vs) for vs in matched_by_date.values()]
+    matched_summary = _summary(matched_daily) or _side([])
+    matched_summary.update({
+        "matched_signals": len(matched_rows),
+        "matched_dates": len(matched_daily),
+        "method": "Her sinyal R10 eksi aynı tarama tarihindeki evren ortalama R10; tarihler eşit ağırlıklı.",
+    })
+
+    eligible_mature = [r for r in eligible if r.get("r10") is not None]
+    by_ticker = _clustered_by(eligible_mature, "ticker")
+    by_date = _clustered_by(eligible_mature, "signal_date")
+    without_best = list(eligible_mature)
+    if without_best:
+        best_idx = max(range(len(without_best)), key=lambda i: float(without_best[i]["r10"]))
+        without_best.pop(best_idx)
+    eligible_sum = sum(float(r["r10"]) for r in eligible_mature)
+    top_trade = max((float(r["r10"]) for r in eligible_mature), default=0.0)
+    concentration = {
+        "unique_tickers": len({r.get("ticker") for r in eligible_mature if r.get("ticker")}),
+        "unique_dates": len({r.get("signal_date") for r in eligible_mature if r.get("signal_date")}),
+        "equal_ticker_weighted": by_ticker,
+        "date_clustered": by_date,
+        "without_best_trade": _side(without_best),
+        "top_trade_contribution_pct": (
+            round(top_trade / eligible_sum * 100, 1) if eligible_sum > 0 else None
+        ),
+    }
+
+    eligible_summary = _side(eligible)
+    ci_low = eligible_summary.get("ci95_low")
+    if eligible_summary["n"] < 30 or by_date.get("groups", 0) < 10:
+        status = "early"
+        label = "Umut verici, örneklem küçük"
+    elif ci_low is not None and ci_low > 0:
+        status = "confirmed"
+        label = "Canlı edge istatistiksel olarak pozitif"
+    elif eligible_summary.get("mean") is not None and eligible_summary["mean"] > 0:
+        status = "inconclusive"
+        label = "Pozitif ortalama, güven aralığı belirsiz"
+    else:
+        status = "negative"
+        label = "Canlı edge doğrulanmıyor"
+
+    legacy_policy_rows = sum(
+        1 for r in signal_recs if r.get("effective_min_quality") is None
+    )
+    return {
+        "signal_recs": signal_recs,
+        "universe_recs": universe_recs,
+        "eligible": eligible,
+        "excluded": excluded,
+        "policy_split": {
+            "version": EDGE_POLICY_VERSION,
+            "floors": REGIME_QUALITY_FLOORS,
+            "eligible": eligible_summary,
+            "excluded": _side(excluded),
+            "legacy_inferred_rows": legacy_policy_rows,
+        },
+        "matched_edge": matched_summary,
+        "robustness": concentration,
+        "verdict": {
+            "status": status,
+            "label": label,
+            "minimum_signals": 30,
+            "minimum_dates": 10,
+        },
+    }
+
+
+def _compute_forward_values(df, signal_date: str) -> Optional[Dict[str, Optional[float]]]:
+    """Calculate t+1-open forward returns without silently shifting old rows.
+
+    A missing signal session is allowed only for a nearby non-trading label.
+    Previously, a truncated 3-month download could turn its first available bar
+    into the entry for a much older signal and corrupt the scorecard.
+    """
+    import pandas as pd
+
+    dates = pd.to_datetime(df["Date"]).dt.strftime("%Y-%m-%d").tolist()
+    if not dates:
+        return None
+    if signal_date in dates:
+        entry_idx = dates.index(signal_date) + 1
+    else:
+        after = [i for i, date in enumerate(dates) if date > signal_date]
+        if not after:
+            return None
+        entry_idx = after[0]
+        gap_days = (
+            datetime.strptime(dates[entry_idx], "%Y-%m-%d")
+            - datetime.strptime(signal_date[:10], "%Y-%m-%d")
+        ).days
+        if gap_days > 7:
+            return None
+    if entry_idx >= len(df):
+        return None
+
+    o = df["Open"].astype(float).values
+    c = df["Close"].astype(float).values
+    h = df["High"].astype(float).values
+    low = df["Low"].astype(float).values
+    entry = float(o[entry_idx])
+    if not math.isfinite(entry) or entry <= 0:
+        return None
+
+    vals: Dict[str, Optional[float]] = {"entry_open": round(entry, 4)}
+    for n in HORIZONS:
+        j = entry_idx + n - 1
+        value = float(c[j]) if j < len(df) else None
+        vals[f"r{n}"] = (
+            round((value / entry - 1) * 100, 2)
+            if value is not None and math.isfinite(value)
+            else None
+        )
+    end = min(entry_idx + MFE_WINDOW, len(df))
+    high = float(h[entry_idx:end].max())
+    low_value = float(low[entry_idx:end].min())
+    vals["mfe10"] = round((high / entry - 1) * 100, 2) if math.isfinite(high) else None
+    vals["mae10"] = round((low_value / entry - 1) * 100, 2) if math.isfinite(low_value) else None
+    return vals
 
 
 def assemble_scan_membership(
@@ -179,6 +454,9 @@ class ForwardReturnTracker:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_fwd_kind_status ON signal_forward_returns(kind, status)"
             )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_fwd_signal_date ON signal_forward_returns(signal_date)"
+            )
             conn.commit()
             conn.close()
         except Exception as e:
@@ -187,13 +465,20 @@ class ForwardReturnTracker:
     # ------------------------------------------------------------------
     # RECORD — called right after each live scan persists its signals
     # ------------------------------------------------------------------
-    def record_signals(self, run_id: Optional[str], signals: List[Dict[str, Any]]) -> int:
+    def record_signals(
+        self,
+        run_id: Optional[str],
+        signals: List[Dict[str, Any]],
+        *,
+        effective_min_quality: Optional[float] = None,
+        policy_version: str = EDGE_POLICY_VERSION,
+    ) -> int:
         """Insert one tracking row per signal. Idempotent on (ticker, signal_date)."""
         if not signals:
             return 0
         ph = _ph()
         inserted = 0
-        now = datetime.utcnow().isoformat() + "Z"
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         conn = None
         try:
             conn = _connect()
@@ -203,38 +488,56 @@ class ForwardReturnTracker:
                 sig_date = (s.get("signal_date") or s.get("date") or now)[:10]
                 if not ticker:
                     continue
+                quality = float(s.get("quality_score") or 0)
+                threshold = (
+                    float(effective_min_quality)
+                    if effective_min_quality is not None
+                    else REGIME_QUALITY_FLOORS.get(
+                        str(s.get("market_regime") or "UNKNOWN").upper(),
+                        REGIME_QUALITY_FLOORS["UNKNOWN"],
+                    )
+                )
+                actionable = 1 if quality >= threshold else 0
                 try:
                     if _MODE == "pg":
                         cur.execute(
                             f"""INSERT INTO signal_forward_returns
                                 (created_at, run_id, ticker, signal_date, quality,
-                                 swing_type, pathway, regime, status, kind)
-                                VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},'pending',{ph})
+                                 swing_type, pathway, regime, status, kind,
+                                 effective_min_quality, is_actionable, policy_version)
+                                VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},'pending',{ph},{ph},{ph},{ph})
                                 ON CONFLICT (ticker, signal_date) DO NOTHING""",
                             (
                                 now, run_id, ticker, sig_date,
-                                float(s.get("quality_score") or 0),
+                                quality,
                                 s.get("swing_type"),
                                 s.get("trigger_pathway")
                                 or (s.get("trigger_details") or {}).get("trigger_pathway"),
                                 s.get("market_regime"),
                                 KIND_SIGNAL,
+                                threshold,
+                                actionable,
+                                policy_version,
                             ),
                         )
                     else:
                         cur.execute(
                             f"""INSERT OR IGNORE INTO signal_forward_returns
                                 (created_at, run_id, ticker, signal_date, quality,
-                                 swing_type, pathway, regime, status, kind)
-                                VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},'pending',{ph})""",
+                                 swing_type, pathway, regime, status, kind,
+                                 effective_min_quality, is_actionable, policy_version)
+                                VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},'pending',{ph},{ph},{ph},{ph})""",
                             (
                                 now, run_id, ticker, sig_date,
-                                float(s.get("quality_score") or 0),
+                                quality,
                                 s.get("swing_type"),
                                 s.get("trigger_pathway")
                                 or (s.get("trigger_details") or {}).get("trigger_pathway"),
                                 s.get("market_regime"),
                                 KIND_SIGNAL,
+                                threshold,
+                                actionable,
+                                policy_version,
                             ),
                         )
                     inserted += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
@@ -268,7 +571,7 @@ class ForwardReturnTracker:
             return 0
         ph = _ph()
         inserted = 0
-        now = datetime.utcnow().isoformat() + "Z"
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         conn = None
         try:
             conn = _connect()
@@ -328,7 +631,7 @@ class ForwardReturnTracker:
     # ------------------------------------------------------------------
     # UPDATE — fill matured forward returns (called after each scan / daily)
     # ------------------------------------------------------------------
-    def update_pending(self, fetcher=None, max_tickers: int = 40) -> int:
+    def update_pending(self, fetcher=None, max_tickers: int = 500) -> int:
         """
         For every non-complete row, fetch price history and fill R3/R5/R10 +
         MFE/MAE as bars become available. Marks 'complete' once R10 is known.
@@ -362,45 +665,45 @@ class ForwardReturnTracker:
 
             fetcher = DataFetcher()
 
-        import pandas as pd
+        selected = rows[:max_tickers]
+        tickers = list(dict.fromkeys(
+            (row[1] if not hasattr(row, "keys") else row["ticker"])
+            for row in selected
+        ))
+        signal_dates = [
+            str(row[2] if not hasattr(row, "keys") else row["signal_date"])
+            for row in selected
+        ]
+        earliest = min(signal_dates)
+        start_date = (
+            datetime.strptime(earliest[:10], "%Y-%m-%d") - timedelta(days=7)
+        ).strftime("%Y-%m-%d")
+        end_date = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+        try:
+            data_by_ticker = fetcher.fetch_multiple_stocks_batch(
+                tickers,
+                start_date=start_date,
+                end_date=end_date,
+                chunk_size=40,
+                min_rows=5,
+            )
+        except Exception as e:
+            logger.warning("ForwardReturnTracker batch fetch failed: %s", e)
+            data_by_ticker = {}
 
         updated = 0
-        now = datetime.utcnow().isoformat() + "Z"
-        for row in rows[:max_tickers]:
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        for row in selected:
             rid = row[0] if not hasattr(row, "keys") else row["id"]
             ticker = row[1] if not hasattr(row, "keys") else row["ticker"]
             sig_date = row[2] if not hasattr(row, "keys") else row["signal_date"]
             try:
-                df = fetcher.fetch_stock_data(ticker, period="3mo")
+                df = data_by_ticker.get(ticker)
                 if df is None or len(df) < 5 or "Date" not in df.columns:
                     continue
-                dates = pd.to_datetime(df["Date"]).dt.strftime("%Y-%m-%d").tolist()
-                if sig_date not in dates:
-                    # signal day older than window or non-trading label — try first bar AFTER it
-                    after = [i for i, d in enumerate(dates) if d > sig_date]
-                    if not after:
-                        continue
-                    entry_idx = after[0]
-                else:
-                    entry_idx = dates.index(sig_date) + 1  # next-day-open entry
-                if entry_idx >= len(df):
-                    continue  # entry day not traded yet
-
-                o = df["Open"].astype(float).values
-                c = df["Close"].astype(float).values
-                h = df["High"].astype(float).values
-                low = df["Low"].astype(float).values
-                entry = float(o[entry_idx])
-                if entry <= 0:
+                vals = _compute_forward_values(df, str(sig_date))
+                if vals is None:
                     continue
-
-                vals: Dict[str, Optional[float]] = {"entry_open": round(entry, 4)}
-                for n in HORIZONS:
-                    j = entry_idx + n - 1
-                    vals[f"r{n}"] = round((float(c[j]) / entry - 1) * 100, 2) if j < len(df) else None
-                end = min(entry_idx + MFE_WINDOW, len(df))
-                vals["mfe10"] = round((float(h[entry_idx:end].max()) / entry - 1) * 100, 2)
-                vals["mae10"] = round((float(low[entry_idx:end].min()) / entry - 1) * 100, 2)
                 status = "complete" if vals.get("r10") is not None else "partial"
 
                 cur = conn.cursor()
@@ -414,11 +717,11 @@ class ForwardReturnTracker:
                         vals.get("mfe10"), vals.get("mae10"), status, now, rid,
                     ),
                 )
-                conn.commit()
                 updated += 1
             except Exception as e:
                 logger.debug("update_pending %s failed: %s", ticker, e)
 
+        conn.commit()
         conn.close()
         if updated:
             logger.info("ForwardReturnTracker: %d signal(s) updated", updated)
@@ -435,13 +738,15 @@ class ForwardReturnTracker:
             cur.execute(
                 "SELECT ticker, signal_date, quality, swing_type, pathway, regime, "
                 "entry_open, r3, r5, r10, mfe10, mae10, status, "
-                "COALESCE(kind, 'signal') AS kind, reject_reason "
+                "COALESCE(kind, 'signal') AS kind, reject_reason, "
+                "effective_min_quality, is_actionable, policy_version "
                 "FROM signal_forward_returns ORDER BY signal_date DESC"
             )
             rows = cur.fetchall()
             cols = ["ticker", "signal_date", "quality", "swing_type", "pathway", "regime",
                     "entry_open", "r3", "r5", "r10", "mfe10", "mae10", "status",
-                    "kind", "reject_reason"]
+                    "kind", "reject_reason", "effective_min_quality", "is_actionable",
+                    "policy_version"]
             recs = [dict(zip(cols, r)) for r in rows]
         except Exception as e:
             logger.error("get_stats failed: %s", e)
@@ -450,12 +755,9 @@ class ForwardReturnTracker:
             if conn:
                 conn.close()
 
-        def _kind_of(r: Dict[str, Any]) -> str:
-            k = r.get("kind") or KIND_SIGNAL
-            return KIND_UNIVERSE if k == KIND_UNIVERSE else KIND_SIGNAL
-
-        signal_recs = [r for r in recs if _kind_of(r) == KIND_SIGNAL]
-        universe_recs = [r for r in recs if _kind_of(r) == KIND_UNIVERSE]
+        report = build_edge_report(recs)
+        signal_recs = report["signal_recs"]
+        universe_recs = report["universe_recs"]
 
         def _agg(pool: List[Dict[str, Any]], key: str) -> Optional[Dict[str, float]]:
             vals = [row[key] for row in pool if row.get(key) is not None]
@@ -560,10 +862,13 @@ class ForwardReturnTracker:
                 "above": _side(True),
                 "below": _side(False),
             },
+            "policy_split": report["policy_split"],
+            "matched_edge": report["matched_edge"],
+            "robustness": report["robustness"],
+            "verdict": report["verdict"],
             "harness_expectation": {
-                "r10_mean": "+7 ile +10% arası (benchmark +2.2%)",
-                "r5_win_rate": "55-60%",
-                "kaynak": "scripts/measure_signal_edge.py 2026-06-10 (n=123 VCE, OOS t=2.29)",
+                "r10_mean": "Pathway ve sürüme göre değişir; canlı politika kohortu esas alınır.",
+                "kaynak": "PIPELINE_MAP.md + GATE_AUDIT.md; canlı sonuçlar bu ekranda ayrıca ölçülür.",
             },
             "signals": signal_recs[:150],
             "universe": {

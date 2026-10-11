@@ -639,7 +639,11 @@ def _execute_smallcap_scan(
         from swing_trader.data.forward_returns import get_forward_tracker
 
         tracker = get_forward_tracker()
-        tracker.record_signals(job_id, signals)
+        tracker.record_signals(
+            job_id,
+            signals,
+            effective_min_quality=effective_min_quality,
+        )
         tracker.record_universe(job_id, scanned_members, regime=actual_regime)
         tracker.update_pending()
     except Exception:
@@ -776,5 +780,8 @@ def get_edge_tracking(refresh: bool = Query(False)):
 
     tracker = get_forward_tracker()
     if refresh:
-        tracker.update_pending(max_tickers=80)
+        # Batch updater handles hundreds of rows in a handful of provider calls.
+        # The former 80-row cap grew a permanent backlog because a daily scan
+        # often adds more universe rows than it could mature.
+        tracker.update_pending(max_tickers=500)
     return sanitize_for_json(tracker.get_stats())

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from swing_trader.data.forward_returns import (
     KIND_SIGNAL,
     KIND_UNIVERSE,
+    _compute_forward_values,
     assemble_scan_membership,
+    build_edge_report,
 )
 
 
@@ -96,3 +99,80 @@ def test_signal_wins_unique_ticker_date(isolated_tracker):
     stats = isolated_tracker.get_stats()
     assert stats["n_tracked"] == 1
     assert stats["universe"]["n_tracked"] == 0
+
+
+def _edge_row(ticker, date, quality, r10, *, regime="BULL", kind="signal"):
+    return {
+        "ticker": ticker,
+        "signal_date": date,
+        "quality": quality,
+        "r10": r10,
+        "regime": regime,
+        "kind": kind,
+        "effective_min_quality": None,
+        "is_actionable": None,
+    }
+
+
+def test_policy_split_uses_regime_threshold_not_fixed_q80():
+    rows = [
+        _edge_row("BULL78", "2026-01-02", 78, 5.0, regime="BULL"),
+        _edge_row("CAUTION78", "2026-01-03", 78, -2.0, regime="CAUTION"),
+        _edge_row("CAUTION80", "2026-01-04", 80, 3.0, regime="CAUTION"),
+    ]
+    report = build_edge_report(rows)
+    assert report["policy_split"]["eligible"]["n"] == 2
+    assert report["policy_split"]["eligible"]["mean"] == 4.0
+    assert report["policy_split"]["excluded"]["n"] == 1
+
+
+def test_persisted_scan_threshold_wins_over_current_fallback():
+    row = _edge_row("STRICT", "2026-01-02", 80, 4.0)
+    row["effective_min_quality"] = 82
+    row["is_actionable"] = 0
+    report = build_edge_report([row])
+    assert report["policy_split"]["eligible"]["n"] == 0
+    assert report["policy_split"]["excluded"]["n"] == 1
+    assert report["policy_split"]["legacy_inferred_rows"] == 0
+
+
+def test_matched_edge_uses_same_date_controls_and_equal_weights_dates():
+    rows = [
+        _edge_row("S1", "2026-01-02", 80, 10.0),
+        _edge_row("S2", "2026-01-02", 81, 6.0),
+        _edge_row("S3", "2026-01-03", 82, 2.0),
+        _edge_row("U1", "2026-01-02", None, 2.0, kind="universe"),
+        _edge_row("U2", "2026-01-02", None, 4.0, kind="universe"),
+        _edge_row("U3", "2026-01-03", None, -2.0, kind="universe"),
+        _edge_row("U4", "2026-02-01", None, 100.0, kind="universe"),
+    ]
+    matched = build_edge_report(rows)["matched_edge"]
+    assert matched["matched_dates"] == 2
+    assert matched["matched_signals"] == 3
+    assert matched["mean"] == 4.5
+
+
+def test_forward_values_reject_truncated_history_instead_of_shifting_entry():
+    df = pd.DataFrame({
+        "Date": pd.date_range("2026-02-01", periods=12, freq="B"),
+        "Open": [100.0] * 12,
+        "High": [101.0] * 12,
+        "Low": [99.0] * 12,
+        "Close": [100.0] * 12,
+    })
+    assert _compute_forward_values(df, "2025-12-01") is None
+
+
+def test_forward_values_enter_next_session_open():
+    df = pd.DataFrame({
+        "Date": pd.date_range("2026-01-05", periods=12, freq="B"),
+        "Open": [10.0, 20.0] + [20.0] * 10,
+        "High": [10.0, 22.0] + [22.0] * 10,
+        "Low": [10.0, 18.0] + [18.0] * 10,
+        "Close": [10.0, 21.0] + [22.0] * 10,
+    })
+    values = _compute_forward_values(df, "2026-01-05")
+    assert values is not None
+    assert values["entry_open"] == 20.0
+    assert values["r3"] == 10.0
+    assert values["r10"] == 10.0

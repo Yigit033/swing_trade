@@ -83,17 +83,38 @@ export default function EdgePage() {
     if (error) return <div className="card" style={{ color: "var(--danger)" }}>{error}</div>;
     if (!data) return null;
 
-    const { above, below, reference } = data.threshold_split;
+    const { reference } = data.threshold_split;
+    const above = data.policy_split?.eligible ?? data.threshold_split.above;
+    const below = data.policy_split?.excluded ?? data.threshold_split.below;
+    const thresholdLabel = data.policy_split ? "rejim eşiği" : `Q${reference}`;
     const uni = data.universe;
     const cohort = data.cohort_split;
-    const verdict =
-        above.n < 3 || below.n < 3
+    const verdict = data.verdict
+        ? {
+            text: data.verdict.label,
+            color: data.verdict.status === "confirmed"
+                ? "var(--success)"
+                : data.verdict.status === "negative"
+                    ? "var(--danger)"
+                    : "var(--warning, #f59e0b)",
+        }
+        : above.n < 3 || below.n < 3
             ? { text: "Henüz karar için yetersiz veri — her iki kalite grubunda da en az 3 olgun sinyal gerekir.", color: "var(--text-muted)" }
             : (above.mean ?? 0) > (below.mean ?? 0)
-                ? { text: `Eşik İŞE YARIYOR: Q${reference}+ grubu ${pct(above.mean)} vs altı ${pct(below.mean)}.`, color: "var(--success)" }
-                : { text: `⚠️ Eşik SORGULANMALI: Q${reference}+ grubu (${pct(above.mean)}) eşik-altından (${pct(below.mean)}) daha iyi DEĞİL.`, color: "var(--danger)" };
+                ? { text: `Eşik İŞE YARIYOR: ${thresholdLabel} üstü ${pct(above.mean)} vs altı ${pct(below.mean)}.`, color: "var(--success)" }
+                : { text: `⚠️ Eşik SORGULANMALI: ${thresholdLabel} üstü (${pct(above.mean)}) eşik-altından (${pct(below.mean)}) daha iyi DEĞİL.`, color: "var(--danger)" };
 
-    const gateVerdict = gateCopy(cohort?.signal, cohort?.universe);
+    const matched = data.matched_edge;
+    const gateVerdict = matched && matched.matched_dates > 0
+        ? {
+            text: `Aynı-gün kontrolüne karşı excess R10 ${pct(matched.mean)} (${matched.matched_dates} bağımsız tarih).`,
+            color: (matched.ci95_low ?? -1) > 0
+                ? "var(--success)"
+                : (matched.mean ?? 0) > 0
+                    ? "var(--warning, #f59e0b)"
+                    : "var(--danger)",
+        }
+        : gateCopy(cohort?.signal, cohort?.universe);
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -130,8 +151,8 @@ export default function EdgePage() {
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
                 {[
-                    { title: `Sinyal Q${reference}+`, s: above, icon: TrendingUp, hint: "Eşiği geçen — işleme alınabilir" },
-                    { title: `Sinyal Q<${reference}`, s: below, icon: TrendingDown, hint: "Üretildi, gösterilmedi — ölçüm" },
+                    { title: "Politikaya uygun sinyal", s: above, icon: TrendingUp, hint: "Tarama günündeki rejim eşiğini geçen" },
+                    { title: "Politika dışı sinyal", s: below, icon: TrendingDown, hint: "Eşik altında kalan — yalnız ölçüm" },
                     {
                         title: "Evren (tetik yok)",
                         s: uni?.r10,
@@ -152,6 +173,8 @@ export default function EdgePage() {
                                 <Stat label="Ortalama R10" value={pct(s.mean)} color={tone(s.mean)} big />
                                 <Stat label="Kazanma" value={s.win_rate !== null ? `%${s.win_rate.toFixed(0)}` : "—"} big />
                                 <Stat label="Olgun" value={String(s.n)} />
+                                <Stat label="Medyan" value={pct(s.median)} />
+                                <Stat label="%95 güven aralığı" value={`${pct(s.ci95_low, 1)} … ${pct(s.ci95_high, 1)}`} />
                                 <Stat label="En iyi / en kötü" value={`${pct(s.best, 1)} / ${pct(s.worst, 1)}`} />
                             </div>
                         )}
@@ -166,6 +189,27 @@ export default function EdgePage() {
                     <div style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 4 }}>
                         Sinyal kohortunun R10’u, tetik olmayan evrenden belirgin daha iyiyse kapılar kenar ayıklıyor demektir.
                     </div>
+                </div>
+            )}
+
+            {data.robustness && (
+                <div className="card">
+                    <strong>Kanıt kalitesi — uç kazanca ne kadar bağımlıyız?</strong>
+                    <div style={{ color: "var(--text-muted)", fontSize: 12, margin: "6px 0 14px" }}>
+                        Ham ortalama tek başına yanıltabilir. Tarih ve ticker kümeleri eşit ağırlıklandırılır; en iyi işlem ayrıca çıkarılır.
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 14 }}>
+                        <Stat label="Farklı hisse / tarih" value={`${data.robustness.unique_tickers} / ${data.robustness.unique_dates}`} />
+                        <Stat label="Tarih eşit-ağırlıklı R10" value={pct(data.robustness.date_clustered.mean)} color={tone(data.robustness.date_clustered.mean)} />
+                        <Stat label="Hisse eşit-ağırlıklı R10" value={pct(data.robustness.equal_ticker_weighted.mean)} color={tone(data.robustness.equal_ticker_weighted.mean)} />
+                        <Stat label="En iyi işlem hariç" value={pct(data.robustness.without_best_trade.mean)} color={tone(data.robustness.without_best_trade.mean)} />
+                        <Stat label="En iyi işlemin toplam katkısı" value={data.robustness.top_trade_contribution_pct == null ? "—" : `%${data.robustness.top_trade_contribution_pct.toFixed(0)}`} />
+                    </div>
+                    {data.policy_split && data.policy_split.legacy_inferred_rows > 0 && (
+                        <div style={{ color: "var(--warning, #f59e0b)", fontSize: 12, marginTop: 12 }}>
+                            {data.policy_split.legacy_inferred_rows} eski kayıtta gerçek tarama eşiği saklanmamış; mevcut rejim politikasıyla geriye dönük sınıflandırıldı.
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -315,7 +359,12 @@ export default function EdgePage() {
                         <tbody>
                             {rows.map((s: EdgeSignal, i) => {
                                 const isSignal = (s.kind || "signal") !== "universe";
-                                const taken = isSignal && (s.quality ?? 0) >= reference;
+                                const inferredFloor = data.policy_split?.floors?.[String(s.regime || "UNKNOWN").toUpperCase()] ?? reference;
+                                const taken = isSignal && (
+                                    s.is_actionable != null
+                                        ? Boolean(s.is_actionable)
+                                        : (s.quality ?? 0) >= (s.effective_min_quality ?? inferredFloor)
+                                );
                                 return (
                                     <tr key={`${s.kind}-${s.ticker}-${s.signal_date}-${i}`} style={{ borderTop: "1px solid var(--border)" }}>
                                         <td style={{ padding: "8px", color: "var(--text-muted)" }}>{s.signal_date?.slice(0, 10)}</td>
@@ -371,7 +420,8 @@ export default function EdgePage() {
                 <strong style={{ color: "var(--text)" }}>Nasıl okunur:</strong>{" "}
                 R3/R5/R10 = bar tarihinin ertesi seans <em>açılışından</em> 3/5/10 iş günü sonraki getiri.
                 Bu işlem P&amp;L&apos;i değildir (stop/hedef yok). Q yalnızca motor skorladığında doludur.
-                Evren satırında “—” normaldir. Harness beklentisi (sinyaller): {data.harness_expectation?.r10_mean}.
+                Evren satırında “—” normaldir. Politika eşikleri rejime göre uygulanır; eski sabit-Q80 ayrımı karar için kullanılmaz.
+                Güven aralığı sıfırı kapsıyorsa pozitif ortalama henüz istatistiksel kanıt değildir.
             </div>
         </div>
     );

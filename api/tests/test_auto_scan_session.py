@@ -1,11 +1,20 @@
 """Daily-run skip is per completed NYSE session, not calendar weekday."""
 
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
 
-from api.auto_scan import run_covers_auto_session, session_already_auto_scanned
+from api.auto_scan import auto_entry_capacity, run_covers_auto_session, session_already_auto_scanned
 
 
 FRIDAY = date(2026, 8, 28)
+
+
+def test_live_auto_entry_capacity_matches_backtest_regime_policy():
+    policy = SimpleNamespace(bear_block_new_entries=True, caution_max_concurrent=1)
+    assert auto_entry_capacity("BEAR", policy, active_count=0) == 0
+    assert auto_entry_capacity("CAUTION", policy, active_count=0) == 1
+    assert auto_entry_capacity("CAUTION", policy, active_count=1) == 0
+    assert auto_entry_capacity("BULL", policy, active_count=9) is None
 
 
 def test_auto_run_with_bar_session_covers():

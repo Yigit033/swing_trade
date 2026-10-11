@@ -532,9 +532,15 @@ export type EdgeBucket = {
 export type EdgeSide = {
     n: number;
     mean: number | null;
+    median?: number | null;
     win_rate: number | null;
     best?: number | null;
     worst?: number | null;
+    ci95_low?: number | null;
+    ci95_high?: number | null;
+    standard_error?: number | null;
+    p_value_positive?: number | null;
+    groups?: number;
 };
 
 export type EdgeSignal = {
@@ -553,6 +559,9 @@ export type EdgeSignal = {
     status: string;
     kind?: "signal" | "universe" | string | null;
     reject_reason?: string | null;
+    effective_min_quality?: number | null;
+    is_actionable?: number | boolean | null;
+    policy_version?: string | null;
 };
 
 export type EdgeRejectReason = {
@@ -583,6 +592,32 @@ export type EdgeTracking = {
         reference: number;
         above: EdgeSide;
         below: EdgeSide;
+    };
+    policy_split?: {
+        version: string;
+        floors: Record<string, number>;
+        eligible: EdgeSide;
+        excluded: EdgeSide;
+        legacy_inferred_rows: number;
+    };
+    matched_edge?: EdgeSide & {
+        matched_signals: number;
+        matched_dates: number;
+        method: string;
+    };
+    robustness?: {
+        unique_tickers: number;
+        unique_dates: number;
+        equal_ticker_weighted: EdgeSide;
+        date_clustered: EdgeSide;
+        without_best_trade: EdgeSide;
+        top_trade_contribution_pct: number | null;
+    };
+    verdict?: {
+        status: "early" | "confirmed" | "inconclusive" | "negative";
+        label: string;
+        minimum_signals: number;
+        minimum_dates: number;
     };
     harness_expectation: Record<string, string>;
     signals: EdgeSignal[];

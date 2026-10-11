@@ -261,6 +261,7 @@ class DataFetcher:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         chunk_size: int = 25,
+        min_rows: int = 20,
     ) -> Dict[str, pd.DataFrame]:
         """
         Fetch data for many tickers using yf.download() in chunks.
@@ -318,7 +319,7 @@ class DataFetcher:
                             # hisseye farklı barlarla bakar.
                             df = self._repair_ohlc_bars(df, ticker)
 
-                            if len(df) >= 20:
+                            if len(df) >= min_rows:
                                 results[ticker] = df
                         except Exception:
                             pass

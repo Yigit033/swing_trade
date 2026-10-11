@@ -497,6 +497,38 @@ class PaperTradeStorage:
             if conn:
                 conn.close()
 
+    def count_active_trades_for_owner(self, user_id: Optional[str] = None) -> int:
+        """Count OPEN + PENDING trades for one execution owner.
+
+        Auto-scan uses ``user_id=None`` and must not consume a logged-in user's
+        slots. This intentionally differs from get_all_trades(None), whose
+        legacy meaning is administrative/all rows.
+        """
+        ph = '?' if self._override_path else _ph()
+        conn = None
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            if user_id:
+                cursor.execute(
+                    f"SELECT COUNT(*) FROM paper_trades "
+                    f"WHERE user_id = {ph} AND status IN ('OPEN', 'PENDING')",
+                    (user_id,),
+                )
+            else:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM paper_trades "
+                    "WHERE user_id IS NULL AND status IN ('OPEN', 'PENDING')"
+                )
+            row = cursor.fetchone()
+            return int(row[0]) if row else 0
+        except Exception as e:
+            logger.error("Error counting active trades: %s", e)
+            return 0
+        finally:
+            if conn:
+                conn.close()
+
     def _set_meta(self, key: str, value: str) -> None:
         """Upsert a key/value pair into paper_meta."""
         conn = None

@@ -43,6 +43,16 @@ _last_run_session: Optional[date] = None
 _AUTO_SOURCE = "auto"
 
 
+def auto_entry_capacity(regime: str, loop_policy, active_count: int = 0) -> int | None:
+    """Live auto-entry slots using the same regime policy as the backtest."""
+    regime = str(regime or "UNKNOWN").upper()
+    if regime == "BEAR" and loop_policy.bear_block_new_entries:
+        return 0
+    if regime == "CAUTION":
+        return max(0, int(loop_policy.caution_max_concurrent) - active_count)
+    return None
+
+
 def _next_target_et(target_hour: int, target_minute: int, now: Optional[datetime] = None) -> datetime:
     """Bugün hedef saat geçtiyse yarının, geçmediyse bugünün hedef anı (ET)."""
     now_et = (now or datetime.now(tz=_NYSE_TZ)).astimezone(_NYSE_TZ)
@@ -170,7 +180,8 @@ def run_daily_maintenance(force: bool = False) -> dict:
 
     # 3) Günlük tarama — son tamamlanmış seans, işlem günü takvimi değil
     try:
-        us = load_settings().auto_scan
+        settings = load_settings()
+        us = settings.auto_scan
         if not us.enabled:
             result["scan"] = "disabled"
         elif _last_run_session == session and not force:
@@ -206,7 +217,8 @@ def _run_auto_scan_once() -> str:
         return "busy"
 
     try:
-        us = load_settings().auto_scan
+        settings = load_settings()
+        us = settings.auto_scan
         body = ScanRequest(
             portfolio_value=us.portfolio_value,
             min_quality=us.min_quality,
@@ -231,6 +243,26 @@ def _run_auto_scan_once() -> str:
         return "ran"
 
     tracker = get_paper_tracker()
+    regime = str(result.get("market_regime") or "UNKNOWN").upper()
+    loop_policy = settings.backtest_loop
+    active = tracker.storage.count_active_trades_for_owner(None) if regime == "CAUTION" else 0
+    capacity = auto_entry_capacity(regime, loop_policy, active)
+    if capacity == 0 and regime == "BEAR":
+        logger.warning(
+            "Auto-scan: %d signal(s) observed but no entries opened in BEAR "
+            "(live policy matches backtest_loop.bear_block_new_entries)",
+            len(signals),
+        )
+        return "ran"
+    if capacity is not None:
+        if capacity == 0:
+            logger.info(
+                "Auto-scan: CAUTION slot full (%d active, max %d); %d signal(s) research-only",
+                active, loop_policy.caution_max_concurrent, len(signals),
+            )
+            return "ran"
+        signals = signals[:capacity]
+
     added, skipped = [], []
     for signal in signals:
         try:
