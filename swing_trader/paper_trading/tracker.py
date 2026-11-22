@@ -120,6 +120,44 @@ MAX_STOP_BY_TYPE = {
 }
 MAX_STOP_DEFAULT = 0.15
 
+def gap_percent(open_price: float, signal_price: float) -> float:
+    """Sinyal kapanışına göre t+1 açılış gap'i (%). Canlı onay ve backtest ortak."""
+    return ((open_price / signal_price) - 1) * 100
+
+
+def confirm_entry_levels(open_price: float, signal_price: float, atr: float, swing_type: str,
+                         stop_loss: float, target: float, target_2: float) -> Tuple[float, float, float]:
+    """PENDING → OPEN seviye matematiği (tek kaynak: canlı tracker + backtest).
+
+    Stop = açılış − 2.5×ATR, tipe özgü tavanla sınırlı (en fazla %14–16 aşağı).
+    T1 = sinyalin hedef yüzdesi açılışa ölçeklenir, en az 1R. T2 orantılı ölçeklenir.
+    ATR yoksa sinyalin stop/hedef yüzdeleri açılışa taşınır.
+    """
+    orig_stop_pct = (signal_price - stop_loss) / signal_price if signal_price > 0 else 0.08
+    orig_target_pct = (target - signal_price) / signal_price if signal_price > 0 else 0.15
+    if atr > 0:
+        new_stop = round(open_price - (atr * CONFIRM_ATR_MULTIPLIER), 2)
+        max_stop_pct = MAX_STOP_BY_TYPE.get(swing_type, MAX_STOP_DEFAULT)
+        max_stop = open_price * (1 - max_stop_pct)
+        if new_stop < max_stop:
+            new_stop = round(max_stop, 2)
+        # Sinyalin T1 yüzdesi zaten tipe özgü ATR tavanlarını uyguladı; 2R gibi
+        # şişirilmiş bir hedef T1 kısmisini hiç tetiklemezdi.
+        new_target = round(open_price * (1 + orig_target_pct), 2)
+        min_target = round(open_price + (open_price - new_stop), 2)   # en az 1R
+        if new_target < min_target:
+            new_target = min_target
+    else:
+        new_stop = round(open_price * (1 - orig_stop_pct), 2)
+        new_target = round(open_price * (1 + orig_target_pct), 2)
+    orig_t2 = target_2 or target
+    if signal_price > 0 and orig_t2 > 0:
+        new_t2 = round(open_price * (1 + (orig_t2 / signal_price) - 1), 2)
+    else:
+        new_t2 = new_target
+    return new_stop, new_target, new_t2
+
+
 # PENDING: if still unresolved after this many calendar days, auto-REJECT (data gaps / user never opened UI)
 MAX_STALE_PENDING_CALENDAR_DAYS = 14
 
@@ -550,7 +588,7 @@ class PaperTradeTracker:
                 
                 # Gap filter — limitler her kontrolde ayardan okunur
                 max_gap_up, max_gap_down = _gap_limits()
-                gap_pct = ((open_price / signal_price) - 1) * 100
+                gap_pct = gap_percent(open_price, signal_price)
 
                 if gap_pct > max_gap_up:
                     # Gap-up too big — momentum exhausted, reject
@@ -577,39 +615,10 @@ class PaperTradeTracker:
                     continue
                 
                 # Recalculate stop/target based on actual entry (Open)
-                atr = trade.get('atr') or 0
-                swing_type = trade.get('swing_type', 'A')
-                orig_stop_pct = (signal_price - trade['stop_loss']) / signal_price if signal_price > 0 else 0.08
-                orig_target_pct = (trade['target'] - signal_price) / signal_price if signal_price > 0 else 0.15
-                if atr > 0:
-                    stop_loss = round(open_price - (atr * CONFIRM_ATR_MULTIPLIER), 2)
-                    max_stop_pct = MAX_STOP_BY_TYPE.get(swing_type, MAX_STOP_DEFAULT)
-                    max_stop = open_price * (1 - max_stop_pct)
-                    if stop_loss < max_stop:
-                        stop_loss = round(max_stop, 2)
-
-                    # Scale original signal T1 to the actual open price.
-                    # The signal already applied type-specific ATR caps (e.g. 8% for Type C),
-                    # so using those percentages prevents confirming with an inflated 2R target
-                    # that exceeds the type cap and prevents T1 partial from ever triggering.
-                    target = round(open_price * (1 + orig_target_pct), 2)
-                    # Floor: target must be at least 1R beyond entry (not 2R — that was too far)
-                    risk_distance = open_price - stop_loss
-                    min_target = round(open_price + risk_distance, 2)
-                    if target < min_target:
-                        target = min_target
-                else:
-                    # Fallback: use percentage-based from original signal
-                    stop_loss = round(open_price * (1 - orig_stop_pct), 2)
-                    target = round(open_price * (1 + orig_target_pct), 2)
-
-                # v3.1: Recalculate T2 proportionally to new entry
-                orig_t2 = trade.get('target_2') or trade['target']
-                if signal_price > 0 and orig_t2 > 0:
-                    t2_pct = (orig_t2 / signal_price) - 1
-                    target_2 = round(open_price * (1 + t2_pct), 2)
-                else:
-                    target_2 = target
+                stop_loss, target, target_2 = confirm_entry_levels(
+                    open_price, signal_price, trade.get('atr') or 0, trade.get('swing_type', 'A'),
+                    trade['stop_loss'], trade['target'], trade.get('target_2') or trade['target'],
+                )
 
                 # Confirm the trade
                 confirmed = self.storage.update_trade(trade_id, {

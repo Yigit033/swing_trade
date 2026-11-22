@@ -385,7 +385,11 @@ class ScoringTuningSettings(BaseModel):
         default_factory=_default_float_millions_bands,
         min_length=1,
     )
-    float_score_unknown: float = Field(default=5.0, ge=-50, le=50)
+    # 2026-11-22: float skora girmez (ölçüldü, Lab v3 Ek B) — skor her hisse için bu
+    # sabit ham puanı kullanır. Bantlar/üst-bant puanı yalnız araştırma teşhisi
+    # (scoring.score_float_tightness, discovery) içindir; canlı skoru ETKİLEMEZ.
+    float_score_unknown: float = Field(default=5.0, ge=-50, le=50,
+                                       description="Float bileşeninin sabit ham puanı (float skora girmez)")
     float_score_above_max_band: float = Field(default=-8.0, ge=-50, le=50)
     momentum_points: ScoringMomentumPoints = Field(default_factory=ScoringMomentumPoints)
     risk_bands: ScoringRiskBands = Field(default_factory=ScoringRiskBands)
@@ -423,33 +427,10 @@ class ScoringTuningSettings(BaseModel):
 
 
 class BacktestLoopSettings(BaseModel):
+    """Otomatik giriş rejim politikası — canlı auto-scan ve backtest ORTAK (thresholds.auto_entry_capacity)."""
     model_config = ConfigDict(extra="forbid")
 
-    drawdown_pause_entries_fraction: float = 0.25
-    drawdown_reduce_to_one_position_fraction: float = 0.15
     caution_max_concurrent: int = 1
     bear_block_new_entries: bool = True
-
-
-class BacktestTypeQualityOverride(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    type_c_bear: int = 86
-    type_c_caution: int = 82
-    type_a_bear: int = 90
-    type_a_caution: int = 87
-    type_b_bear: int = 85
-    type_b_caution: int = 82
-
-
-class BacktestEntrySettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    type_c_min_open_vs_signal_close_ratio: float = 0.98
-    trend_ema_fast_span: int = 10
-    trend_ema_slow_span: int = 20
-    trend_min_bars: int = 21
-    gap_atr_multiplier: float = 2.0
-    partial_fallback_target_bump: float = 1.15
 
 

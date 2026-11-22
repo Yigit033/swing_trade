@@ -36,7 +36,8 @@ def test_default_matches_known_engine_constants():
     # ayrışma canlıda gerçek zarar üretiyordu (dosya katmanı çökünce ürün
     # sessizce eski/gevşek varsayılanlara düşüyordu). Bkz.
     # test_defaults_match_measured.py — ayrışmayı kalıcı olarak yasaklıyor.
-    assert d.backtest_type_quality.type_c_bear == 86
+    # 2026-11-22: backtest_type_quality canlıda yoktu → silindi (backtest canlıyı çağırıyor).
+    assert "backtest_type_quality" not in type(d).model_fields
     assert len(d.scoring_tuning.volume_surge_tiers) == 8
     assert len(d.scoring_tuning.atr_percent_tiers) == 7
     assert len(d.scoring_tuning.float_millions_bands) == 5
@@ -151,3 +152,18 @@ def test_nested_swing_patch_merges():
         assert out.swing.type_c.hold_min == 3
         reloaded = load_settings(p)
         assert reloaded.swing.type_c.min_score == 12
+
+
+def test_float_does_not_change_quality_score():
+    """2026-11-22 (Lab v3 Ek B): float skora girmez — her float aynı skoru verir."""
+    import numpy as np
+    import pandas as pd
+    from swing_trader.small_cap.scoring import SmallCapScoring
+
+    rng = np.random.default_rng(3)
+    close = 20 + np.cumsum(rng.normal(0.05, 0.4, 80))
+    df = pd.DataFrame({"Open": close, "High": close * 1.02, "Low": close * 0.98,
+                       "Close": close, "Volume": 1e6})
+    sc = SmallCapScoring()
+    scores = {f: sc.calculate_quality_score(df, 3.0, 0.06, f, {}) for f in (None, 0, 10e6, 60e6, 500e6)}
+    assert len(set(scores.values())) == 1, scores

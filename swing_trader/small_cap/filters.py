@@ -244,9 +244,10 @@ class SmallCapFilters:
             'value': atr_pct,
         }
 
-        float_shares = stock_info.get('floatShares', 0) or stock_info.get('float_shares', 0)
-        if backtest_mode and (float_shares is None or float_shares <= 0):
-            float_shares = 45_000_000
+        # 2026-11-22: backtest_mode'daki sahte 45M float kaldırıldı. Canlıda float
+        # bilinmediğinde skor "bilinmiyor" puanını alır; backtest 45M uydurup
+        # (≤45M bandı) canlıdan 6.25 puan yüksek skor veriyordu (Lab v3 parite).
+        float_shares = stock_info.get('floatShares', 0) or stock_info.get('float_shares', 0) or 0
         _ok, reason = self.check_float(float_shares)
         results['filters']['float'] = {
             'passed': True,

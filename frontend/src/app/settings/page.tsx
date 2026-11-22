@@ -405,17 +405,9 @@ function ScoringTierTables({
                 "0.005",
                 "1",
             )}
-            {tableBlock(
-                "Float bantları (milyon hisse, üst sınır dahil)",
-                "float_millions ≤ max_millions_le olan en küçük bant seçilir; son banttan büyükse ceza puanı kullanılır.",
-                ["scoring_tuning", "float_millions_bands"],
-                ["max_millions_le", "score"],
-                ["Max float (M$)", "Ham puan"],
-                { max_millions_le: 100, score: 0 },
-                (r) => [...r].sort((a, b) => a.max_millions_le - b.max_millions_le),
-                "1",
-                "1",
-            )}
+            {/* 2026-11-22: "Float bantları" tablosu ve "son bant üstü" alanı KALDIRILDI.
+                Float skora girmez (Lab v3 Ek B ölçümü: float çalışırken net −0.97%/işlem,
+                sabitken −0.46%). Bantlar canlı skoru etkilemiyordu. */}
             <div
                 style={{
                     display: "grid",
@@ -425,22 +417,11 @@ function ScoringTierTables({
                 }}
             >
                 <FieldNum
-                    label="Float bilinmiyor (ham puan)"
-                    hint="float yok veya ≤0"
+                    label="Float bileşeni sabit puanı (ham)"
+                    hint="Float skora girmez (ölçüldü). Bu sabit, kalibre edilmiş kalite eşiklerini korur; değiştirmek tüm skorları kaydırır."
                     value={getNestedNum(draft, ["scoring_tuning", "float_score_unknown"], 5)}
                     onChange={(v) =>
                         setDraft((p) => setNestedNum(p as Record<string, unknown> | null, ["scoring_tuning", "float_score_unknown"], v))
-                    }
-                    step="0.5"
-                    min={-50}
-                    max={50}
-                />
-                <FieldNum
-                    label="Son bant üstü float (ham puan)"
-                    hint="Tüm max_millions_le değerlerinden büyük float"
-                    value={getNestedNum(draft, ["scoring_tuning", "float_score_above_max_band"], -8)}
-                    onChange={(v) =>
-                        setDraft((p) => setNestedNum(p as Record<string, unknown> | null, ["scoring_tuning", "float_score_above_max_band"], v))
                     }
                     step="0.5"
                     min={-50}
@@ -489,7 +470,7 @@ const SETTINGS_NAV_GROUPS: { id: SettingsNavGroupId; label: string; scrollToId: 
     { id: "risk", label: "Risk & hedefler", scrollToId: "settings-section-risk-yonetimi" },
     { id: "regime", label: "Rejim", scrollToId: "settings-section-rejim-min-kalite" },
     { id: "scoring", label: "Skor & tip", scrollToId: "settings-section-skorlama" },
-    { id: "backtest", label: "Backtest motoru", scrollToId: "settings-section-backtest-dongu" },
+    { id: "backtest", label: "Giriş politikası", scrollToId: "settings-section-backtest-dongu" },
 ];
 
 const HASH_TO_NAV_GROUP: Partial<Record<string, SettingsNavGroupId>> = {
@@ -508,8 +489,6 @@ const HASH_TO_NAV_GROUP: Partial<Record<string, SettingsNavGroupId>> = {
     "settings-details-skorlama-momentum-ham": "scoring",
     "settings-section-swing-siniflandirma-gelismis": "scoring",
     "settings-section-backtest-dongu": "backtest",
-    "settings-section-backtest-tip-kalitesi": "backtest",
-    "settings-section-backtest-giris-ema-gap": "backtest",
 };
 
 /** Başlık + isteğe bağlı ? ile açılan kısa bölüm notu (tuning kılavuzu). */
@@ -1187,7 +1166,7 @@ export default function SettingsPage() {
             <Section
                 id="settings-section-backtest-giris-yurutme"
                 title="Backtest / giriş yürütme"
-                help="Min ödül:risk, gap sınırları, kısmi satış oranı, kalite tabanları ve gap sonrası portföy risk limiti gibi hem backtest hem canlı yürütmeyle uyumlu giriş kuralları. Sadece simülasyon değil; motor bu alanı da okur."
+                help="t+1 açılış onayının gap sınırları, T1 kısmi satış oranı, cooldown ve backtest slippage’ı. Canlı tracker ve backtest bu alanların AYNISINI okur (2026-11-22: canlıda karşılığı olmayan eski backtest ayarları kaldırıldı)."
             >
                 {/* 2026-08-04: iki "Min R:R" alanı KALDIRILDI. R:R kapısı hem
                     canlıdan hem eski backtest'ten silindi — measure_remaining_gates.py:
@@ -1201,33 +1180,6 @@ export default function SettingsPage() {
                     step="0.05"
                     min={0.05}
                     max={1}
-                />
-                <FieldNum
-                    label="Min kalite — C"
-                    hint="Tip C sinyali için taban kalite; altı elenir."
-                    value={num("min_quality_type_c", 65)}
-                    onChange={(v) => setNum("min_quality_type_c", Math.round(v))}
-                    step={1}
-                    min={30}
-                    max={100}
-                />
-                <FieldNum
-                    label="Min kalite — A"
-                    hint="Tip A için taban kalite."
-                    value={num("min_quality_type_a", 60)}
-                    onChange={(v) => setNum("min_quality_type_a", Math.round(v))}
-                    step={1}
-                    min={30}
-                    max={100}
-                />
-                <FieldNum
-                    label="Min kalite — B"
-                    hint="Tip B için taban kalite."
-                    value={num("min_quality_type_b", 60)}
-                    onChange={(v) => setNum("min_quality_type_b", Math.round(v))}
-                    step={1}
-                    min={30}
-                    max={100}
                 />
                 <FieldNum
                     label="Max gap yukarı %"
@@ -1248,49 +1200,13 @@ export default function SettingsPage() {
                     max={30}
                 />
                 <FieldNum
-                    label="Max kayıp / işlem (stop mesafesi %)"
-                    hint="Stop mesafesi girişe göre bu yüzdeneyi aşmamalı (işlem boyutu ile birlikte düşünülür)."
-                    value={num("max_loss_per_trade_pct", 0.07)}
-                    onChange={(v) => setNum("max_loss_per_trade_pct", v)}
-                    step="0.01"
-                    min={0.02}
-                    max={0.25}
-                />
-                <FieldNum
-                    label="Gap risk bütçesi (portföy %)"
-                    hint="Kötü senaryo gap’inde portföyün bu kadarından fazla riske izin verilmez (pozisyon küçültülür)."
-                    value={num("max_gap_risk_portfolio_pct", 0.02)}
-                    onChange={(v) => setNum("max_gap_risk_portfolio_pct", v)}
-                    step="0.005"
-                    min={0.005}
-                    max={0.1}
-                />
-                <FieldNum
-                    label="Max notional (portföy %)"
-                    hint="Tek işlemde kullanılacak sermaye üst sınırı (portföy yüzdesi)."
-                    value={num("max_position_cost_portfolio_pct", 0.15)}
-                    onChange={(v) => setNum("max_position_cost_portfolio_pct", v)}
-                    step="0.05"
-                    min={0.05}
-                    max={0.5}
-                />
-                <FieldNum
                     label="Cooldown (gün)"
-                    hint="Aynı tickerde ardışık kayıptan sonra bekleme (ban ile birlikte)."
+                    hint="Bir hissede işlem kapandıktan (gap reddi dahil) sonra aynı hisseye yeni giriş için beklenen takvim günü."
                     value={num("cooldown_days", 5)}
                     onChange={(v) => setNum("cooldown_days", Math.round(v))}
                     step={1}
                     min={0}
                     max={30}
-                />
-                <FieldNum
-                    label="Ticker max zarar sayısı (ban)"
-                    hint="Bu kadar zararlı çıkıştan sonra ticker geçici elenir."
-                    value={num("ticker_max_losses", 2)}
-                    onChange={(v) => setNum("ticker_max_losses", Math.round(v))}
-                    step={1}
-                    min={1}
-                    max={10}
                 />
                 <FieldNum
                     label="Slippage (bps / taraf)"
@@ -1299,15 +1215,6 @@ export default function SettingsPage() {
                     onChange={(v) => setNum("slippage_bps_per_side", Math.round(v))}
                     step={1}
                     min={0}
-                    max={100}
-                />
-                <FieldNum
-                    label="Kısmi için min lot"
-                    hint="T1 kısmını satmak için gereken minimum adet (küçük lotlarda kısmi atlanabilir)."
-                    value={num("min_shares_for_partial", 2)}
-                    onChange={(v) => setNum("min_shares_for_partial", Math.round(v))}
-                    step={1}
-                    min={1}
                     max={100}
                 />
             </Section>
@@ -1663,8 +1570,8 @@ export default function SettingsPage() {
 
             <Section
                 id="settings-section-backtest-dongu"
-                title="Backtest döngü (rejim / drawdown)"
-                help="Simülasyonda ayıda yeni giriş kapatma, CAUTION’da eşzamanlı pozisyon sınırı, drawdown’a göre giriş durdurma ve tek pozisyona indirme. Canlı risk yönetiminizle aynı fikirleri test etmek için; parametreleri agresif yapınca equity eğrisi yumuşar ama fırsat da azalır."
+                title="Otomatik giriş politikası (rejim)"
+                help="Rejime göre otomatik giriş kapasitesi: BEAR’da yeni giriş yok, CAUTION’da eşzamanlı pozisyon sınırı, BULL’da sınır yok (yalnız top N). Canlı auto-scan ve backtest aynı kuralı kullanır."
             >
                 <FieldBool
                     label="BEAR’da yeni giriş yok"
@@ -1674,154 +1581,16 @@ export default function SettingsPage() {
                 />
                 <FieldNum
                     label="CAUTION max eşzamanlı"
-                    hint="Backtest pozisyon sınırı; zamanlanmış auto-scan’de otomatik hesaba ait OPEN + PENDING kayıtları kapasiteyi tüketir."
+                    hint="CAUTION rejiminde OPEN + PENDING otomatik pozisyon sınırı (canlı auto-scan ve backtest)."
                     value={nn(["backtest_loop", "caution_max_concurrent"], 1)}
                     onChange={(v) => sn(["backtest_loop", "caution_max_concurrent"], Math.round(v))}
                     step={1}
                     min={1}
                     max={20}
                 />
-                <FieldNum
-                    label="Drawdown — giriş durdur (oran)"
-                    hint="Özsermaye tepeye göre bu kadar gerilediyse yeni girişler durur."
-                    value={nn(["backtest_loop", "drawdown_pause_entries_fraction"], 0.25)}
-                    onChange={(v) => sn(["backtest_loop", "drawdown_pause_entries_fraction"], v)}
-                    step="0.01"
-                    min={0.05}
-                    max={0.9}
-                />
-                <FieldNum
-                    label="Drawdown — tek pozisyona indir (oran)"
-                    hint="Daha hafif drawdown eşiğinde eşzamanlı pozisyon tek pozisyona indirilir."
-                    value={nn(["backtest_loop", "drawdown_reduce_to_one_position_fraction"], 0.15)}
-                    onChange={(v) => sn(["backtest_loop", "drawdown_reduce_to_one_position_fraction"], v)}
-                    step="0.01"
-                    min={0.05}
-                    max={0.5}
-                />
             </Section>
 
-            <Section
-                id="settings-section-backtest-tip-kalitesi"
-                title="Backtest tip kalitesi (BEAR / CAUTION tabanları)"
-                help="BEAR ve CAUTION rejiminde Tip C/A/B için minimum kalite tabanı. Ayıda daha seçici sinyal için yükseltin; çok az işlem kalıyorsa düşürün. BULL tabanları bu blokta yoktur (üst rejim bölümüne bakın)."
-            >
-                <FieldNum
-                    label="Tip C — BEAR min"
-                    hint="Ayı rejiminde Tip C için simülasyonda istenen min kalite (üst bölümdeki genel min’e ek taban)."
-                    value={nn(["backtest_type_quality", "type_c_bear"], 82)}
-                    onChange={(v) => sn(["backtest_type_quality", "type_c_bear"], Math.round(v))}
-                    step={1}
-                    min={30}
-                    max={100}
-                />
-                <FieldNum
-                    label="Tip C — CAUTION min"
-                    hint="CAUTION rejiminde Tip C taban kalitesi."
-                    value={nn(["backtest_type_quality", "type_c_caution"], 75)}
-                    onChange={(v) => sn(["backtest_type_quality", "type_c_caution"], Math.round(v))}
-                    step={1}
-                    min={30}
-                    max={100}
-                />
-                <FieldNum
-                    label="Tip A — BEAR min"
-                    hint="Ayıda Tip A için min kalite."
-                    value={nn(["backtest_type_quality", "type_a_bear"], 72)}
-                    onChange={(v) => sn(["backtest_type_quality", "type_a_bear"], Math.round(v))}
-                    step={1}
-                    min={30}
-                    max={100}
-                />
-                <FieldNum
-                    label="Tip A — CAUTION min"
-                    hint="CAUTION’da Tip A min kalite."
-                    value={nn(["backtest_type_quality", "type_a_caution"], 66)}
-                    onChange={(v) => sn(["backtest_type_quality", "type_a_caution"], Math.round(v))}
-                    step={1}
-                    min={30}
-                    max={100}
-                />
-                <FieldNum
-                    label="Tip B — BEAR min"
-                    hint="Ayıda Tip B min kalite."
-                    value={nn(["backtest_type_quality", "type_b_bear"], 67)}
-                    onChange={(v) => sn(["backtest_type_quality", "type_b_bear"], Math.round(v))}
-                    step={1}
-                    min={30}
-                    max={100}
-                />
-                <FieldNum
-                    label="Tip B — CAUTION min"
-                    hint="CAUTION’da Tip B min kalite."
-                    value={nn(["backtest_type_quality", "type_b_caution"], 60)}
-                    onChange={(v) => sn(["backtest_type_quality", "type_b_caution"], Math.round(v))}
-                    step={1}
-                    min={30}
-                    max={100}
-                />
-            </Section>
 
-            <Section
-                id="settings-section-backtest-giris-ema-gap"
-                title="Backtest giriş (EMA / gap)"
-                help="Tip C için açılış/kapanış oranı, trend EMA periyotları ve gap planlamada ATR çarpanı. Simülasyonun ‘ne zaman ve nasıl girildiği’; canlı ile hizalamak için küçük adımla değiştirin, tek seferde çok alanı oynamayın."
-            >
-                <FieldNum
-                    label="Tip C: min açılış / sinyal kapanış oranı"
-                    hint="Açılış, sinyal günü kapanışına göre çok aşağıdaysa (gap aşağı) Tip C girişi reddedilir."
-                    value={nn(["backtest_entry", "type_c_min_open_vs_signal_close_ratio"], 0.98)}
-                    onChange={(v) => sn(["backtest_entry", "type_c_min_open_vs_signal_close_ratio"], v)}
-                    step="0.01"
-                    min={0.8}
-                    max={1}
-                />
-                <FieldNum
-                    label="Trend EMA hızlı span"
-                    hint="Trend onayı için hızlı EMA periyodu (EMA_fast > EMA_slow)."
-                    value={nn(["backtest_entry", "trend_ema_fast_span"], 10)}
-                    onChange={(v) => sn(["backtest_entry", "trend_ema_fast_span"], Math.round(v))}
-                    step={1}
-                    min={3}
-                    max={60}
-                />
-                <FieldNum
-                    label="Trend EMA yavaş span"
-                    hint="Yavaş EMA periyodu; hızlıdan büyük olmalıdır."
-                    value={nn(["backtest_entry", "trend_ema_slow_span"], 20)}
-                    onChange={(v) => sn(["backtest_entry", "trend_ema_slow_span"], Math.round(v))}
-                    step={1}
-                    min={5}
-                    max={120}
-                />
-                <FieldNum
-                    label="Trend min bar"
-                    hint="EMA hesabı için gereken minimum geçmiş bar sayısı."
-                    value={nn(["backtest_entry", "trend_min_bars"], 21)}
-                    onChange={(v) => sn(["backtest_entry", "trend_min_bars"], Math.round(v))}
-                    step={1}
-                    min={10}
-                    max={120}
-                />
-                <FieldNum
-                    label="Gap planlama ATR çarpanı"
-                    hint="Gap sonrası plan fiyatı / stop mesafesi hesabında ATR ile çarpan."
-                    value={nn(["backtest_entry", "gap_atr_multiplier"], 2)}
-                    onChange={(v) => sn(["backtest_entry", "gap_atr_multiplier"], v)}
-                    step="0.1"
-                    min={0.5}
-                    max={6}
-                />
-                <FieldNum
-                    label="Kısmi sonrası T2 fallback çarpanı"
-                    hint="T1 kısmı alındıktan sonra T2 hedefi sıkılaşırsa uygulanan küçük genişletme."
-                    value={nn(["backtest_entry", "partial_fallback_target_bump"], 1.15)}
-                    onChange={(v) => sn(["backtest_entry", "partial_fallback_target_bump"], v)}
-                    step="0.01"
-                    min={1}
-                    max={2}
-                />
-            </Section>
 
             {/* "Backtest çıkış (zaman stop / trailing)" bölümü 2026-08-05'te kaldırıldı.
                 15 ayar vardı ve HEPSİ backtest'i canlıdan AYIRIYORDU: canlı tracker

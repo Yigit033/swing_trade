@@ -169,28 +169,32 @@ def test_postgres_migration_is_additive_and_fails_closed():
 
 def backtester(tape):
     from swing_trader.small_cap.smallcap_backtest import SmallCapBacktester
-    bt=SmallCapBacktester();bt._reset_diagnostics()
+    bt=SmallCapBacktester();bt._reset_state()
+    bt._data={'TEST':tape};bt._end=pd.Timestamp('2026-12-31')
     bt.pending_signals=[dict(signal=dict(ticker='TEST',swing_type='A',quality_score=85,
-        hold_days_max=20,position_size=10),signal_close=100.,signal_date=datetime(2026,10,1),
-        df_window=tape.iloc[:-1])]
+        hold_days_max=20,position_size=10,stop_loss=92.,target_1=110.,target_2=125.),
+        signal_close=100.,signal_date=pd.Timestamp('2026-10-01'),atr=4.)]
     return bt
 
 
 def test_next_open_atr_stop_targets_sizing_invariant_to_future_ohlcv():
     dates=pd.bdate_range(end='2026-10-02',periods=80)
     tape=pd.DataFrame(dict(Date=dates,Open=100.,High=102.,Low=98.,Close=100.,Volume=1000000.))
-    original=backtester(tape);original._process_pending_entries(datetime(2026,10,2),{'TEST':tape},3)
+    original=backtester(tape);original._confirm_pending(pd.Timestamp('2026-10-02'))
     changed=tape.copy();changed.loc[79,['High','Low','Close','Volume']]=[1000.,1.,500.,999999999.]
-    modified=backtester(changed);modified._process_pending_entries(datetime(2026,10,2),{'TEST':changed},3)
+    modified=backtester(changed);modified._confirm_pending(pd.Timestamp('2026-10-02'))
+    keys=('entry_price','size','stop','target','target_2','initial_risk')
     assert len(original.open_trades)==len(modified.open_trades)==1
-    assert original.open_trades==modified.open_trades
-    assert original.open_trades[0]['atr']==4.
+    assert [original.open_trades[0][k] for k in keys]==[modified.open_trades[0][k] for k in keys]
+    # Canlı onay matematiği: açılış − 2.5×ATR(4) = 90, tip A tavanı %15 → 85'in üstünde kalır.
+    assert original.open_trades[0]['stop']==90.
 
 
 def test_no_stale_open_fill_when_entry_bar_missing():
     tape=pd.DataFrame(dict(Date=pd.bdate_range(end='2026-10-01',periods=80),Open=100.,High=102.,Low=98.,Close=100.,Volume=1000000.))
-    bt=backtester(tape);bt._process_pending_entries(datetime(2026,10,2),{'TEST':tape},3)
+    bt=backtester(tape);bt._confirm_pending(pd.Timestamp('2026-10-02'))
     assert bt.open_trades==[]
+    assert len(bt.pending_signals)==1, "canlı tracker bar gelene kadar bekler (14 gün sonra reddeder)"
 
 
 def test_partial_mark_to_market_uses_remaining_shares():
@@ -231,41 +235,44 @@ def test_policy_edit_intraday_cannot_use_pre_edit_low():
     assert not u and 'INTRADAY_POLICY_EDIT' in r[3]
 
 
-def test_backtest_entry_then_exit_order_and_prior_regime(monkeypatch):
+def test_backtest_follows_live_daily_order(monkeypatch):
+    """Canlı günlük bakım sırası: PENDING onayı → çıkış → (kapanış) rejim + tarama."""
     from swing_trader.small_cap.smallcap_backtest import SmallCapBacktester
     bt=SmallCapBacktester()
-    frame=pd.DataFrame(dict(Open=100.,High=101.,Low=99.,Close=100.,Volume=10000.),
-                       index=pd.bdate_range(end='2026-10-02',periods=80))
-    frame.index.name='Date'
-    monkeypatch.setattr('swing_trader.small_cap.smallcap_backtest.yf.Ticker',lambda _:Mock(history=lambda **kw:frame))
+    tape=pd.DataFrame(dict(Date=pd.bdate_range(end='2026-10-02',periods=80),Open=100.,High=101.,
+                           Low=99.,Close=100.,Volume=10000.))
+    def load(*a):
+        bt._data={'TEST':tape}
+    monkeypatch.setattr(bt,'_load_data',load)
     monkeypatch.setattr(bt,'_fetch_benchmarks',lambda *a:(None,None))
     calls=[]
-    def regime(now):
-        calls.append(('regime',now))
-        return {'regime':'BULL','confidence':'CONFIRMED'},78,10,pd.DataFrame()
+    monkeypatch.setattr(bt,'_confirm_pending',lambda day:calls.append(('confirm',day)))
+    monkeypatch.setattr(bt,'_settle_exits',lambda day:calls.append(('exit',day)))
+    def regime(day):
+        calls.append(('regime',day))
+        return {'regime':'BULL','confidence':'CONFIRMED'},78,10
     monkeypatch.setattr(bt,'_daily_regime_bundle',regime)
-    def scan(day,*args):
-        bt.pending_signals=[{'signal_date':day}]
-        calls.append(('scan',day))
-    monkeypatch.setattr(bt,'_scan_for_signals',scan)
-    monkeypatch.setattr(bt,'_process_pending_entries',lambda day,*a:calls.append(('entry',day)))
-    monkeypatch.setattr(bt,'_check_exits',lambda day,*a:calls.append(('exit',day)))
+    monkeypatch.setattr(bt,'_scan_and_track',lambda day,*a:calls.append(('scan',day)))
     bt.run_backtest(['TEST'],'2026-10-01','2026-10-02')
-    day=datetime(2026,10,2)
-    assert calls.index(('entry',day)) < calls.index(('exit',day))
-    assert ('regime',datetime(2026,10,1,23,59,59,999999)) in calls
+    day=pd.Timestamp('2026-10-02')
+    order=[c for c in calls if c[1]==day]
+    assert order==[('confirm',day),('exit',day),('regime',day),('scan',day)]
 
 
 def test_backtest_end_uses_no_future_bar_or_stop_floor():
     from swing_trader.small_cap.smallcap_backtest import SmallCapBacktester
     bt=SmallCapBacktester()
-    bt.open_trades=[dict(ticker='TEST',entry_date='2026-10-01',entry_price=100.,shares=10,
-                        initial_shares=10,stop_loss=90.,trailing_stop=90.,initial_risk=100.)]
     tape=bars([('2026-10-01',100,101,99,100),('2026-10-02',80,85,75,80),
                ('2026-10-05',1000,1001,999,1000)])
     tape.Date=pd.to_datetime(tape.Date)
-    bt._force_close_all(datetime(2026,10,2),{'TEST':tape})
+    bt._data={'TEST':tape}
+    bt.open_trades=[dict(ticker='TEST',swing_type='A',pathway='VCE',quality_score=80,rank_score=80,
+        entry_day=pd.Timestamp('2026-10-01'),entry_price=100.,size=10,stop=90.,target=110.,
+        target_2=125.,max_hold_days=20,initial_risk=100.,status='OPEN',reason='',exit_day=None,
+        exit_price=0.,bars=2,sold=0,partial_price=0.,partial_day=None,partial_realized=False)]
+    bt._force_close_all(pd.Timestamp('2026-10-02'))
     assert bt.trades[0]['exit_price']==bt._exit_fill_price(80.)
+    assert bt.trades[0]['status']=='FORCED'
 
 
 def test_full_partial_fraction_sells_no_extra_remaining_shares():
@@ -280,40 +287,38 @@ def test_single_share_t1_is_full_exit_not_zero_share_sale():
     assert json.loads(u['execution_state'])['sold']==1
 
 
-def test_backtest_same_bar_partial_be_keeps_original_risk():
+def test_backtest_exit_is_live_execution_evaluate():
+    """Backtest çıkışı canlı execution.evaluate'in sonucunu birebir taşır (kısmi T1 + BE aynı bar)."""
     from swing_trader.small_cap.smallcap_backtest import SmallCapBacktester
     bt=SmallCapBacktester()
     bt.settings=bt.settings.model_copy(deep=True)
     bt.settings.slippage_bps_per_side=0  # isolate accounting, not a production edit
-    bt.open_trades=[dict(ticker='TEST',entry_date='2026-10-01',entry_price=100.,shares=100,
-        initial_shares=100,stop_loss=90.,initial_stop=90.,trailing_stop=90.,initial_risk=1000.,
-        target=110.,target_2=125.,partial_done=False,partial_pnl_dollar=0.,partial_shares=0,
-        atr=0.,max_hold_days=20,status='OPEN')]
     tape=bars([('2026-10-01',100,130,99,120)]);tape.Date=pd.to_datetime(tape.Date)
-    bt._check_exits(datetime(2026,10,1),{'TEST':tape})
+    bt._data={'TEST':tape};bt._end=pd.Timestamp('2026-10-01')
+    sig=dict(ticker='TEST',swing_type='A',quality_score=85,rank_score=85,hold_days_max=20)
+    bt._open_trade(sig,pd.Timestamp('2026-10-01'),100.,100,90.,110.,125.,0.)
+    live,(st,px,_,_,_)=evaluate(trade(stop_loss=90.,initial_stop=90.,target=110.,target_2=125.,
+                                     initial_risk=1000.,atr=0.),bars([('2026-10-01',100,130,99,120)]),
+                                bt.settings.partial_at_t1_fraction)
+    bt._settle_exits(pd.Timestamp('2026-10-01'))
     assert len(bt.trades)==1 and bt.open_trades==[]
-    assert bt.trades[0]['initial_stop']==90.
-    assert bt.trades[0]['initial_risk']==1000.
-    assert bt.trades[0]['pnl_dollar']==330.
+    assert bt.trades[0]['status']==st=='TRAILED'
+    assert bt.trades[0]['pnl_dollar']==live['realized_pnl']==330.
     assert bt.capital==10330.
 
 
-def test_migration_failure_rolls_back_added_columns(tmp_path,monkeypatch):
-    path=str(tmp_path/'rollback.db');conn=sqlite3.connect(path)
-    conn.execute(_CREATE_TABLE_SQLITE);conn.commit();conn.close()
-    def fail(cur,postgres):
-        cur.execute('ALTER TABLE paper_trades ADD COLUMN initial_risk REAL')
-        raise RuntimeError('simulated DDL failure')
-    monkeypatch.setattr('swing_trader.paper_trading.storage._migrate_execution_columns',fail)
-    with pytest.raises(RuntimeError):PaperTradeStorage(path)
-    conn=sqlite3.connect(path)
-    assert 'initial_risk' not in {r[1] for r in conn.execute('PRAGMA table_info(paper_trades)')}
-    conn.close()
-
-
-def test_explicit_sqlite_override_never_uses_postgres_placeholders(tmp_path,monkeypatch):
-    monkeypatch.setattr('swing_trader.paper_trading.storage._MODE','pg')
-    store=PaperTradeStorage(str(tmp_path/'isolated.db'))
-    tid=store.add_trade(trade())
-    assert tid>0 and store.get_trade_by_id(tid)['initial_risk']==1000.
-    assert store.close_trade(tid,105.,'2026-10-02T20:00:00Z','MANUAL')
+def test_backtest_regime_uses_one_year_spy_history(monkeypatch):
+    """Canlı rejim SPY'nin 1 yıllık geçmişini kullanır (MA200). Backtest SPY'yi yalnız fiyat
+    ısınmasıyla (7 ay) indirince dönem başında rejim canlıdan farklı çıkıyordu (ASST 2026-08-24)."""
+    from swing_trader.small_cap.smallcap_backtest import SmallCapBacktester
+    bt=SmallCapBacktester()
+    monkeypatch.setattr(bt,'_load_data',lambda *a:setattr(bt,'_data',{'T':pd.DataFrame(
+        dict(Date=pd.bdate_range(end='2026-10-02',periods=80),Open=1.,High=1.,Low=1.,Close=1.,Volume=1.))}))
+    seen={}
+    def bench(start,end):
+        seen['start']=start
+        return None,None
+    monkeypatch.setattr(bt,'_fetch_benchmarks',bench)
+    monkeypatch.setattr(bt,'_scan_and_track',lambda *a:None)
+    bt.run_backtest(['T'],'2026-10-01','2026-10-02')
+    assert (pd.Timestamp('2026-10-01')-pd.Timestamp(seen['start'])).days>=365

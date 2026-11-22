@@ -309,7 +309,16 @@ class SmallCapScoring:
             boosters.get('rvol_value', volume_surge) if boosters else volume_surge
         )
         volatility_score_raw = self.score_volatility_expansion(atr_percent)
-        float_score_raw = self.score_float_tightness(float_shares)
+        # FLOAT BİLEŞENİ BİLİNÇLİ OLARAK SABİT (2026-11-22, Lab v3 ön kayıt Ek B).
+        # Canlı tarama Finviz Overview'dan okur; orada Float sütunu yok → canlı skor
+        # hep "bilinmiyor" sabitini alıyordu (fark edilmemiş bir hata). Düzeltmenin
+        # yönü ÖLÇÜLDÜ: canlı replikada float çalışırken 2021–2026 net −0.97%/işlem,
+        # portföy −29.3%, maxDD −42.7%; sabitken −0.46%, −18.7%, −28.6%. Gerçek float
+        # ürünü kötüleştiriyor → skora girmez. Sabit, kalibre eşikler (BULL Q78 vb.)
+        # aynı kalsın diye korunur; seçim bugünküyle birebir aynıdır. Lookup ve
+        # backtest de artık aynı skoru üretir (lookup yfinance float'ıyla farklı skor
+        # veriyordu). score_float_tightness yalnız araştırma teşhisi için duruyor.
+        float_score_raw = self._st.float_score_unknown
         momentum_score_raw = self.score_momentum_continuity(df)
         risk_score_raw = self.score_risk_control(df, atr_percent)
         trend_score_raw = self.score_trend_quality(df, boosters)

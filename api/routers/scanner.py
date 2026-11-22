@@ -517,8 +517,9 @@ def _execute_smallcap_scan(
         _scan_regime_and_thresholds(engine, body, signals)
     )
 
-    filtered = [s for s in signals if s.get("quality_score", 0) >= effective_min_quality]
-    filtered = filtered[: effective_top_n]
+    from swing_trader.small_cap.thresholds import select_scan_signals
+
+    filtered = select_scan_signals(signals, effective_min_quality, effective_top_n)
 
     # Motorun ürettiği ama eşiğin altında kaldığı için GÖSTERİLMEYEN sinyalleri
     # açıkça logla. Aksi halde motor "SMALL CAP SWING 🚀: PRCH ... Q:61" diye

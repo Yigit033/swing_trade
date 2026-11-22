@@ -43,14 +43,8 @@ _last_run_session: Optional[date] = None
 _AUTO_SOURCE = "auto"
 
 
-def auto_entry_capacity(regime: str, loop_policy, active_count: int = 0) -> int | None:
-    """Live auto-entry slots using the same regime policy as the backtest."""
-    regime = str(regime or "UNKNOWN").upper()
-    if regime == "BEAR" and loop_policy.bear_block_new_entries:
-        return 0
-    if regime == "CAUTION":
-        return max(0, int(loop_policy.caution_max_concurrent) - active_count)
-    return None
+# Tek kaynak swing_trader.small_cap.thresholds — backtest de aynısını kullanır.
+from swing_trader.small_cap.thresholds import auto_entry_capacity  # noqa: E402,F401
 
 
 def _next_target_et(target_hour: int, target_minute: int, now: Optional[datetime] = None) -> datetime:

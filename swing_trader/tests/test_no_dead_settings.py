@@ -108,14 +108,17 @@ def test_t1_fraction_parity_with_backtest_harness():
     )
 
 
-def test_position_cost_setting_matches_live_authority():
+def test_old_backtest_only_settings_stay_removed():
     """
-    max_position_cost_portfolio_pct canlıda kullanılmıyor (authority =
-    type_position_caps). En azından SAYISAL olarak çelişmemeli — aksi halde
-    eski backtest modülü canlıdan farklı boyutlandırır ve sonuçları kıyaslanamaz.
+    2026-11-22: max_position_cost_portfolio_pct ve diğer eski-backtest-ayarları
+    canlıda yoktu; backtest artık canlı fonksiyonlarını çağırdığı için silindi.
     """
-    s = load_settings()
-    assert s.max_position_cost_portfolio_pct == max(s.type_position_caps.values())
+    from swing_trader.small_cap.settings_config import SmallCapSettings
+    fields = SmallCapSettings.model_fields
+    for gone in ("max_position_cost_portfolio_pct", "max_gap_risk_portfolio_pct",
+                 "max_loss_per_trade_pct", "ticker_max_losses", "min_quality_type_a",
+                 "backtest_type_quality", "backtest_entry", "min_shares_for_partial"):
+        assert gone not in fields, gone
 
 
 @pytest.mark.parametrize("field", [

@@ -1,88 +1,104 @@
 """
-SmallCap Walk-Forward Backtest Engine.
+SmallCap Walk-Forward Backtest — canlı ürünün günlük akışını birebir yürütür.
 
-Simulates daily SmallCap scans over historical data to evaluate
-signal quality, win rates, and overall system performance.
+2026-11-22 (Lab v3): eski motor canlıyı ölçmüyordu. Canlıda olmayan bir RSI kapısını
+VCE'ye de uyguluyor, ``rank_score`` yerine kalite skoruyla sıralıyor, tipe özgü
+kalite tabanları, EMA trend giriş filtresi, Tip C açılış kontrolü, %7 stop tabanı,
+swing-low stop, drawdown duraklatması ve "2 kayıptan sonra kalıcı yasak" gibi canlıda
+OLMAYAN kurallar işletiyordu; ``scan_stock``'a rejim geçirmiyor, sahte cap/float
+(45M) kullanıyor ve çıkışları kendi kopyasıyla hesaplıyordu.
+
+Artık her gün canlı ``run_daily_maintenance`` sırası izlenir ve her adım canlının
+KENDİ fonksiyonunu çağırır:
+
+  1. Açılış: dünkü PENDING'ler t+1 Open'da onaylanır
+     → ``tracker.gap_percent`` + ``tracker.confirm_entry_levels``
+  2. Çıkış: ``paper_trading.execution.evaluate`` (canlı tracker'ın çıkış motoru)
+  3. Kapanış: rejim (``regime_from_spy_close``) → ``scan_stock(regime=…)`` →
+     ``select_scan_signals`` (rank_score sırası, eşik, top_n) →
+     ``auto_entry_capacity`` → duplicate + cooldown (çıkıştan itibaren, REJECTED dahil)
+
+Canlıdan bilinen kalan farklar (UI'da da gösterilir):
+  - Evren: bugünkü Finviz listesi geçmişe uygulanır (survivorship — iyimser).
+  - Market cap: bugünkü cap × (Close_t / bugünkü Close) yaklaşımı.
+  - Maliyet: ``slippage_bps_per_side`` her bacakta düşülür (canlı paper maliyet düşmez).
+  - ``max_concurrent`` verilirse canlıda OLMAYAN ek bir sermaye kısıtı uygulanır.
 """
 
+import json
 import logging
-from typing import Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-import pandas as pd
-import numpy as np
-import yfinance as yf
+from typing import Dict, List, Optional
 
+import numpy as np
+import pandas as pd
+
+from ..paper_trading import execution
+from ..paper_trading.tracker import (
+    MAX_STALE_PENDING_CALENDAR_DAYS,
+    confirm_entry_levels,
+    gap_percent,
+)
+from ..utils.market_calendar import is_trading_day
 from .engine import SmallCapEngine
-from .risk import SmallCapRisk
 from .regime_logic import regime_from_spy_close, regime_unknown
-from .thresholds import effective_scan_thresholds
+from .risk import SmallCapRisk
+from .thresholds import auto_entry_capacity, effective_scan_thresholds, select_scan_signals
 
 logger = logging.getLogger(__name__)
 
+# Canlı tarama 6 aylık pencereyle çalışır (api/routers/scanner.py: period="6mo").
+_SCAN_WINDOW = pd.DateOffset(months=6)
+
 
 class SmallCapBacktester:
-    """
-    Walk-forward backtest for SmallCap momentum system.
-
-    Scans stocks day by day using historical data windows,
-    opens simulated trades on signals, and tracks outcomes.
-
-    Live parity notes (scan_stock backtest_mode=True still differs from full live):
-    - Earnings filter is skipped; catalyst / short / insider / news bonuses are zero;
-      sector RS uses SPY proxy when benchmark window exists.
-    - Execution: optional slippage below; live API does not model fills. No commission model (US zero-commission assumption).
-    """
-
-    # Tunable backtest / entry parameters: SmallCapSettings (data/smallcap_settings.json).
+    """Walk-forward backtest; canlı auto-scan + paper tracker akışının geçmişe uygulanışı."""
 
     def __init__(self, config: Dict = None):
         self.engine = SmallCapEngine(config)
         self.settings = self.engine.settings
         self.risk = SmallCapRisk(config, self.settings)
         self.config = config or {}
-        self.trades = []
-        self.open_trades = []
-        self.equity_curve = []
-        self.initial_capital = 10000
+        self.initial_capital = 10000.0
         self.capital = self.initial_capital
-        self.cooldowns = {}  # ticker -> date when cooldown expires
-        self.ticker_losses = {}  # ticker -> count of stop-out losses (for permanent ban)
-        self.banned_tickers = set()  # permanently banned after TICKER_MAX_LOSSES
-        self.pending_signals = []  # Signals waiting for next-day entry
-        self._peak_equity = 10000
+        self.min_quality = self.settings.auto_scan.min_quality
+        self.top_n = self.settings.auto_scan.top_n
+        self._max_concurrent: Optional[int] = None
+        self._reset_state()
+
+    # ── durum ────────────────────────────────────────────────────────────────
+
+    def _reset_state(self) -> None:
+        self.trades: List[Dict] = []          # kapanmış işlemler (UI)
+        self.open_trades: List[Dict] = []     # aktif işlemler (önceden hesaplanmış sonuçla)
+        self.pending_signals: List[Dict] = []
+        self.equity_curve: List[Dict] = []
+        self._last_exit: Dict[str, pd.Timestamp] = {}   # ticker → son çıkış günü (cooldown)
         self._spy_df: Optional[pd.DataFrame] = None
         self._vix_df: Optional[pd.DataFrame] = None
-        self.min_quality = 65
-        self.top_n = 10
-        self._max_concurrent = 3
-        self._diag: Dict = {}
-
-    def _reset_diagnostics(self) -> None:
+        self._data: Dict[str, pd.DataFrame] = {}
+        self._earnings: Dict[str, Optional[list]] = {}
+        self._meta: Dict[str, Dict] = {}
+        self._end: Optional[pd.Timestamp] = None
         self._diag = {
-            "signals_passed_rsi": 0,
+            "raw_signals": 0,
+            "selected_signals": 0,
             "pending_queued": 0,
+            "skip_capacity": 0,
+            "skip_duplicate": 0,
+            "skip_cooldown": 0,
+            "skip_max_concurrent": 0,
+            "skip_position_size": 0,
             "entry_skip_gap_up": 0,
             "entry_skip_gap_down": 0,
-            "entry_skip_tip_c": 0,
-            "entry_skip_risk": 0,
-            "entry_skip_trend": 0,
+            "entry_skip_no_bar": 0,
             "entries_opened": 0,
+            "earnings_unknown_tickers": 0,
+            "cap_unknown_tickers": 0,
         }
 
-    def _entry_limit(self, regime, max_concurrent, drawdown):
-        """Existing regime/DD rules, evaluated at each decision's own timestamp."""
-        bl = self.settings.backtest_loop
-        name = regime.get('regime', 'UNKNOWN')
-        limit = max_concurrent
-        if name == 'BEAR' and bl.bear_block_new_entries:
-            limit = 0
-        elif name == 'CAUTION':
-            limit = min(limit, bl.caution_max_concurrent)
-        if drawdown > bl.drawdown_pause_entries_fraction:
-            return 0
-        if drawdown > bl.drawdown_reduce_to_one_position_fraction:
-            limit = min(limit, 1)
-        return limit
+    # ── giriş noktası ────────────────────────────────────────────────────────
 
     def run_backtest(
         self,
@@ -90,106 +106,55 @@ class SmallCapBacktester:
         start_date: str,
         end_date: str,
         initial_capital: float = 10000,
-        max_concurrent: int = 3,
-        min_quality: int = 65,
-        top_n: int = 10,
+        max_concurrent: Optional[int] = None,
+        min_quality: Optional[int] = None,
+        top_n: Optional[int] = None,
         progress_callback=None,
+        stock_meta: Optional[Dict[str, Dict]] = None,
     ) -> Dict:
         """
-        Run walk-forward backtest (aligned with live scanner: regime, effective thresholds,
-        scan_universe-style ranking, backtest_mode scan_stock).
-
         Args:
-            min_quality / top_n: same meaning as POST /api/scanner/smallcap ScanRequest.
+            min_quality / top_n: None → canlı auto-scan ayarı (``settings.auto_scan``).
+            max_concurrent: None → canlıdaki gibi sınırsız (yalnız rejim kapasitesi).
+            stock_meta: ticker → Finviz metadata (marketCap, sector). Yoksa hisse sayısı
+                yfinance'tan alınır.
         """
-        self.initial_capital = initial_capital
-        self.capital = initial_capital
-        self.min_quality = min_quality
-        self.top_n = top_n
+        self._reset_state()
+        self.initial_capital = float(initial_capital)
+        self.capital = float(initial_capital)
+        self.min_quality = int(min_quality if min_quality is not None else self.settings.auto_scan.min_quality)
+        self.top_n = int(top_n if top_n is not None else self.settings.auto_scan.top_n)
         self._max_concurrent = max_concurrent
-        self.trades = []
-        self.open_trades = []
-        self.equity_curve = []
-        self.cooldowns = {}
-        self.ticker_losses = {}
-        self.banned_tickers = set()
-        self.pending_signals = []
-        self._peak_equity = initial_capital
-        self._reset_diagnostics()
-        
-        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Step 1: Fetch all data upfront (3 months before start for indicator warmup)
-        warmup_start = (start_dt - timedelta(days=90)).strftime('%Y-%m-%d')
-        end_plus = (end_dt + timedelta(days=15)).strftime('%Y-%m-%d')  # Extra for trade exits
-        
+
+        start_dt = pd.Timestamp(start_date)
+        end_dt = pd.Timestamp(end_date)
+        self._end = end_dt
+        warmup_start = (start_dt - pd.DateOffset(months=7)).strftime('%Y-%m-%d')
+        fetch_end = (end_dt + timedelta(days=1)).strftime('%Y-%m-%d')
+
         if progress_callback:
             progress_callback(0, f"Downloading data for {len(tickers)} stocks...")
-        
-        data_dict = {}
-        for i, ticker in enumerate(tickers):
-            try:
-                stock = yf.Ticker(ticker)
-                df = stock.history(start=warmup_start, end=end_plus)
-                if df is not None and len(df) >= 60:
-                    df = df.reset_index()
-                    if 'Date' in df.columns:
-                        df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
-                    data_dict[ticker] = df
-            except Exception as e:
-                logger.debug(f"Skip {ticker}: {e}")
-            
-            if progress_callback and i % 5 == 0:
-                pct = int((i / len(tickers)) * 30)  # 0-30% for data download
-                progress_callback(pct, f"Downloaded {i+1}/{len(tickers)} stocks...")
-        
-        if not data_dict:
+        self._load_data(list(tickers), warmup_start, fetch_end, stock_meta or {})
+        if not self._data:
             return self._empty_results()
+        # Canlı rejim SPY'nin 1 yıllık geçmişiyle (period="1y", MA200 için) hesaplanır.
+        # Benchmark'ı yalnız fiyat ısınmasıyla (7 ay) indirmek dönemin başında MA200'ü
+        # eksik bırakıp canlıdan FARKLI rejim üretiyordu (eski motorda 90 gündü).
+        bench_start = (start_dt - timedelta(days=400)).strftime('%Y-%m-%d')
+        self._spy_df, self._vix_df = self._fetch_benchmarks(bench_start, fetch_end)
 
-        self._spy_df, self._vix_df = self._fetch_benchmarks(warmup_start, end_plus)
-        
         if progress_callback:
-            progress_callback(30, f"Data ready: {len(data_dict)} stocks. Starting simulation...")
-        
-        # Step 2: Walk forward day by day
-        from ..utils.market_calendar import is_trading_day
-        trading_days = [d for d in pd.bdate_range(start_dt, end_dt) if is_trading_day(d.date())]
-        total_days = len(trading_days)
-        
-        for day_idx, current_date in enumerate(trading_days):
-            current_date_dt = current_date.to_pydatetime()
-            
-            # Open decisions precede ALL of today's high/low/close outcomes.
-            # Yesterday's completed regime/equity only (not today's EOD exits).
-            prior_instant = current_date_dt - timedelta(microseconds=1)
-            regime, eff_min, eff_top, spy_rs = self._daily_regime_bundle(prior_instant)
-            
-            # Drawdown circuit breaker: reduce size or pause if losing too much
-            portfolio_value = self._calculate_portfolio_value(prior_instant, data_dict)
-            current_dd = (self._peak_equity - portfolio_value) / self._peak_equity if self._peak_equity > 0 else 0
-            if portfolio_value > self._peak_equity:
-                self._peak_equity = portfolio_value
-            
-            entry_max = self._entry_limit(regime, max_concurrent, current_dd)
-            
-            # 2b: Process pending signals from YESTERDAY (next-day-open entry)
-            if self.pending_signals and entry_max > 0 and len(self.open_trades) < entry_max:
-                self._process_pending_entries(current_date_dt, data_dict, entry_max)
-            else:
-                self.pending_signals = []  # next-open opportunities cannot roll forward
+            progress_callback(30, f"Data ready: {len(self._data)} stocks. Starting simulation...")
 
-            # Entry-day stops are eligible, exactly once per completed bar.
-            self._check_exits(current_date_dt, data_dict)
-            portfolio_value = self._calculate_portfolio_value(current_date_dt, data_dict)
-            regime, eff_min, eff_top, spy_rs = self._daily_regime_bundle(current_date_dt)
-            eod_dd = (self._peak_equity - portfolio_value) / self._peak_equity if self._peak_equity > 0 else 0
-            scan_limit = self._entry_limit(regime, max_concurrent, eod_dd)
-            
-            # 2c: Record equity (+ daily regime / thresholds for UI)
+        days = [d for d in pd.bdate_range(start_dt, end_dt) if is_trading_day(d.date())]
+        for i, day in enumerate(days):
+            # Canlı günlük bakım sırası: onay → çıkış → tarama.
+            self._confirm_pending(day)
+            self._settle_exits(day)
+            regime, eff_min, eff_top = self._daily_regime_bundle(day)
             self.equity_curve.append({
-                'date': current_date_dt.strftime('%Y-%m-%d'),
-                'portfolio_value': round(portfolio_value, 2),
+                'date': day.strftime('%Y-%m-%d'),
+                'portfolio_value': round(self._portfolio_value(day), 2),
                 'open_trades': len(self.open_trades),
                 'market_regime': regime.get('regime', 'UNKNOWN'),
                 'regime_confidence': regime.get('confidence', ''),
@@ -198,59 +163,88 @@ class SmallCapBacktester:
                 'request_min_quality': self.min_quality,
                 'request_top_n': self.top_n,
             })
-            
-            # 2d: Scan for new signals → queue as PENDING (enter tomorrow)
-            if scan_limit > 0 and len(self.open_trades) < max_concurrent:
-                self._scan_for_signals(
-                    current_date_dt,
-                    data_dict,
-                    max_concurrent,
-                    regime,
-                    eff_min,
-                    eff_top,
-                    spy_rs,
-                )
-            
-            if progress_callback and day_idx % 5 == 0:
-                pct = 30 + int((day_idx / total_days) * 65)  # 30-95%
-                progress_callback(pct, f"Day {day_idx+1}/{total_days} | "
-                                      f"Trades: {len(self.trades)} | "
-                                      f"Open: {len(self.open_trades)}")
-        
-        # Step 3: Force close remaining open trades at last price
-        self._force_close_all(end_dt, data_dict)
-        
+            self._scan_and_track(day, regime, eff_min, eff_top)
+            if progress_callback and i % 5 == 0:
+                progress_callback(30 + int(i / max(1, len(days)) * 65),
+                                  f"Day {i+1}/{len(days)} | Trades: {len(self.trades)} | "
+                                  f"Open: {len(self.open_trades)}")
+
+        self._force_close_all(end_dt)
         if progress_callback:
             progress_callback(100, f"Done! {len(self.trades)} total trades")
-        
-        # Step 4: Calculate metrics
-        metrics = self._calculate_metrics()
-        
+
         return {
             'trades': self.trades,
             'equity_curve': self.equity_curve,
-            'metrics': metrics,
-            'data_stocks': len(data_dict),
+            'metrics': self._calculate_metrics(),
+            'data_stocks': len(self._data),
             'period': f"{start_date} to {end_date}",
             'diagnostics': dict(self._diag),
-            'params': {
-                'min_quality': self.min_quality,
-                'top_n': self.top_n,
-                'max_concurrent': self._max_concurrent,
-                'slippage_bps_per_side': self.settings.slippage_bps_per_side,
-                'partial_at_t1_fraction': self.settings.partial_at_t1_fraction,
-            },
+            'params': self._params(),
         }
 
-    def _entry_fill_price(self, quoted: float) -> float:
-        b = self.settings.slippage_bps_per_side / 10000.0
-        return round(quoted * (1.0 + b), 2)
+    def _params(self) -> Dict:
+        return {
+            'min_quality': self.min_quality,
+            'top_n': self.top_n,
+            'max_concurrent': self._max_concurrent,
+            'slippage_bps_per_side': self.settings.slippage_bps_per_side,
+            'partial_at_t1_fraction': self.settings.partial_at_t1_fraction,
+            'cooldown_days': self.settings.cooldown_days,
+            'live_parity': self._max_concurrent is None,
+        }
 
-    def _exit_fill_price(self, quoted: float) -> float:
-        if quoted <= 0:
-            return quoted
-        b = self.settings.slippage_bps_per_side / 10000.0
-        return round(quoted * (1.0 - b), 2)
+    # ── veri ─────────────────────────────────────────────────────────────────
+
+    def _load_data(self, tickers: List[str], start: str, end: str, stock_meta: Dict[str, Dict]) -> None:
+        """Canlı fetcher (aynı auto_adjust + OHLC onarımı) + bilanço tarihleri + cap kaynağı."""
+        from ..data.fetcher import DataFetcher
+
+        fetcher = DataFetcher()
+        data = fetcher.fetch_multiple_stocks_batch(tickers, start_date=start, end_date=end, min_rows=60)
+        self._data = {t: df.sort_values('Date').reset_index(drop=True) for t, df in data.items()}
+
+        def extras(t):
+            import yfinance as yf
+            tk = yf.Ticker(t)
+            earn, shares = None, None
+            try:
+                ed = tk.get_earnings_dates(limit=24)
+                earn = list(ed.index) if ed is not None and len(ed) else []
+            except Exception:
+                earn = None
+            meta = stock_meta.get(t) or {}
+            if not meta.get('marketCap'):
+                try:
+                    shares = float(tk.fast_info['shares'] or 0) or None
+                except Exception:
+                    shares = None
+            return t, earn, shares
+
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            for t, earn, shares in ex.map(extras, list(self._data)):
+                self._earnings[t] = earn
+                if earn is None:
+                    self._diag["earnings_unknown_tickers"] += 1
+                df = self._data[t]
+                meta = dict(stock_meta.get(t) or {})
+                meta['ref_close'] = float(df['Close'].iloc[-1])
+                if shares:
+                    meta['shares'] = shares
+                if not meta.get('marketCap') and not meta.get('shares'):
+                    self._diag["cap_unknown_tickers"] += 1
+                self._meta[t] = meta
+
+    def _stock_info(self, ticker: str, close_t: float) -> Dict:
+        """Canlı Finviz metadata şekli. Float canlıda bilinmiyor (Overview'da sütun yok) → 0."""
+        meta = self._meta.get(ticker) or {}
+        cap = 0.0
+        if meta.get('marketCap') and meta.get('ref_close'):
+            cap = float(meta['marketCap']) * close_t / float(meta['ref_close'])
+        elif meta.get('shares'):
+            cap = float(meta['shares']) * close_t
+        return {'ticker': ticker, 'marketCap': int(cap), 'floatShares': 0,
+                'shortName': ticker, 'sector': meta.get('sector') or 'Unknown'}
 
     def _normalize_benchmark_df(self, raw: Optional[pd.DataFrame]) -> pd.DataFrame:
         if raw is None or len(raw) == 0:
@@ -265,765 +259,320 @@ class SmallCapBacktester:
         return d
 
     def _fetch_benchmarks(self, start_s: str, end_s: str) -> tuple:
-        """Load SPY + VIX for point-in-time regime (same rules as live)."""
-        spy_df = pd.DataFrame()
-        vix_df = pd.DataFrame()
+        """SPY + VIX — canlı rejimle aynı kurallar için."""
+        import yfinance as yf
+        spy_df, vix_df = pd.DataFrame(), pd.DataFrame()
         try:
-            sh = yf.Ticker("SPY").history(start=start_s, end=end_s)
-            spy_df = self._normalize_benchmark_df(sh)
+            spy_df = self._normalize_benchmark_df(yf.Ticker("SPY").history(start=start_s, end=end_s))
         except Exception as e:
             logger.warning("Backtest: SPY benchmark fetch failed: %s", e)
         try:
-            vh = yf.Ticker("^VIX").history(start=start_s, end=end_s)
-            vix_df = self._normalize_benchmark_df(vh)
+            vix_df = self._normalize_benchmark_df(yf.Ticker("^VIX").history(start=start_s, end=end_s))
         except Exception as e:
             logger.debug("Backtest: VIX fetch failed: %s", e)
         return spy_df, vix_df
 
-    def _daily_regime_bundle(self, current_date: datetime):
-        """Regime from SPY/VIX as of current_date + effective thresholds + SPY slice for RS."""
-        if self._spy_df is None or len(self._spy_df) == 0:
-            r = regime_unknown("no_spy_benchmark")
-            eff_min, eff_top = effective_scan_thresholds(
-                r["regime"],
-                r["confidence"],
-                self.min_quality,
-                self.top_n,
-                regime_caps=self.settings.regime_thresholds,
-            )
-            return r, eff_min, eff_top, pd.DataFrame()
-
-        m = self._spy_df[self._spy_df["Date"] <= current_date]
-        if len(m) < 50:
-            r = regime_unknown("insufficient_spy_history")
-            eff_min, eff_top = effective_scan_thresholds(
-                r["regime"],
-                r["confidence"],
-                self.min_quality,
-                self.top_n,
-                regime_caps=self.settings.regime_thresholds,
-            )
-            return r, eff_min, eff_top, m.tail(60) if len(m) >= 6 else m
-
-        spy_regime = m.tail(252)
-        vx = None
-        if self._vix_df is not None and len(self._vix_df) > 0:
-            vm = self._vix_df[self._vix_df["Date"] <= current_date]
-            if len(vm) > 0:
-                vx = float(vm["Close"].iloc[-1])
-
-        r = regime_from_spy_close(spy_regime["Close"], vx)
+    def _daily_regime_bundle(self, day: pd.Timestamp):
+        """Günün kapanışı itibarıyla rejim + etkin eşikler (canlı scanner ile aynı fonksiyonlar)."""
+        caps = self.settings.regime_thresholds
+        m = self._spy_df[self._spy_df["Date"] <= day] if self._spy_df is not None and len(self._spy_df) else None
+        if m is None or len(m) < 50:
+            r = regime_unknown("no_spy_benchmark" if m is None else "insufficient_spy_history")
+        else:
+            vx = None
+            if self._vix_df is not None and len(self._vix_df):
+                vm = self._vix_df[self._vix_df["Date"] <= day]
+                if len(vm):
+                    vx = float(vm["Close"].iloc[-1])
+            # Canlı: yfinance period="1y" ≈ son 252 seans.
+            r = regime_from_spy_close(m.tail(252)["Close"].reset_index(drop=True), vx)
         eff_min, eff_top = effective_scan_thresholds(
-            r.get("regime", "UNKNOWN"),
-            r.get("confidence", "TENTATIVE"),
-            self.min_quality,
-            self.top_n,
-            regime_caps=self.settings.regime_thresholds,
+            r.get("regime", "UNKNOWN"), r.get("confidence", "TENTATIVE"),
+            self.min_quality, self.top_n, regime_caps=caps,
         )
-        spy_rs = m.tail(60)
-        return r, eff_min, eff_top, spy_rs
+        return r, eff_min, eff_top
 
-    def _scan_for_signals(
-        self,
-        current_date: datetime,
-        data_dict: Dict,
-        max_concurrent: int,
-        regime: Dict,
-        eff_min: int,
-        eff_top: int,
-        spy_rs: pd.DataFrame,
-    ):
-        """
-        Full-universe day scan: backtest_mode scan_stock, quality filter, sort, top_n, then queue pending.
-        """
-        regime_name = regime.get('regime', 'UNKNOWN')
-        regime_conf = regime.get('confidence', 'TENTATIVE')
-        
-        bl = self.settings.backtest_loop
-        if regime_name == 'BEAR' and bl.bear_block_new_entries:
-            return
-        elif regime_name == 'CAUTION':
-            effective_max = min(max_concurrent, bl.caution_max_concurrent)
-        else:
-            effective_max = max_concurrent
-        
-        open_tickers = {t["ticker"] for t in self.open_trades}
-        pending_tickers = {s["signal"]["ticker"] for s in self.pending_signals}
-        slots = effective_max - len(self.open_trades) - len(self.pending_signals)
-        if slots <= 0:
-            return
+    # ── 3. kapanış: tarama + otomatik takip ─────────────────────────────────
 
-        candidates: List[Dict] = []
-
-        for ticker in sorted(data_dict.keys()):
-            if ticker in open_tickers or ticker in pending_tickers:
-                continue
-
-            if ticker in self.banned_tickers:
-                continue
-
-            if ticker in self.cooldowns:
-                if current_date < self.cooldowns[ticker]:
-                    continue
-                del self.cooldowns[ticker]
-
-            full_df = data_dict[ticker]
-            mask = full_df["Date"] <= current_date
-            df_window = full_df[mask].copy()
-            if len(df_window) < 50:
-                continue
-
+    def _scan_and_track(self, day: pd.Timestamp, regime: Dict, eff_min: int, eff_top: int) -> None:
+        regime_name = str(regime.get("regime", "UNKNOWN")).upper()
+        windows: Dict[str, pd.DataFrame] = {}
+        signals: List[Dict] = []
+        lo = day - _SCAN_WINDOW
+        for ticker in sorted(self._data):
+            df = self._data[ticker]
+            w = df[(df['Date'] > lo) & (df['Date'] <= day)]
+            if len(w) < 20 or w['Date'].iloc[-1] != day:
+                continue          # canlı yalnız o seansın tamamlanmış barıyla tarar
+            w = w.reset_index(drop=True)
             try:
-                signal = self.engine.scan_stock(
-                    ticker,
-                    df_window,
-                    backtest_mode=True,
-                    portfolio_value=self.capital,
-                    spy_df_window=spy_rs if len(spy_rs) >= 6 else None,
+                sig = self.engine.scan_stock(
+                    ticker, w,
+                    stock_info=self._stock_info(ticker, float(w['Close'].iloc[-1])),
+                    backtest_mode=True,                     # yalnız anlatı/LLM'i atlar
+                    portfolio_value=self.initial_capital,   # canlı: sabit auto_scan.portfolio_value
+                    regime=regime_name,
+                    earnings_dates=self._earnings.get(ticker),
                 )
-                if not signal:
-                    continue
-
-                signal["market_regime"] = regime.get("regime", "UNKNOWN")
-                signal["regime_confidence"] = regime.get("confidence", "CONFIRMED")
-                # Regime multiplier no longer affects score (kept only as info).
-
-                signal_rsi = signal.get("rsi", 50)
-                if signal_rsi > self.settings.max_entry_rsi:
-                    continue
-
-                candidates.append(
-                    {"ticker": ticker, "signal": signal, "df_window": df_window}
-                )
-                self._diag["signals_passed_rsi"] += 1
             except Exception as e:
-                logger.debug(f"Scan error {ticker}: {e}")
-
-        candidates.sort(key=lambda x: x["signal"].get("quality_score", 0), reverse=True)
-        filtered = []
-        for c in candidates:
-            qs = c["signal"].get("quality_score", 0)
-            if qs < eff_min:
+                logger.debug("Scan error %s: %s", ticker, e)
                 continue
-            stype = c["signal"].get("swing_type")
-            tq = self.settings.backtest_type_quality
-            if stype == "C":
-                c_min = self.settings.min_quality_type_c
-                if regime_name == "BEAR":
-                    c_min = tq.type_c_bear
-                elif regime_name == "CAUTION":
-                    c_min = tq.type_c_caution
-                if qs < c_min:
-                    continue
-            elif stype == "A":
-                a_min = self.settings.min_quality_type_a
-                if regime_name == "BEAR":
-                    a_min = tq.type_a_bear
-                elif regime_name == "CAUTION":
-                    a_min = tq.type_a_caution
-                if qs < a_min:
-                    continue
-            elif stype == "B":
-                b_min = self.settings.min_quality_type_b
-                if regime_name == "BEAR":
-                    b_min = tq.type_b_bear
-                elif regime_name == "CAUTION":
-                    b_min = tq.type_b_caution
-                if qs < b_min:
-                    continue
-            filtered.append(c)
-        filtered = filtered[:eff_top]
+            if sig:
+                sig["market_regime"] = regime_name
+                sig["regime_confidence"] = regime.get("confidence", "")
+                signals.append(sig)
+                windows[ticker] = w
+        self._diag["raw_signals"] += len(signals)
 
-        for item in filtered:
-            if len(self.open_trades) + len(self.pending_signals) >= max_concurrent:
-                break
-            sig = item["signal"]
-            t = item["ticker"]
-            df_window = item["df_window"]
-            self.pending_signals.append(
-                {
-                    "signal": sig,
-                    "signal_date": current_date,
-                    "signal_close": float(df_window["Close"].iloc[-1]),
-                    "df_window": df_window,
-                }
-            )
+        selected = select_scan_signals(signals, eff_min, eff_top)
+        self._diag["selected_signals"] += len(selected)
+        active = len(self.open_trades) + len(self.pending_signals)
+        capacity = auto_entry_capacity(regime_name, self.settings.backtest_loop, active)
+        if capacity is not None and len(selected) > capacity:
+            self._diag["skip_capacity"] += len(selected) - capacity
+            selected = selected[:capacity]
+
+        cooldown = int(self.settings.cooldown_days)
+        busy = {t['ticker'] for t in self.open_trades} | {p['signal']['ticker'] for p in self.pending_signals}
+        for sig in selected:
+            t = sig['ticker']
+            if self._max_concurrent is not None and \
+                    len(self.open_trades) + len(self.pending_signals) >= self._max_concurrent:
+                self._diag["skip_max_concurrent"] += 1
+                continue
+            if t in busy:                                     # storage.check_duplicate
+                self._diag["skip_duplicate"] += 1
+                continue
+            last = self._last_exit.get(t)                     # storage.check_cooldown_active
+            if cooldown > 0 and last is not None and last >= day - pd.Timedelta(days=cooldown):
+                self._diag["skip_cooldown"] += 1
+                continue
+            w = windows[t]
+            self.pending_signals.append({
+                "signal": sig,
+                "signal_date": day,
+                "signal_close": float(w['Close'].iloc[-1]),
+                "atr": float(self.risk.calculate_atr(w)),     # tracker: ATR(14) eklenme anında
+            })
+            busy.add(t)
             self._diag["pending_queued"] += 1
-    
-    def _process_pending_entries(self, current_date: datetime, data_dict: Dict, max_concurrent: int):
-        """Process pending signals: enter at today's Open with gap/confirmation filters."""
-        remaining = []
-        
-        for pending in self.pending_signals:
-            if len(self.open_trades) >= max_concurrent:
-                remaining.append(pending)  # Keep for next day? No — expire after 1 day
-                continue
-            
-            signal = pending['signal']
-            signal_close = pending['signal_close']
-            ticker = signal['ticker']
-            
-            # Skip if already in a trade
-            if ticker in {t['ticker'] for t in self.open_trades}:
-                continue
-            
-            # Get today's data
-            full_df = data_dict.get(ticker)
-            if full_df is None:
-                continue
-            
-            # Require the actual next session, never a stale previous Open.
-            from ..utils.market_calendar import next_trading_day
-            if next_trading_day(pd.Timestamp(pending['signal_date']).date()) != current_date.date():
-                continue
-            today_bars = full_df[full_df['Date'].dt.date == current_date.date()]
-            if len(today_bars) != 1:
-                continue
-            today_open = float(today_bars['Open'].iloc[0])
-            if not np.isfinite(today_open) or today_open <= 0:
-                continue
-            
-            # ── ADIM 1: Gap filter — skip if gap too large ──
-            gap_pct = ((today_open - signal_close) / signal_close) * 100
-            
-            if gap_pct > self.settings.max_gap_up_pct:
-                self._diag["entry_skip_gap_up"] += 1
-                logger.debug(f"{ticker}: Gap UP {gap_pct:+.1f}% > {self.settings.max_gap_up_pct}% — skipped")
-                continue
-            
-            if gap_pct < -self.settings.max_gap_down_pct:
-                self._diag["entry_skip_gap_down"] += 1
-                logger.debug(f"{ticker}: Gap DOWN {gap_pct:+.1f}% < -{self.settings.max_gap_down_pct}% — skipped")
-                continue
-            
-            # ── Type C: open-only confirmation (no same-day close — not knowable at open)
-            be = self.settings.backtest_entry
-            if signal.get("swing_type") == "C":
-                if today_open < signal_close * be.type_c_min_open_vs_signal_close_ratio:
-                    self._diag["entry_skip_tip_c"] += 1
-                    continue
-            
-            # ── All filters passed: Enter at today's Open (+ adverse slippage) ──
-            entry_price = self._entry_fill_price(today_open)
-            
-            # Only completed PRE-entry bars can determine indicators or risk.
-            df_entry = full_df[full_df['Date'].dt.date < current_date.date()].copy()
-            if df_entry.empty:
-                continue
-            
-            # EMA trend: completed bars only (no same-day close lookahead)
-            min_b = be.trend_min_bars
-            df_prior = df_entry
-            if len(df_prior) >= min_b:
-                ema10 = float(
-                    df_prior["Close"]
-                    .ewm(span=be.trend_ema_fast_span, adjust=False)
-                    .mean()
-                    .iloc[-1]
-                )
-                ema20 = float(
-                    df_prior["Close"]
-                    .ewm(span=be.trend_ema_slow_span, adjust=False)
-                    .mean()
-                    .iloc[-1]
-                )
-                if entry_price < ema10 and entry_price < ema20:
-                    self._diag["entry_skip_trend"] += 1
-                    continue
-            
-            sig = signal.copy()
-            sig['entry_price'] = entry_price
-            regime_str = sig.get('market_regime', '')
-            
-            try:
-                self.risk.add_risk_management(
-                    sig, df_entry,
-                    portfolio_value=self.capital,
-                    regime=regime_str,
-                )
-            except Exception as e:
-                self._diag["entry_skip_risk"] += 1
-                logger.debug(f"{ticker}: add_risk_management failed on entry: {e}")
-                continue
-            
-            # Recalculate stop relative to actual entry_price (not signal-day close)
-            sl = float(sig.get('stop_loss') or 0)
-            atr_val = self.risk.calculate_atr(df_entry)
-            swing_type = sig.get('swing_type', 'A')
-            max_stop_pct = self.risk.MAX_STOP_BY_TYPE.get(swing_type, self.risk.MAX_STOP_PERCENT)
-            
-            if atr_val > 0:
-                atr_stop = entry_price - (self.risk.STOP_ATR_MULTIPLIER * atr_val)
-                swing_low = float(df_entry['Low'].tail(5).min()) * 0.995
-                entry_max_stop = entry_price * (1 - max_stop_pct)
-                # WIDER stop: further from entry = larger % risk from ATR vs swing
-                atr_dist = (entry_price - atr_stop) / entry_price if entry_price > 0 else 0.0
-                swing_dist = (entry_price - swing_low) / entry_price if entry_price > 0 else 0.0
-                if atr_dist >= swing_dist:
-                    sl = atr_stop
+
+    # ── 1. açılış: PENDING → OPEN ───────────────────────────────────────────
+
+    def _confirm_pending(self, day: pd.Timestamp) -> None:
+        keep = []
+        for p in self.pending_signals:
+            sig, t = p['signal'], p['signal']['ticker']
+            df = self._data[t]
+            after = df[df['Date'] > p['signal_date']]
+            if after.empty or after['Date'].iloc[0] > day:
+                # Bar yok (halt / veri boşluğu): canlı bekler, 14 takvim günü sonra reddeder.
+                if (day - p['signal_date']).days > MAX_STALE_PENDING_CALENDAR_DAYS:
+                    self._diag["entry_skip_no_bar"] += 1
+                    self._last_exit[t] = day
                 else:
-                    sl = swing_low
-                sl = max(sl, entry_max_stop)
-                sl = min(sl, entry_price * 0.995)  # must be below entry
-                hard_floor = entry_price * (1 - self.settings.max_loss_per_trade_pct)
-                sl = max(sl, hard_floor)
-                sig['stop_loss'] = round(sl, 2)
-            
-            if int(sig.get('position_size') or 0) < 1:
-                self._diag["entry_skip_risk"] += 1
+                    keep.append(p)
                 continue
-            if sl <= 0 or sl >= entry_price:
-                self._diag["entry_skip_risk"] += 1
+            bar = after.iloc[0]
+            open_price = float(bar['Open'])
+            gap = gap_percent(open_price, p['signal_close'])
+            if gap > self.settings.max_gap_up_pct or gap < -self.settings.max_gap_down_pct:
+                self._diag["entry_skip_gap_up" if gap > 0 else "entry_skip_gap_down"] += 1
+                self._last_exit[t] = day                  # canlı REJECTED exit_date = onay günü
                 continue
-            
-            # Recalculate targets based on actual entry_price and new stop
-            quality_score = int(sig.get('original_quality_score') or sig.get('quality_score') or 0)
-            t1, t2 = self.risk.calculate_targets(
-                entry_price, sl, swing_type,
-                atr=atr_val, quality_score=quality_score, regime=regime_str,
+            size = int(sig.get('position_size') or 0)
+            if size < 1:
+                self._diag["skip_position_size"] += 1
+                self._last_exit[t] = day
+                continue
+            stop, t1, t2 = confirm_entry_levels(
+                open_price, p['signal_close'], p['atr'], sig.get('swing_type', 'A'),
+                float(sig['stop_loss']), float(sig['target_1']),
+                float(sig.get('target_2') or sig['target_1']),
             )
-            sig['target_1'] = t1
-            sig['target_2'] = t2
-            
-            # Recalculate position size with new stop
-            shares, _ = self.risk.calculate_position_size(
-                self.capital, entry_price, sl, swing_type
-            )
-            # Gap-aware cap: plan 2×ATR; also vs full stop distance (gap-through-stop can exceed 2×ATR)
-            if atr_val > 0 and entry_price > 0:
-                atr_pct_at_entry = atr_val / entry_price
-                gap_mult = self.settings.backtest_entry.gap_atr_multiplier
-                two_atr = entry_price * atr_pct_at_entry * gap_mult
-                stop_width = max(entry_price - sl, 1e-9)
-                max_gap_loss_per_share = max(two_atr, stop_width)
-                if max_gap_loss_per_share > 1e-9:
-                    gap_cap = int(
-                        (self.capital * self.settings.max_gap_risk_portfolio_pct)
-                        / max_gap_loss_per_share
-                    )
-                    shares = min(shares, max(0, gap_cap))
-            # Hard notional cap (survive total loss / large gap)
-            max_sh_cost = int(
-                (self.capital * self.settings.max_position_cost_portfolio_pct) / entry_price
-            ) if entry_price > 0 else 0
-            shares = min(shares, max(0, max_sh_cost))
-            sig['position_size'] = shares
-            if shares < 1:
-                self._diag["entry_skip_risk"] += 1
-                continue
-            
-            # R:R KAPISI SİLİNDİ — 2026-08-04, canlı motorla PARİTE.
-            # measure_remaining_gates.py: kapı 21 ayda hiç ateşlenmedi
-            # (ΔEV 0.00, TRAIN ve OOS'ta da 0.00). 2.5×ATR stop + T1 %10 +
-            # tipe özgü T2 tavanları zaten R:R(T2) > 2.0 üretiyor.
-            # Canlıda silinip burada bırakılsa backtest ürünü ölçmez olurdu.
+            self._open_trade(sig, day, open_price, size, stop, t1, t2, p['atr'])
+        self.pending_signals = keep
 
-            self._open_trade(sig, current_date, df_entry)
-            self._diag["entries_opened"] += 1
-        
-        # Expire all pending signals (1-day validity)
-        self.pending_signals = []
-    
-    def _open_trade(self, signal: Dict, entry_date: datetime, df: pd.DataFrame):
-        """Open a simulated trade from a signal with proper risk management."""
-        entry_price = signal.get('entry_price', float(df['Close'].iloc[-1]))
-        
-        # ATR-based stop from risk module (no more fixed 8%!)
-        stop_loss = signal.get('stop_loss', 0)
-        if stop_loss <= 0 or stop_loss >= entry_price:
-            # Fallback: calculate manually
-            atr = self.risk.calculate_atr(df)
-            stop_loss = entry_price - (self.risk.STOP_ATR_MULTIPLIER * atr)
-        
-        # ATR-based target from risk module (3R minimum)
-        target = signal.get('target_1', 0)
-        target_2 = float(signal.get("target_2") or 0)
-        if target <= entry_price:
-            risk_amount = entry_price - stop_loss
-            target = entry_price + (risk_amount * 2.0)  # fallback min ~2R if target_1 missing
-        if target_2 <= target:
-            target_2 = target * self.settings.backtest_entry.partial_fallback_target_bump
-        
-        # Validate
-        if entry_price <= 0 or stop_loss <= 0 or stop_loss >= entry_price:
-            return
-        
-        swing_type = signal.get('swing_type', 'A')
-        ps = int(signal.get('position_size') or 0)
-        if ps >= 1:
-            shares = ps
-        else:
-            shares, _ = self.risk.calculate_position_size(
-                self.capital, entry_price, stop_loss, swing_type
-            )
-        if shares < 1:
-            return
-        
-        # Get max hold from signal
-        max_hold = signal.get('hold_days_max', self.risk.MAX_HOLDING_DAYS)
-        if isinstance(signal.get('hold_days'), tuple):
-            max_hold = signal['hold_days'][1]
-        
-        # Calculate stop/target percentages for logging
-        stop_pct = ((entry_price - stop_loss) / entry_price) * 100
-        target_pct = ((target - entry_price) / entry_price) * 100
-        
-        # Calculate ATR for trailing stop
-        atr = self.risk.calculate_atr(df)
-        
-        trade = {
-            'ticker': signal['ticker'],
-            'entry_date': entry_date.strftime('%Y-%m-%d'),
-            'entry_price': round(entry_price, 2),
-            'stop_loss': round(stop_loss, 2),
-            'initial_stop': round(stop_loss, 2),
-            'initial_risk': shares * (round(entry_price, 2) - round(stop_loss, 2)),
-            'trailing_stop': round(stop_loss, 2),
-            'target': round(target, 2),
-            'target_2': round(target_2, 2),
-            'stop_pct': round(stop_pct, 1),
-            'target_pct': round(target_pct, 1),
-            'shares': shares,
-            'initial_shares': shares,
-            'partial_done': False,
-            'partial_pnl_dollar': 0.0,
-            'partial_shares': 0,
-            'partial_exit_price': 0.0,
-            'atr': round(atr, 4),
-            'swing_type': swing_type,
-            'quality_score': signal.get('quality_score', 0),
-            'stop_method': signal.get('stop_method', 'ATR'),
-            'max_hold_days': max_hold,
-            'status': 'OPEN',
-            'exit_price': 0,
-            'exit_date': '',
-            'exit_reason': '',
-            'pnl_pct': 0,
-            'pnl_dollar': 0
-        }
-        
-        self.open_trades.append(trade)
-    
-    def _check_exits(self, current_date: datetime, data_dict: Dict):
-        """Check exits: trailing stop, optional partial at T1 + BE, T2, timeout."""
-        still_open = []
-        
-        for trade in self.open_trades:
-            ticker = trade['ticker']
-            df = data_dict.get(ticker)
-            
-            if df is None:
-                still_open.append(trade)
-                continue
-            
-            mask = df['Date'].dt.date == current_date.date() if hasattr(df['Date'].iloc[0], 'date') else df['Date'] == current_date
-            today_bars = df[mask]
-            
-            if len(today_bars) == 0:
-                still_open.append(trade)
-                continue
-            
-            bar = today_bars.iloc[0]
-            current_close = float(bar['Close'])
-            current_high = float(bar['High'])
-            current_low = float(bar['Low'])
-            atr = trade.get('atr', 0)
-            entry_price = trade['entry_price']
-            shares = trade['shares']
+    def _open_trade(self, sig, day, open_price, size, stop, t1, t2, atr) -> None:
+        """Canlı tracker'ın OPEN kaydını kurar ve sonucunu canlı çıkış motoruyla hesaplar."""
+        entry = round(open_price, 2)
+        live = dict(
+            id=len(self.trades) + len(self.open_trades) + 1, ticker=sig['ticker'], status='OPEN',
+            entry_date=execution.event_time(day.date(), at_open=True), entry_price=entry,
+            position_size=size, stop_loss=stop, initial_stop=stop, trailing_stop=stop,
+            target=t1, target_2=t2, max_hold_days=int(sig.get('hold_days_max') or 7),
+            atr=round(atr, 4) if atr else 0, initial_risk=round((entry - stop) * size, 8),
+            execution_state=None, partial_exit_price=None, policy_effective_at=None,
+        )
+        df = self._data[sig['ticker']]
+        hist = df[(df['Date'] >= day) & (df['Date'] <= self._end)][['Date', 'Open', 'High', 'Low', 'Close']]
+        hist = hist.head(live['max_hold_days'] + 5).reset_index(drop=True)
+        updates, (status, exit_price, exit_date, reason, _stop) = execution.evaluate(
+            live, hist, self.settings.partial_at_t1_fraction)
+        if str(reason).startswith('REVIEW_REQUIRED'):
+            # Canlıda pozisyon insan müdahalesine kadar donar; burada test sonuna kadar açık kalır.
+            self._diag["review_required"] = self._diag.get("review_required", 0) + 1
+        state = json.loads(updates['execution_state']) if updates.get('execution_state') else {}
+        exit_day = None
+        if status not in ('OPEN',) and exit_date:
+            exit_day = pd.Timestamp(pd.Timestamp(exit_date).tz_convert("America/New_York").date())
+        partial_day = None
+        if state.get('partial') and state.get('partial_date'):
+            partial_day = pd.Timestamp(pd.Timestamp(state['partial_date']).tz_convert("America/New_York").date())
+        self.open_trades.append(dict(
+            ticker=sig['ticker'], swing_type=sig.get('swing_type'), pathway=sig.get('trigger_pathway'),
+            quality_score=sig.get('quality_score', 0), rank_score=sig.get('rank_score', 0),
+            entry_day=day, entry_price=entry, size=size, stop=stop, target=t1, target_2=t2,
+            max_hold_days=live['max_hold_days'], initial_risk=live['initial_risk'],
+            status=status, reason=reason, exit_day=exit_day, exit_price=float(exit_price or 0),
+            bars=int(state.get('bars') or 0), sold=int(state.get('sold') or 0) if state.get('partial') else 0,
+            partial_price=float(state.get('partial_price') or 0), partial_day=partial_day,
+            partial_realized=False,
+        ))
+        self._diag["entries_opened"] += 1
 
-            # ================================================================
-            # Shared exit constants, NOT proof of end-to-end production parity.
-            # Entry/risk rules and historical data assumptions still differ.
-            # ================================================================
-            # Buradaki mantık ÖNCE canlıdan ayrışmıştı ve /backtest sayfası
-            # canlıda KULLANILMAYAN bir çıkış stratejisinin sonuçlarını
-            # gösteriyordu. Üç ayrı kırık vardı:
-            #
-            #   1) TRAILING: canlı chandelier (giriş sonrası GÖRÜLEN EN YÜKSEK
-            #      tepe − 3 ATR, +1.5 ATR kârdan sonra devreye girer) kullanıyor;
-            #      backtest 8 parametreli kademeli merdiven kullanıyordu ve
-            #      "tepe" olarak yalnız O GÜNÜN yükseğini alıyordu (giriş sonrası
-            #      kümülatif tepe değil) — her barda sıfırlanan farklı bir kural.
-            #   2) SIRALAMA: canlı stop'u trail GÜNCELLEMESİNDEN ÖNCE kontrol
-            #      ediyor (tracker.py'de bu bir HATA olarak bulunup düzeltilmiş:
-            #      "check stop BEFORE updating trail (was inverted)"). Backtest
-            #      ters sırayı koruyordu → yeni zirve yapıp düşen barlarda
-            #      yükseltilmiş trail'den çıkıyordu, yani sonuçları İYİMSER.
-            #   3) GÜN SAYIMI: canlı işlem günü (bar) sayıyor, backtest TAKVİM
-            #      günü sayıyordu → 20 takvim günü ≈ 14 işlem günü, timeout
-            #      canlıdan daha erken tetikliyordu.
-            #
-            # Ayrıca canlıda OLMAYAN bir "Time Stop" (5 gün + %5 zarar) vardı;
-            # parite için kaldırıldı. Kaldırılan 15 ayar GATE_AUDIT.md'de.
-            TRAIL_ATR_MULT = 3.0
-            TRAIL_ACTIVATE_ATR = 1.5
+    # ── 2. çıkışlar ─────────────────────────────────────────────────────────
 
-            trade['bars_held'] = int(trade.get('bars_held', 0)) + 1
-            days_held = trade['bars_held']          # işlem günü (canlı ile aynı)
-            peak_high = max(float(trade.get('peak_high', entry_price)), current_high)
-            trade['peak_high'] = peak_high
+    def _slip(self) -> float:
+        return self.settings.slippage_bps_per_side / 10000.0
 
-            # ── 1. STOP kontrolü (trail güncellemesinden ÖNCE) ──
-            active_stop = trade['trailing_stop']
+    def _entry_fill_price(self, quoted: float) -> float:
+        return round(quoted * (1.0 + self._slip()), 2)
 
-            if current_low <= active_stop:
-                today_open = float(bar['Open'])
-                if today_open <= active_stop:
-                    raw_exit = today_open
-                else:
-                    raw_exit = active_stop
-                is_trail = active_stop > trade['initial_stop']
-                trade['exit_price'] = self._exit_fill_price(raw_exit)
-                trade['exit_date'] = current_date.strftime('%Y-%m-%d')
-                if trade.get('partial_done'):
-                    trade['exit_reason'] = 'Trailing Stop (kalan)' if is_trail else 'Stop Loss (kalan)'
-                else:
-                    trade['exit_reason'] = 'Trailing Stop' if is_trail else 'Stop Loss'
-                trade['status'] = 'TRAILED' if is_trail else 'STOPPED'
-                trade['days_held'] = days_held
-                self._close_trade(trade)
-                self.cooldowns[ticker] = current_date + timedelta(days=self.settings.cooldown_days)
-                # Track losses per ticker — ban after too many
-                if not is_trail:
-                    self.ticker_losses[ticker] = self.ticker_losses.get(ticker, 0) + 1
-                    if self.ticker_losses[ticker] >= self.settings.ticker_max_losses:
-                        self.banned_tickers.add(ticker)
-                continue
-            
-            if not trade.get('partial_done') and current_high >= trade['target']:
-                if shares < self.settings.min_shares_for_partial:
-                    trade['exit_price'] = self._exit_fill_price(float(trade['target']))
-                    trade['exit_date'] = current_date.strftime('%Y-%m-%d')
-                    trade['exit_reason'] = 'Hedef T1 (tam)'
-                    trade['status'] = 'TARGET'
-                    trade['days_held'] = days_held
-                    self._close_trade(trade)
-                    continue
-                
-                ps = max(1, int(shares * self.settings.partial_at_t1_fraction))
-                if ps >= shares:
-                    ps = max(1, shares - 1)
-                px = self._exit_fill_price(float(trade['target']))
-                leg_pnl = (px - entry_price) * ps
-                self.capital += leg_pnl
-                trade['partial_pnl_dollar'] = round(leg_pnl, 2)
-                trade['partial_shares'] = ps
-                trade['partial_exit_price'] = px
-                trade['shares'] = shares - ps
-                trade['partial_done'] = True
-                trade['trailing_stop'] = max(trade['trailing_stop'], entry_price)
-                # Original entry risk remains immutable after T1.
-                trade['target'] = round(float(trade.get('target_2') or trade['target'] * 1.15), 2)
-                shares = trade['shares']
-                # OHLC cannot order Low vs T1. Use the same conservative
-                # newly-active BE-first convention as paper execution.
-                if current_low <= trade['trailing_stop']:
-                    trade['exit_price'] = self._exit_fill_price(trade['trailing_stop'])
-                    trade['exit_date'] = current_date.strftime('%Y-%m-%d')
-                    trade['exit_reason'] = 'Ambiguous T1/BE bar: conservative BE-first'
-                    trade['status'] = 'TRAILED'
-                    trade['days_held'] = days_held
-                    self._close_trade(trade)
-                    continue
-            
-            if trade.get('partial_done') and current_high >= trade['target']:
-                trade['exit_price'] = self._exit_fill_price(float(trade['target']))
-                trade['exit_date'] = current_date.strftime('%Y-%m-%d')
-                trade['exit_reason'] = 'Hedef T2 (kısmi sonrası)'
-                trade['status'] = 'TARGET_T2'
-                trade['days_held'] = days_held
-                self._close_trade(trade)
-                continue
+    def _exit_fill_price(self, quoted: float) -> float:
+        return round(quoted * (1.0 - self._slip()), 2) if quoted > 0 else quoted
 
-            # ── 4. CHANDELIER TRAIL GÜNCELLEMESİ (stop/hedef kontrollerinden SONRA) ──
-            # Kümülatif tepe − 3 ATR, yalnız yukarı kilitlenir (monotonik).
-            # Başlangıç 2.5 ATR stop'u, trail onu geçene kadar aşağıyı korur.
-            if atr > 0 and (peak_high - entry_price) / atr >= TRAIL_ACTIVATE_ATR:
-                new_trail = peak_high - TRAIL_ATR_MULT * atr
-                if new_trail > trade['trailing_stop']:
-                    trade['trailing_stop'] = round(new_trail, 2)
-
-            # ── 5. TIMEOUT (işlem günü) ──
-            if days_held >= trade['max_hold_days']:
-                exit_px = current_close
-                if not trade.get('partial_done') and current_high >= trade['target']:
-                    exit_px = float(trade['target'])
-                trade['exit_price'] = self._exit_fill_price(exit_px)
-                trade['exit_date'] = current_date.strftime('%Y-%m-%d')
-                trade['exit_reason'] = f'Timeout ({days_held}d)'
-                trade['status'] = 'TIMEOUT'
-                trade['days_held'] = days_held
-                self._close_trade(trade)
-                # Timeout on a losing trade = count as a loss for that ticker
-                if exit_px < entry_price:
-                    self.ticker_losses[ticker] = self.ticker_losses.get(ticker, 0) + 1
-                    if self.ticker_losses[ticker] >= self.settings.ticker_max_losses:
-                        self.banned_tickers.add(ticker)
-                continue
-            
-            still_open.append(trade)
-        
-        self.open_trades = still_open
-    
-    def _close_trade(self, trade: Dict):
-        """Close remaining shares; sum partial leg if any. Updates capital for remainder only."""
-        entry = trade['entry_price']
-        last_exit = float(trade['exit_price'])
-        shares = trade.get('shares', 100)
-        init_sh = int(trade.get('initial_shares') or shares)
-        partial_pnl = float(trade.get('partial_pnl_dollar') or 0)
-        ps = int(trade.get('partial_shares') or 0)
-        ppx = float(trade.get('partial_exit_price') or 0)
-        
-        rem_leg = (last_exit - entry) * shares
-        if ps > 0:
-            self.capital += rem_leg
-            total = partial_pnl + rem_leg
-            trade['pnl_dollar'] = round(total, 2)
-            trade['exit_price'] = round((ppx * ps + last_exit * shares) / init_sh, 2)
-            trade['pnl_pct'] = round((total / (entry * init_sh)) * 100, 2) if entry * init_sh > 0 else 0
-        else:
-            self.capital += rem_leg
-            trade['pnl_dollar'] = round(rem_leg, 2)
-            trade['pnl_pct'] = round(((last_exit / entry) - 1) * 100, 2) if entry > 0 else 0
-        
-        trade['shares'] = init_sh
-        initial_risk = trade.get('initial_risk')
-        trade['r_multiple'] = trade['pnl_dollar'] / initial_risk if initial_risk and initial_risk > 0 else None
-        self.trades.append(trade)
-    
-    def _force_close_all(self, end_date: datetime, data_dict: Dict):
-        """End-of-test liquidation; no future bar or invented stop-price floor."""
-        for trade in self.open_trades:
-            ticker = trade['ticker']
-            df = data_dict.get(ticker)
-            if df is not None:
-                df = df[df['Date'] <= end_date]
-            
-            if df is not None and len(df) > 0:
-                last_close = float(df['Close'].iloc[-1])
-                trade['exit_price'] = self._exit_fill_price(last_close)
-                trade['exit_reason'] = 'Backtest End (last available completed close)'
+    def _settle_exits(self, day: pd.Timestamp) -> None:
+        still = []
+        for tr in self.open_trades:
+            if tr['sold'] and not tr['partial_realized'] and tr['partial_day'] is not None and tr['partial_day'] <= day:
+                self.capital += tr['sold'] * (self._exit_fill_price(tr['partial_price'])
+                                              - self._entry_fill_price(tr['entry_price']))
+                tr['partial_realized'] = True
+            if tr['exit_day'] is not None and tr['exit_day'] <= day:
+                self._close_trade(tr, tr['exit_price'], tr['exit_day'], tr['status'], tr['reason'], tr['bars'])
             else:
-                trade['exit_price'] = self._exit_fill_price(trade['entry_price'])
-                trade['exit_reason'] = 'Backtest End'
-            
-            entry_date = datetime.strptime(trade['entry_date'], '%Y-%m-%d')
-            trade['exit_date'] = end_date.strftime('%Y-%m-%d')
-            trade['status'] = 'FORCED'
-            trade['days_held'] = (end_date - entry_date).days
-            self._close_trade(trade)
-        
+                still.append(tr)
+        self.open_trades = still
+
+    def _close_trade(self, tr: Dict, raw_exit: float, exit_day: pd.Timestamp, status: str,
+                     reason: str, bars: int) -> None:
+        """Net P/L (her bacakta slippage). Kısmi bacak T1 gününde zaten sermayeye eklendi."""
+        entry_fill = self._entry_fill_price(tr['entry_price'])
+        size, sold = tr['size'], tr['sold']
+        rest = size - sold
+        exit_fill = self._exit_fill_price(raw_exit)
+        partial_pnl = sold * (self._exit_fill_price(tr['partial_price']) - entry_fill) if sold else 0.0
+        rest_pnl = rest * (exit_fill - entry_fill)
+        if sold and not tr['partial_realized']:
+            self.capital += partial_pnl
+        self.capital += rest_pnl
+        total = partial_pnl + rest_pnl
+        blended = ((self._exit_fill_price(tr['partial_price']) * sold + exit_fill * rest) / size) if size else exit_fill
+        self._last_exit[tr['ticker']] = exit_day
+        self.trades.append({
+            'ticker': tr['ticker'], 'swing_type': tr['swing_type'], 'pathway': tr['pathway'],
+            'quality_score': tr['quality_score'], 'rank_score': tr['rank_score'],
+            'entry_date': tr['entry_day'].strftime('%Y-%m-%d'), 'entry_price': tr['entry_price'],
+            'exit_date': exit_day.strftime('%Y-%m-%d'), 'exit_price': round(blended, 2),
+            'stop_loss': tr['stop'], 'target': tr['target'], 'target_2': tr['target_2'],
+            'shares': size, 'initial_shares': size, 'partial_shares': sold,
+            'max_hold_days': tr['max_hold_days'], 'days_held': bars,
+            'status': status, 'exit_reason': reason,
+            'pnl_dollar': round(total, 2),
+            'pnl_pct': round(total / (entry_fill * size) * 100, 2) if size and entry_fill else 0.0,
+            'r_multiple': round(total / tr['initial_risk'], 3) if tr['initial_risk'] > 0 else None,
+        })
+
+    def _force_close_all(self, end_dt: pd.Timestamp) -> None:
+        """Test sonu: açık kalanlar son tamamlanmış kapanıştan kapatılır (FORCED)."""
+        for tr in self.open_trades:
+            df = self._data[tr['ticker']]
+            df = df[df['Date'] <= end_dt]
+            last = float(df['Close'].iloc[-1]) if len(df) else tr['entry_price']
+            bars = int((df['Date'] >= tr['entry_day']).sum()) if len(df) else 0
+            if tr['partial_day'] is None or tr['partial_day'] > end_dt:
+                tr['sold'] = 0                         # kısmi henüz gerçekleşmedi
+            self._close_trade(tr, last, end_dt, 'FORCED',
+                              'Backtest End (last available completed close)', bars)
         self.open_trades = []
-    
-    def _calculate_portfolio_value(self, current_date: datetime, data_dict: Dict) -> float:
-        """Calculate total portfolio value including open positions."""
+
+    def _portfolio_value(self, day: pd.Timestamp) -> float:
+        """Realize sermaye + açık pozisyonların gün sonu değerlemesi."""
         value = self.capital
-        
-        for trade in self.open_trades:
-            ticker = trade['ticker']
-            df = data_dict.get(ticker)
-            if df is None:
+        for tr in self.open_trades:
+            df = self._data[tr['ticker']]
+            sub = df[df['Date'] <= day]
+            if not len(sub):
                 continue
-            
-            mask = df['Date'] <= current_date
-            subset = df[mask]
-            if len(subset) > 0:
-                current_price = float(subset['Close'].iloc[-1])
-                shares = trade.get('shares', 100)
-                unrealized = (current_price - trade['entry_price']) * shares
-                value += unrealized
-        
+            rest = tr['size'] - (tr['sold'] if tr['partial_realized'] else 0)
+            value += rest * (float(sub['Close'].iloc[-1]) - self._entry_fill_price(tr['entry_price']))
         return value
-    
+
+    # ── metrikler ───────────────────────────────────────────────────────────
+
     def _calculate_metrics(self) -> Dict:
         """Calculate performance metrics from completed trades."""
         if not self.trades:
             return self._empty_metrics()
-        
+
         wins = [t for t in self.trades if t['pnl_pct'] > 0]
         losses = [t for t in self.trades if t['pnl_pct'] <= 0]
-        
         total = len(self.trades)
-        win_count = len(wins)
-        loss_count = len(losses)
-        
-        win_rate = win_count / total if total > 0 else 0
-        
+        win_rate = len(wins) / total if total else 0
         avg_win = np.mean([t['pnl_pct'] for t in wins]) if wins else 0
         avg_loss = np.mean([t['pnl_pct'] for t in losses]) if losses else 0
-        
         avg_win_dollar = np.mean([t['pnl_dollar'] for t in wins]) if wins else 0
         avg_loss_dollar = np.mean([t['pnl_dollar'] for t in losses]) if losses else 0
-        
         total_win_dollar = sum(t['pnl_dollar'] for t in wins)
         total_loss_dollar = abs(sum(t['pnl_dollar'] for t in losses))
-        
         profit_factor = total_win_dollar / total_loss_dollar if total_loss_dollar > 0 else float('inf')
-        
         total_pnl_dollar = sum(t['pnl_dollar'] for t in self.trades)
         total_return = (self.capital - self.initial_capital) / self.initial_capital
-        
-        # Max drawdown from equity curve
+
         max_dd = 0
         if self.equity_curve:
             peak = self.equity_curve[0]['portfolio_value']
             for point in self.equity_curve:
                 val = point['portfolio_value']
-                if val > peak:
-                    peak = val
-                dd = (peak - val) / peak * 100
-                if dd > max_dd:
-                    max_dd = dd
-        
-        # By swing type
-        type_stats = {}
+                peak = max(peak, val)
+                if peak > 0:
+                    max_dd = max(max_dd, (peak - val) / peak * 100)
+
+        type_stats: Dict[str, Dict] = {}
         for t in self.trades:
-            st = t.get('swing_type', 'B')
-            if st not in type_stats:
-                type_stats[st] = {'wins': 0, 'losses': 0, 'total_pnl': 0}
-            if t['pnl_pct'] > 0:
-                type_stats[st]['wins'] += 1
-            else:
-                type_stats[st]['losses'] += 1
-            type_stats[st]['total_pnl'] += t['pnl_pct']
-        
-        # By exit reason
-        exit_stats = {}
+            st = type_stats.setdefault(t.get('swing_type') or 'B', {'wins': 0, 'losses': 0, 'total_pnl': 0})
+            st['wins' if t['pnl_pct'] > 0 else 'losses'] += 1
+            st['total_pnl'] += t['pnl_pct']
+
+        exit_stats: Dict[str, Dict] = {}
         for t in self.trades:
-            reason = t.get('status', 'UNKNOWN')
-            if reason not in exit_stats:
-                exit_stats[reason] = {'count': 0, 'avg_pnl': []}
-            exit_stats[reason]['count'] += 1
-            exit_stats[reason]['avg_pnl'].append(t['pnl_pct'])
-        
-        for reason in exit_stats:
-            pnls = exit_stats[reason]['avg_pnl']
-            exit_stats[reason]['avg_pnl'] = round(np.mean(pnls), 2) if pnls else 0
-        
-        # Avg hold days
-        avg_hold = np.mean([t.get('days_held', 0) for t in self.trades])
-        
+            es = exit_stats.setdefault(t.get('status', 'UNKNOWN'), {'count': 0, 'avg_pnl': []})
+            es['count'] += 1
+            es['avg_pnl'].append(t['pnl_pct'])
+        for es in exit_stats.values():
+            es['avg_pnl'] = round(float(np.mean(es['avg_pnl'])), 2) if es['avg_pnl'] else 0
+
         return {
             'total_trades': total,
             'win_rate': round(win_rate, 4),
-            'winning_trades': win_count,
-            'losing_trades': loss_count,
-            'avg_win_pct': round(avg_win, 2),
-            'avg_loss_pct': round(avg_loss, 2),
-            'avg_win_dollar': round(avg_win_dollar, 2),
-            'avg_loss_dollar': round(avg_loss_dollar, 2),
+            'winning_trades': len(wins),
+            'losing_trades': len(losses),
+            'avg_win_pct': round(float(avg_win), 2),
+            'avg_loss_pct': round(float(avg_loss), 2),
+            'avg_win_dollar': round(float(avg_win_dollar), 2),
+            'avg_loss_dollar': round(float(avg_loss_dollar), 2),
             'profit_factor': round(profit_factor, 2),
             'total_pnl_dollar': round(total_pnl_dollar, 2),
             'total_return': round(total_return, 4),
             'max_drawdown': round(max_dd, 2),
-            'avg_hold_days': round(avg_hold, 1),
+            'avg_hold_days': round(float(np.mean([t.get('days_held', 0) for t in self.trades])), 1),
             'initial_capital': self.initial_capital,
             'final_capital': round(self.capital, 2),
             'type_stats': type_stats,
-            'exit_stats': exit_stats
+            'exit_stats': exit_stats,
         }
-    
+
     def _empty_results(self):
         return {
             'trades': [],
@@ -1031,16 +580,10 @@ class SmallCapBacktester:
             'metrics': self._empty_metrics(),
             'data_stocks': 0,
             'period': '',
-            'diagnostics': dict(getattr(self, '_diag', {}) or {}),
-            'params': {
-                'min_quality': getattr(self, 'min_quality', 65),
-                'top_n': getattr(self, 'top_n', 10),
-                'max_concurrent': getattr(self, '_max_concurrent', 3),
-                'slippage_bps_per_side': self.settings.slippage_bps_per_side,
-                'partial_at_t1_fraction': self.settings.partial_at_t1_fraction,
-            },
+            'diagnostics': dict(self._diag),
+            'params': self._params(),
         }
-    
+
     def _empty_metrics(self):
         return {
             'total_trades': 0, 'win_rate': 0, 'winning_trades': 0,

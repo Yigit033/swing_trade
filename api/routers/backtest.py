@@ -19,9 +19,12 @@ logger = logging.getLogger(__name__)
 class BacktestRequest(BaseModel):
     period_days: int = Field(default=90, ge=7, le=730)  # max ~2 years
     initial_capital: float = Field(default=10000, ge=100)
-    max_concurrent: int = Field(default=3, ge=1, le=8)
-    min_quality: int = Field(default=60, ge=30, le=100)
-    top_n: int = Field(default=10, ge=1, le=50)
+    # None = canlı ürünle birebir: eşik/top_n canlı auto-scan ayarından, eşzamanlı
+    # pozisyon sınırı yok (canlıda yalnız rejim kapasitesi var). Değer verilirse
+    # canlıda OLMAYAN bir simülasyon kısıtı olarak uygulanır.
+    max_concurrent: Optional[int] = Field(default=None, ge=1, le=50)
+    min_quality: Optional[int] = Field(default=None, ge=30, le=100)
+    top_n: Optional[int] = Field(default=None, ge=1, le=50)
     tickers: Optional[List[str]] = None   # None = auto Finviz; [] invalid — rejected below
 
 
@@ -45,6 +48,7 @@ def run_smallcap_backtest(body: BacktestRequest):
 
         # Resolve ticker list: explicit [] must not fall through to Finviz
         survivorship_warning = None
+        stock_meta = None
         if body.tickers is not None:
             tickers = [t.strip().upper() for t in body.tickers if t.strip()]
             if not tickers:
@@ -55,6 +59,9 @@ def run_smallcap_backtest(body: BacktestRequest):
             tickers = engine.get_small_cap_universe()
             if not tickers:
                 return {"error": "No tickers found from Finviz universe", "results": None}
+            # Canlı tarama market cap'i Finviz satırından okur — backtest de aynı kaynağı
+            # kullanır (geçmiş günlere fiyat oranıyla ölçeklenir).
+            stock_meta = {t: engine.universe_provider.get_ticker_metadata(t) or {} for t in tickers}
             # 2026-07-27: Finviz evreni BUGÜNKÜ listeyi geçmişe uygular →
             # survivorship bias (bugün kazanan hisselerle geçmişi test etmek
             # sonucu AŞIRI İYİMSER gösterir). Kullanıcı bunu bilmeli.
@@ -76,6 +83,7 @@ def run_smallcap_backtest(body: BacktestRequest):
             max_concurrent=body.max_concurrent,
             min_quality=body.min_quality,
             top_n=body.top_n,
+            stock_meta=stock_meta,
         )
 
         n_trades = len(results.get("trades") or [])
@@ -90,8 +98,8 @@ def run_smallcap_backtest(body: BacktestRequest):
             "end_date":       end_date.strftime("%Y-%m-%d"),
             "tickers_used":   tickers,
             "initial_capital": body.initial_capital,
-            "min_quality":    body.min_quality,
-            "top_n":          body.top_n,
+            "min_quality":    (results.get("params") or {}).get("min_quality"),
+            "top_n":          (results.get("params") or {}).get("top_n"),
             "data_stocks":    results.get("data_stocks", 0),
             "params":         results.get("params", {}),
             "diagnostics":    results.get("diagnostics", {}),

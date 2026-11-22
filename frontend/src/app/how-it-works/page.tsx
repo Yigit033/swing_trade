@@ -221,7 +221,7 @@ export default function HowItWorksPage() {
                             <Link href="/pending" style={{ color: "var(--accent)", fontWeight: 600 }}>Pending</Link> — Giriş onayı bekleyen işlemler (scanner akışına bağlı alt süreç).
                         </li>
                         <li>
-                            <Link href="/backtest" style={{ color: "var(--accent)", fontWeight: 600 }}>Backtest</Link> — Aynı small-cap motorunu geçmişte yürütür; canlı veri / anlatı farkları olabilir.
+                            <Link href="/backtest" style={{ color: "var(--accent)", fontWeight: 600 }}>Backtest</Link> — Canlı ürünün kendi fonksiyonlarını (tarama, seçim, t+1 açılış onayı, çıkış) geçmişte günü gününe yürütür. Fark: bugünkü evren geçmişe uygulanır (iyimser) ve maliyet olarak slippage düşülür.
                         </li>
                     </ul>
                 </div>

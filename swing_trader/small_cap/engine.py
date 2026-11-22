@@ -342,7 +342,7 @@ class SmallCapEngine:
                     stock_info = {
                         "ticker": ticker,
                         "marketCap": int(self.filters.MIN_MARKET_CAP * 1.2),
-                        "floatShares": 45_000_000,
+                        "floatShares": 0,   # bilinmiyor — canlıyla aynı (sahte 45M kaldırıldı)
                         "shortName": ticker,
                         "sector": "Unknown",
                     }

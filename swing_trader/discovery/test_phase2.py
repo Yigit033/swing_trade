@@ -253,6 +253,10 @@ def test_engine_score_type_rank_and_eligibility_parity(seed):
     from swing_trader.small_cap.scoring import SmallCapScoring
     from dateutil.relativedelta import relativedelta
     settings = SmallCapSettings()
+    # 2026-11-22: float skora girmez (Lab v3 Ek B). Bu sentetik veri eşiği yalnız 1M
+    # float'ın +18.75 puanıyla geçiyordu; parite (skor/tip/rank) kontrolü eşikten
+    # bağımsız olsun diye BULL tabanı bu test için düşürülür — iki yol da aynı ayarı görür.
+    settings.regime_thresholds.bull_min_quality = 60
     df = frame(seed=5 if seed == "vce" else seed)
     df.loc[df.index[-1], "Volume"] = 3e6
     if seed == "vce":

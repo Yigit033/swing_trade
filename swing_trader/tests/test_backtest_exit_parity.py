@@ -37,51 +37,28 @@ TRACKER_SRC = inspect.getsource(
 )
 
 
-# ── 1. Kaynak seviyesinde: aynı formül, aynı sabitler ─────────────────────
+# ── 1. Kaynak seviyesinde: backtest kendi çıkış kopyasını TUTMAZ ───────────
+# 2026-11-22: kopya (aynı sabitler + kaynak testi) bile küçük farklar taşıyordu
+# (T2≈T1'de tam çıkış, küçük pozisyonda kısmi adet). Backtest artık canlının
+# execution.evaluate fonksiyonunu doğrudan çağırıyor — parite yapısal.
 
-@pytest.mark.parametrize("const,value", [("TRAIL_ATR_MULT", "3.0"),
-                                         ("TRAIL_ACTIVATE_ATR", "1.5")])
-def test_both_engines_use_same_trail_constants(const, value):
-    for name, src in (("backtest", BT_SRC), ("tracker", TRACKER_SRC)):
-        assert re.search(rf"{const}\s*=\s*{re.escape(value)}", src), (
-            f"{name}'da {const} = {value} bulunamadı — iki motor ayrışmış"
-        )
-
-
-def test_backtest_uses_cumulative_peak_not_todays_high():
-    """
-    Chandelier'in tanımı "giriş sonrası görülen en yüksek tepe". Yalnız o günün
-    yükseğini kullanmak farklı (ve daha gevşek) bir kuraldır.
-    """
-    assert "peak_high" in BT_SRC
-    assert re.search(r"peak_high['\"]?\]?\s*,\s*current_high|max\(\s*float\(trade\.get\(\s*['\"]peak_high",
-                     BT_SRC), "kümülatif tepe takibi yok"
+def test_backtest_delegates_exits_to_live_execution():
+    assert "execution.evaluate(" in BT_SRC
+    for own in ("TRAIL_ATR_MULT", "TRAIL_ACTIVATE_ATR", "peak_high", "active_stop"):
+        assert own not in BT_SRC, f"backtest'te kendi çıkış mantığı ({own}) geri gelmiş"
 
 
-def test_backtest_checks_stop_before_updating_trail():
-    """Stop kontrolü, trail güncellemesinden ÖNCE gelmeli (aynı-bar sıralaması)."""
-    i_stop = BT_SRC.find("if current_low <= active_stop:")
-    i_trail = BT_SRC.find("TRAIL_ATR_MULT * atr")
-    assert i_stop > 0 and i_trail > 0
-    assert i_stop < i_trail, (
-        "trail, stop kontrolünden ÖNCE güncelleniyor — tracker'da düzeltilen "
-        "hatanın aynısı; sonuçlar iyimser çıkar"
-    )
-
-
-def test_backtest_counts_trading_days_not_calendar_days():
-    """Timeout işlem günü saymalı; takvim günü 20 ≈ 14 işlem günüdür."""
-    assert "bars_held" in BT_SRC
-    assert not re.search(r"days_held\s*=\s*\(current_date\s*-\s*entry_date\)\.days", BT_SRC), (
-        "takvim günü sayımı geri gelmiş"
-    )
+def test_backtest_uses_live_entry_and_selection_functions():
+    for fn in ("confirm_entry_levels(", "gap_percent(", "select_scan_signals(",
+               "auto_entry_capacity(", "regime=regime_name"):
+        assert fn in BT_SRC, f"backtest canlı fonksiyonu kullanmıyor: {fn}"
+    for gone in ("max_entry_rsi", "backtest_type_quality", "min_quality_type_", "backtest_entry",
+                 "banned_tickers", "ticker_max_losses", "drawdown_pause", "max_loss_per_trade_pct"):
+        assert gone not in BT_SRC, f"canlıda olmayan kural geri gelmiş: {gone}"
 
 
 def test_removed_tiered_trail_settings_stay_removed():
     """15 parametreli eski merdiven geri gelmemeli."""
-    for f in ("trail_peak_atr_25", "trail_peak_frac_20", "close_trail_atr_15",
-              "light_protect_below_entry_atr", "time_stop_min_days"):
-        assert f not in BT_SRC, f"{f} geri gelmiş (canlıda karşılığı yok)"
     from swing_trader.small_cap.settings_config import SmallCapSettings
     assert "backtest_exit_trailing" not in SmallCapSettings.model_fields
 

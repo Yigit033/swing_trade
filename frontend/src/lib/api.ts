@@ -469,9 +469,12 @@ export interface BacktestResult {
     params?: {
         min_quality: number;
         top_n: number;
-        max_concurrent: number;
+        /** null = canlı ürün gibi sınırsız (yalnız rejim kapasitesi) */
+        max_concurrent: number | null;
         slippage_bps_per_side?: number;
         partial_at_t1_fraction?: number;
+        cooldown_days?: number;
+        live_parity?: boolean;
     };
     /** Walk-forward funnel: signals, pending, entry skips */
     diagnostics?: Record<string, number>;
@@ -485,7 +488,8 @@ export interface BacktestResult {
 export const runBacktest = (params: {
     period_days: number;
     initial_capital: number;
-    max_concurrent: number;
+    /** Verilmezse canlı ürünle birebir (sınırsız + canlı eşik/top N) */
+    max_concurrent?: number;
     min_quality?: number;
     top_n?: number;
     tickers?: string[];

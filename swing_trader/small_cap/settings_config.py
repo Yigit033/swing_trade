@@ -16,9 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .settings_models_extra import (
     AutoScanSettings,
-    BacktestEntrySettings,
     BacktestLoopSettings,
-    BacktestTypeQualityOverride,
     RiskTargetRegimeSettings,
     RvolThrustGuardSettings,
     ScanStockGatesSettings,
@@ -174,18 +172,16 @@ class SmallCapSettings(BaseModel):
     # partial default 0.5 → 0.33: ölçüldü (measure_t1_fraction.py, monotonik,
     # TRAIN+OOS aynı yön; %50 → %33 = +0.42 puan EV).
     partial_at_t1_fraction: float = Field(default=0.33, ge=0.05, le=1.0)
-    min_quality_type_c: int = Field(default=70, ge=30, le=100)
-    min_quality_type_a: int = Field(default=70, ge=30, le=100)
-    min_quality_type_b: int = Field(default=70, ge=30, le=100)
+    # 2026-11-22 SİLİNDİ (Lab v3): min_quality_type_a/b/c, max_loss_per_trade_pct,
+    # max_gap_risk_portfolio_pct, max_position_cost_portfolio_pct, ticker_max_losses,
+    # min_shares_for_partial, backtest_type_quality, backtest_entry ve backtest_loop
+    # drawdown alanları YALNIZ eski backtest motorunda yaşıyordu — canlıda karşılığı
+    # yoktu ve backtest'i canlıdan ayırıyordu. Backtest artık canlı fonksiyonlarını
+    # çağırıyor (smallcap_backtest.py).
     max_gap_up_pct: float = Field(default=5.0, ge=0.0, le=30.0)
     max_gap_down_pct: float = Field(default=7.0, ge=0.0, le=30.0)
-    max_loss_per_trade_pct: float = Field(default=0.07, ge=0.02, le=0.25)
-    max_gap_risk_portfolio_pct: float = Field(default=0.02, ge=0.005, le=0.1)
-    max_position_cost_portfolio_pct: float = Field(default=0.25, ge=0.05, le=0.5)
     cooldown_days: int = Field(default=5, ge=0, le=30)
-    ticker_max_losses: int = Field(default=2, ge=1, le=10)
     slippage_bps_per_side: int = Field(default=5, ge=0, le=100)
-    min_shares_for_partial: int = Field(default=2, ge=1, le=100)
 
     # --- Regime-driven scan floors (scanner / backtest) ---
     regime_thresholds: RegimeThresholds = Field(default_factory=RegimeThresholds)
@@ -201,8 +197,6 @@ class SmallCapSettings(BaseModel):
     rvol_thrust_guards: RvolThrustGuardSettings = Field(default_factory=RvolThrustGuardSettings)
     scoring_tuning: ScoringTuningSettings = Field(default_factory=ScoringTuningSettings)
     backtest_loop: BacktestLoopSettings = Field(default_factory=BacktestLoopSettings)
-    backtest_type_quality: BacktestTypeQualityOverride = Field(default_factory=BacktestTypeQualityOverride)
-    backtest_entry: BacktestEntrySettings = Field(default_factory=BacktestEntrySettings)
 
     @field_validator("max_stop_by_type", "type_atr_multipliers", "type_position_caps")
     @classmethod
@@ -361,6 +355,20 @@ _REMOVED_KEYS = {
     # gösteriliyordu ama dosyada 1, kodda 3 yazıyordu — kullanıcıya çelişkili ve
     # eyleme dönüşmeyen bir sayı. Sürüm uyumu zaten _REMOVED_KEYS ile sağlanıyor.
     "schema_version",
+    # 2026-11-22 (Lab v3): eski backtest motorunun canlıda karşılığı olmayan kuralları.
+    # Backtest artık canlı scan/seçim/onay/çıkış fonksiyonlarını çağırıyor.
+    "min_quality_type_a",
+    "min_quality_type_b",
+    "min_quality_type_c",
+    "max_loss_per_trade_pct",
+    "max_gap_risk_portfolio_pct",
+    "max_position_cost_portfolio_pct",
+    "ticker_max_losses",
+    "min_shares_for_partial",
+    "backtest_type_quality",
+    "backtest_entry",
+    "backtest_loop.drawdown_pause_entries_fraction",
+    "backtest_loop.drawdown_reduce_to_one_position_fraction",
 }
 
 

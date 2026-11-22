@@ -83,9 +83,13 @@ const CTooltip = ({ active, payload, label }: any) => {
 export default function BacktestPage() {
     const [periodDays, setPeriodDays] = useState(90);
     const [capital, setCapital] = useState(10000);
+    // Varsayılan: canlı ürünle birebir — eşik/top N canlı auto-scan ayarından, eşzamanlı
+    // pozisyon sınırı yok (canlıda yalnız rejim kapasitesi var). Manuel mod canlıda
+    // OLMAYAN bir simülasyon kısıtı ekler.
+    const [liveParity, setLiveParity] = useState(true);
     const [maxConcurrent, setMaxConcurrent] = useState(3);
     const [minQuality, setMinQuality] = useState(60);
-    const [topN, setTopN] = useState(10);
+    const [topN, setTopN] = useState(15);
     const [tickerInput, setTickerInput] = useState("AEHR,AXTI,VELO,FSLY,NMRA,NVCR,SGRY,MLTX,FJET,WIN");
     const [useFinviz, setUseFinviz] = useState(false);
     const [result, setResult] = useState<BacktestResult | null>(null);
@@ -113,9 +117,7 @@ export default function BacktestPage() {
             const data = await runBacktest({
                 period_days: periodDays,
                 initial_capital: capital,
-                max_concurrent: maxConcurrent,
-                min_quality: minQuality,
-                top_n: topN,
+                ...(liveParity ? {} : { max_concurrent: maxConcurrent, min_quality: minQuality, top_n: topN }),
                 tickers,
             });
 
@@ -126,7 +128,7 @@ export default function BacktestPage() {
         } finally {
             setLoading(false);
         }
-    }, [periodDays, capital, maxConcurrent, minQuality, topN, tickerInput, useFinviz]);
+    }, [periodDays, capital, liveParity, maxConcurrent, minQuality, topN, tickerInput, useFinviz]);
 
     const m = result?.metrics;
     const winRatePct = m ? (m.win_rate * 100).toFixed(1) : null;
@@ -221,10 +223,21 @@ export default function BacktestPage() {
                             onChange={e => setCapital(Number(e.target.value))} />
                     </div>
 
+                    {/* Canlı parite */}
+                    <div style={{ minWidth: 170 }}>
+                        <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 6 }}>MOD</label>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: "0.8rem", padding: "8px 0" }}
+                            title="Açıkken eşik, top N ve pozisyon kapasitesi canlı auto-scan ile aynıdır.">
+                            <input type="checkbox" checked={liveParity} onChange={e => setLiveParity(e.target.checked)} />
+                            Canlı ürünle birebir
+                        </label>
+                    </div>
+
+                    {!liveParity && (<>
                     {/* Max concurrent */}
                     <div style={{ minWidth: 120 }}>
                         <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 6 }}>MAKS EŞ ZAMANLI</label>
-                        <input className="input" type="number" min={1} max={8} value={maxConcurrent}
+                        <input className="input" type="number" min={1} max={50} value={maxConcurrent}
                             onChange={e => setMaxConcurrent(Number(e.target.value))} />
                     </div>
 
@@ -238,6 +251,7 @@ export default function BacktestPage() {
                         <input className="input" type="number" min={1} max={30} value={topN}
                             onChange={e => setTopN(Number(e.target.value))} />
                     </div>
+                    </>)}
 
                     {/* Run button */}
                     <button className="btn-primary" onClick={run} disabled={loading}
@@ -300,20 +314,27 @@ export default function BacktestPage() {
                         )}
                         {result.params?.slippage_bps_per_side != null && (
                             <span style={{ display: "block", marginTop: 6 }}>
-                                Simülasyon slip: {result.params.slippage_bps_per_side} bps/kenar. T1 kısmi çıkış: %{Math.round((result.params.partial_at_t1_fraction ?? 0.33) * 100)} (kalan T2 / BE). Komisyon yok. Parite: repo içi docs/BACKTEST_LIVE_PARITY.md
+                                Simülasyon slip: {result.params.slippage_bps_per_side} bps/kenar. T1 kısmi çıkış: %{Math.round((result.params.partial_at_t1_fraction ?? 0.33) * 100)} (kalan T2 / BE). Komisyon yok. Seçim, onay ve çıkış canlı ürünün kendi fonksiyonlarıyla hesaplanır{result.params.live_parity === false ? " — manuel mod: canlıda olmayan eşzamanlı pozisyon sınırı uygulandı" : ""}.
                             </span>
                         )}
                         {result.diagnostics && Object.keys(result.diagnostics).length > 0 && (
                             <div style={{ display: "block", marginTop: 10, padding: "10px 12px", background: "rgba(255,255,255,0.03)", borderRadius: 8, fontSize: "0.75rem", lineHeight: 1.55 }}>
                                 <strong style={{ color: "var(--text-secondary)" }}>Teşhis (tüm dönem)</strong>
                                 <div style={{ color: "var(--text-muted)", marginTop: 4 }}>
-                                    RSI sonrası aday: {result.diagnostics.signals_passed_rsi ?? 0} · Kuyruğa alınan: {result.diagnostics.pending_queued ?? 0} ·
-                                    Açılan pozisyon: {result.diagnostics.entries_opened ?? 0}
+                                    Motor sinyali: {result.diagnostics.raw_signals ?? 0} · Eşik + top N sonrası: {result.diagnostics.selected_signals ?? 0} ·
+                                    Kuyruğa alınan: {result.diagnostics.pending_queued ?? 0} · Açılan pozisyon: {result.diagnostics.entries_opened ?? 0}
                                 </div>
                                 <div style={{ color: "var(--text-muted)", marginTop: 2 }}>
-                                    Elenen giriş: gap↑ {result.diagnostics.entry_skip_gap_up ?? 0} · gap↓ {result.diagnostics.entry_skip_gap_down ?? 0} ·
-                                    Tip C {result.diagnostics.entry_skip_tip_c ?? 0} · risk {result.diagnostics.entry_skip_risk ?? 0} · R:R {result.diagnostics.entry_skip_rr ?? 0}
+                                    Elenen: rejim kapasitesi {result.diagnostics.skip_capacity ?? 0} · aynı hisse açık {result.diagnostics.skip_duplicate ?? 0} ·
+                                    cooldown {result.diagnostics.skip_cooldown ?? 0} · gap↑ {result.diagnostics.entry_skip_gap_up ?? 0} · gap↓ {result.diagnostics.entry_skip_gap_down ?? 0}
+                                    {(result.diagnostics.skip_max_concurrent ?? 0) > 0 && ` · manuel eşzamanlı sınır ${result.diagnostics.skip_max_concurrent}`}
                                 </div>
+                                {((result.diagnostics.earnings_unknown_tickers ?? 0) > 0 || (result.diagnostics.cap_unknown_tickers ?? 0) > 0) && (
+                                    <div style={{ color: "var(--text-muted)", marginTop: 2 }}>
+                                        Veri eksik: bilanço tarihi yok {result.diagnostics.earnings_unknown_tickers ?? 0} hisse (bilanço kapısı atlandı) ·
+                                        market cap yok {result.diagnostics.cap_unknown_tickers ?? 0} hisse
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
