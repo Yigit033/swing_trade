@@ -484,3 +484,7 @@ her biri (2021–23 / 2024–son, her biri 10.000$'dan) ≥ tabanın o yarısı 
 − 3 puan VE > −35%; (d) duyarlılıkta (20 bps) (a) de sağlanır. Birden fazla geçerse geçenlerin
 birleşimi aynı kurallarla denenir ve en iyi tek varyantın toplamından düşük değilse benimsenir; değilse
 en yüksek toplamlı tek varyant. Hiçbiri geçmezse canlı değişmez.
+
+**Ek O kullanıcı kararı (2026-11-22, SONUÇ GÖRÜLDÜKTEN SONRA, etiketli sapma):** kullanıcı O2'yi ön kayıt
+şartı (c, max düşüş) geçmemesine rağmen benimsedi: canlı H6S pozisyon büyüklüğü %10 → %15 (fren %7.5).
+Gölge H6S kilidi (PARAMS_H6S) değişmez; bu yalnız canlı paper hesabın boyut ayarıdır.

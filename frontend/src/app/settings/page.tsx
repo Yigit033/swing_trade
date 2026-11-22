@@ -1580,8 +1580,8 @@ export default function SettingsPage() {
                 />
                 <FieldNum
                     label="H6S pozisyon büyüklüğü (hesabın oranı)"
-                    hint="Ölçülen kural: 0.10 = her işleme hesabın %10'u (en çok 10 eşzamanlı pozisyon, kaldıraçsız)."
-                    value={nn(["auto_scan", "h6s_position_pct"], 0.1)}
+                    hint="Kullanıcı kararı (Lab v3 Ek O2): 0.15 = her işleme hesabın %15'i (en çok 6 eşzamanlı pozisyon, kaldıraçsız). Geçmiş testte %10'a göre daha çok kazanç, daha derin düşüş (−32 → −38%)."
+                    value={nn(["auto_scan", "h6s_position_pct"], 0.15)}
                     onChange={(v) => sn(["auto_scan", "h6s_position_pct"], v)}
                     step={0.01}
                     min={0.01}

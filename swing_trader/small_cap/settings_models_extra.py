@@ -257,12 +257,14 @@ class AutoScanSettings(BaseModel):
     portfolio_value: float = Field(default=10_000.0, gt=0)
     # 2026-11-22 (kullanıcı kararı, Lab v3 Ek J2): otomatik girişin ana stratejisi H6S "Profesyonel
     # VCE" — canlı evren + sert filtreler + bilanço + VCE, küçük hisse (IWM) piyasa freni, pozisyon
-    # başına hesabın %10'u, 2.5×ATR felaket stop'u, 8. seans kapanışında çıkış. "LEGACY" eski kurallara
+    # başına hesabın h6s_position_pct'si, 2.5×ATR felaket stop'u, 8. seans kapanışında çıkış. "LEGACY" eski kurallara
     # tek adımda döner.
     strategy: Literal["H6S", "LEGACY"] = "H6S"
     # Eski kurallar ayrı bir sanal hesapla KONTROL GRUBU olarak açmaya devam eder (kıyas için).
     legacy_control: bool = True
-    h6s_position_pct: float = Field(default=0.10, gt=0, le=0.5)
+    # 2026-11-22 kullanıcı kararı (Lab v3 Ek O2, ön kayıt şartı geçmedi — etiketli sapma): %10 → %15.
+    # Geçmiş test (50 bps + 1.5$): +35.7 → +66.2%, iki yarıda da daha çok; max düşüş −31.8 → −37.9%.
+    h6s_position_pct: float = Field(default=0.15, gt=0, le=0.5)
     # Ek L2 (ölçüldü, eklendi): son 3 kapanmış H6S işleminin hepsi zararlıysa yeni pozisyon yarım boyut.
     # Sektör sınırı (Ek L1) ölçüldü ve EKLENMEDİ (sektör momentumunu kesiyor: portföy +64.5 → −6.8%).
     h6s_loss_streak_brake: bool = True

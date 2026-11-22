@@ -70,7 +70,7 @@ export default function OrdersPage() {
             {data.loss_streak_brake && (
                 <div className="card" style={{ borderLeft: "3px solid #f59e0b", fontSize: 13 }}>
                     ⚠ <strong>Kayıp serisi freni aktif:</strong> son 3 H6S işlemi zararla kapandı. Yeni pozisyonlar yarım boyut
-                    (hesabın %5&apos;i); ilk kârlı kapanışta tam boyuta dönülür. Geçmiş testte hem getiriyi hem düşüşü iyileştirdi.
+                    (normal boyutun yarısı); ilk kârlı kapanışta tam boyuta dönülür. Geçmiş testte hem getiriyi hem düşüşü iyileştirdi.
                 </div>
             )}
 

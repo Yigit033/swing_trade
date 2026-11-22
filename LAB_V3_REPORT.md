@@ -651,3 +651,7 @@ ve maliyet erimesi swing tarafında çözülmeli. Hisse seçiminin edge'i ileri 
 
 **Sonuç:** canlı ürün değişmedi. Swing kuralları bu sinyalle sınırına yakın; 2024–26 açığının çözümü
 kural ayarı değil, sinyalin kendisi — o da ancak ileri testte (Mayıs 2027) ölçülür.
+
+**Ek O kullanıcı kararı (2026-11-22):** O2 benimsendi — canlı H6S pozisyonu %15 (fren %7.5). Ön kayıtlı
+düşüş şartını geçmediği bilinerek alındı (etiketli sapma). Beklenen (geçmiş test, 50 bps + 1.5$): +66%
+/ max düşüş −38%; 20 bps'de +106% / −33%.

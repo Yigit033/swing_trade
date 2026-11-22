@@ -152,6 +152,7 @@ def test_auto_scan_never_exceeds_cash_account(monkeypatch):
     import api.scanner_jobs as jobs
     import api.deps as deps
     s = SmallCapSettings()
+    s.auto_scan.h6s_position_pct = 0.10   # sabit: bu testler kuralı ölçer, varsayılanı değil
     s.auto_scan.strategy = "LEGACY"                 # bu test eski kuralların nakit sınırını ölçer
     monkeypatch.setattr("swing_trader.small_cap.settings_config.load_settings", lambda *a, **k: s)
     monkeypatch.setattr(jobs, "create_exclusive_scan_job", lambda: "job")
@@ -181,6 +182,7 @@ def test_auto_scan_h6s_entries(monkeypatch, regime, expected):
     import api.scanner_jobs as jobs
     import api.deps as deps
     s = SmallCapSettings()
+    s.auto_scan.h6s_position_pct = 0.10   # sabit: bu testler kuralı ölçer, varsayılanı değil
     monkeypatch.setattr("swing_trader.small_cap.settings_config.load_settings", lambda *a, **k: s)
     monkeypatch.setattr(jobs, "create_exclusive_scan_job", lambda: "job")
     monkeypatch.setattr(jobs, "release_scan_slot", lambda j: None)
@@ -225,6 +227,7 @@ def test_auto_scan_h6s_halves_size_after_loss_streak(monkeypatch):
     import api.scanner_jobs as jobs
     import api.deps as deps
     s = SmallCapSettings()
+    s.auto_scan.h6s_position_pct = 0.10   # sabit: bu testler kuralı ölçer, varsayılanı değil
     s.auto_scan.legacy_control = False
     monkeypatch.setattr("swing_trader.small_cap.settings_config.load_settings", lambda *a, **k: s)
     monkeypatch.setattr(jobs, "create_exclusive_scan_job", lambda: "job")
@@ -256,6 +259,7 @@ def test_auto_scan_h6s_brake_fails_safe_to_half_size(monkeypatch):
     import api.scanner_jobs as jobs
     import api.deps as deps
     s = SmallCapSettings()
+    s.auto_scan.h6s_position_pct = 0.10   # sabit: bu testler kuralı ölçer, varsayılanı değil
     s.auto_scan.legacy_control = False
     monkeypatch.setattr("swing_trader.small_cap.settings_config.load_settings", lambda *a, **k: s)
     monkeypatch.setattr(jobs, "create_exclusive_scan_job", lambda: "job")
@@ -283,6 +287,7 @@ def test_auto_scan_h6s_sizes_from_compounded_equity(monkeypatch):
     import api.scanner_jobs as jobs
     import api.deps as deps
     s = SmallCapSettings()
+    s.auto_scan.h6s_position_pct = 0.10   # sabit: bu testler kuralı ölçer, varsayılanı değil
     s.auto_scan.legacy_control = False
     monkeypatch.setattr("swing_trader.small_cap.settings_config.load_settings", lambda *a, **k: s)
     monkeypatch.setattr(jobs, "create_exclusive_scan_job", lambda: "job")
