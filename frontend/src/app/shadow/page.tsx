@@ -27,6 +27,10 @@ const NAMES: Record<string, { title: string; desc: string }> = {
         title: "H6S · Profesyonel VCE (Midas adayı)",
         desc: "H6 sinyalleri + küçük hisse (IWM) piyasa freni (ayı piyasasında giriş yok, temkinli piyasada en çok 1) + 2.5×ATR felaket stop'u → ertesi açılış, 8. seans kapanışı. Geçmiş testte en güçlü aday (iyimser: fikir sonuçtan sonra geldi).",
     },
+    H6SR: {
+        title: "H6SR · Kazananı koştur (H6S'nin çıkış varyantı)",
+        desc: "H6S ile aynı sinyal, aynı piyasa freni ve aynı 2.5×ATR stop. Fark yalnız çıkışta: 8. seans kapanışında kârdaysa satmaz, iz süren stopla (en yüksek kapanış − 2.5×ATR) en çok 40 seans tutar. Geçmiş testte işlem başı kazancı neredeyse ikiye katladı ama dönemden döneme ters döndü (Lab v3 Ek O1) — karar bu ileri testte.",
+    },
     H6: {
         title: "H6 · Sade VCE (canlı ürünün rakibi)",
         desc: "Canlı evren + sert filtreler + bilanço kapısı + VCE tetiği; RVOL, RSI, Weinstein, skor, rejim, top N, gap, stop yok → ertesi açılış, 8. seans kapanışı.",
@@ -56,7 +60,9 @@ const REASON_LABEL: Record<string, string> = {
     NO_PRICE_DATA: "Fiyat verisi yok",
     NO_SIGNAL_BAR: "Sinyal günü bar yok",
     STOP: "Stop",
-    TIME: "Süre doldu (H4/H5 20, H6/H6S 8 seans)",
+    TIME: "Süre doldu (H4/H5 20, H6/H6S 8 seans; H6SR 8. seansta kârda değildi)",
+    TRAIL: "İz süren stop (kazanan geri döndü)",
+    TIME_MAX: "En uzun tutuş doldu (40 seans)",
     BEAR_REGIME: "Küçük hisse piyasası ayıda (giriş yok)",
     CAUTION_CAPACITY: "Temkinli piyasa: açık pozisyon sınırı dolu",
 };
@@ -145,7 +151,7 @@ export default function ShadowPage() {
     const [data, setData] = useState<ShadowData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
-    const [strategy, setStrategy] = useState<"all" | "H5" | "H4" | "H6" | "H6S">("all");
+    const [strategy, setStrategy] = useState<"all" | "H5" | "H4" | "H6" | "H6S" | "H6SR">("all");
     const [hideSkipped, setHideSkipped] = useState(true);
 
     const load = async () => {
@@ -173,7 +179,7 @@ export default function ShadowPage() {
     if (error) return <div className="card" style={{ color: "var(--danger)" }}>{error}</div>;
     if (!data) return null;
 
-    const ORDER = ["H6S", "H6", "H5", "H4"];
+    const ORDER = ["H6S", "H6SR", "H6", "H5", "H4"];
     const strategies = data.report
         ? Object.values(data.report.strategies).sort((a, b) => ORDER.indexOf(a.strategy) - ORDER.indexOf(b.strategy))
         : [];
@@ -234,7 +240,7 @@ export default function ShadowPage() {
             <div className="card">
                 <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
                     <strong>İşlemler</strong>
-                    {(["all", "H6S", "H6", "H5", "H4"] as const).map(s => (
+                    {(["all", "H6S", "H6SR", "H6", "H5", "H4"] as const).map(s => (
                         <button key={s} className={strategy === s ? "btn-primary" : "btn-secondary"}
                             style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setStrategy(s)}>
                             {s === "all" ? "Tümü" : s}

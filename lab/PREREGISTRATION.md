@@ -535,3 +535,20 @@ t+1 açılış girişi, 2.5×ATR14 stop (gün içi Low ≤ stop → min(Open, st
 çıkış; yüzde, [−60, +150]'de kırpılır. Model: sklearn HistGradientBoostingRegressor (aynı
 hiperparametreler, loss=squared_error). Seçim: tahmin ≥ eğitim yarısı tahminlerinin 99. yüzdeliği.
 Evren, bölme, özellikler, rejim çerçevesi, portföy ve P1–P5 terfi kuralları H9 ile birebir aynı.
+
+# Ek Q — H6SR "Kazananı koştur" gölge ileri testi (Ek O1 kuralı, canlıya dokunmadan)
+
+**Yazıldığı an: 2026-11-22.** Ek O1 geçmiş testte işlem başı neti +0.79 → +1.40'a çıkardı ama portföyde
+yol bağımlı çıktı (2021–23 −35 puan, 2024–26 +37 puan) → canlıya alınmadı. Kullanıcı kararıyla karar
+geleceğin verisine bırakılır: gölge defterde H6S ile yan yana, AYNI sinyaller ve AYNI fren.
+
+- **Giriş/fren (H6S ile birebir):** H6 isabetleri, dolar hacim sırası, IWM rejimi (BEAR giriş yok,
+  CAUTION'da en çok 1 açık H6SR), hisse başına tek pozisyon, t+1 açılış, 2.5×ATR14 stop.
+- **Çıkış (Ek O1 birebir, `lab/swing_o.walk_runner`):** 8. seans kapanışı giriş açılışının üstündeyse
+  çıkılmaz; iz süren stop = max(önceki stop, girişten beri en yüksek kapanış − 2.5×ATR14), gün içi
+  Low ≤ stop → min(Open, stop); en çok 40 seans. Değilse 8. kapanışta çıkış.
+- **Kilit:** ayrı hash (`PARAMS_H6SR`); H4/H5/H6/H6S kilitleri değişmez. Canlı paper ürün değişmez.
+- **Kapı (Ek C düzeni, otomatik terfi yok):** F1 ≥ 6 ay VE ≥ 100 uygun kapanmış işlem; F2 50 bps net
+  ortalama > 0 VE CI alt sınırı > 0; F3 %10 portföy > IWM al-tut; F4 max düşüş > −35%. Ek olarak aynı
+  dönemde H6S ile kıyas raporlanır; H6SR, H6S'nin yerine ancak F1–F4 geçer VE portföy toplamı H6S'den
+  yüksekse kullanıcıya önerilir.

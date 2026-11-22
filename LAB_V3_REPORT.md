@@ -678,3 +678,13 @@ Arka plan (tüm dönem, betimleyici): evrende 20 seansta +%50 koşu 2.430 kez (y
 yani "piyasa çöktükten sonra oynak küçük hisse al"; seçimlerin 112/257'si Nisan 2025 gümrük çöküşü
 haftası, 157'si BEAR rejiminde (tek olay, doğrulanamaz; rejim freniyle de çelişiyor). Teknik göstergelerle
 büyük koşu avı görülmemiş yıllarda para kazandırmadı. H9/H9b kapandı; canlı ürün değişmedi.
+
+## Ek Q — H6SR "Kazananı koştur" gölge ileri testinde (canlıya dokunmadan)
+
+Ön kayıt Ek Q (SHA `510649fa…`), kilit `PARAMS_H6SR` (`6d9c5a98…`). Ek O1'in kuralı (8. seans kapanışı
+kârdaysa iz süren stop, en çok 40 seans) geçmiş testte işlem başı neti +0.79 → +1.40'a çıkardı ama
+portföyde dönemden döneme ters döndü. Karar geleceğin verisine bırakıldı: gölge defterde H6S ile
+**aynı sinyaller, aynı fren, aynı stop**, yalnız çıkış farklı. Gölge çıkışı lab kuralıyla 400 rastgele
+yolda (eksik barlı) birebir. H4/H5/H6/H6S kilitleri değişmedi; canlı paper ürün değişmedi.
+Kapı Ek C düzeni (≥6 ay ve ≥100 işlem, net CI > 0, IWM'i geçmek, düşüş > −35%) + aynı dönemde H6S'den
+yüksek portföy → ancak o zaman kullanıcıya önerilir. Gölge sayfasında H6S'nin yanında görünür.

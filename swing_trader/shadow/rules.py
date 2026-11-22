@@ -60,12 +60,28 @@ PARAMS_H6S: Dict = dict(
 )
 PARAMS_H6S_SHA256 = hashlib.sha256(json.dumps(PARAMS_H6S, sort_keys=True, default=list).encode()).hexdigest()
 
+# Ek Q — H6SR "Kazananı koştur": H6S ile AYNI giriş ve fren; çıkış Ek O1 (lab/swing_o.walk_runner):
+# 8. kapanış giriş açılışının üstündeyse iz süren stop (girişten beri en yüksek kapanış − 2.5×ATR14),
+# en çok 40 seans. Ayrı kilit; H4/H5/H6/H6S kilitleri ve EXITS değişmez.
+PARAMS_H6SR: Dict = dict(
+    base="H6S", entry_and_regime="same_as_H6S", stop_atr=2.5, hold_sessions=8,
+    runner_if="close_at_hold > entry_open", trail_atr=2.5, trail_ref="highest_close_since_entry",
+    max_sessions=40, rank_key="dollar_volume_20", cost_pct=0.50, min_closed=100,
+)
+PARAMS_H6SR_SHA256 = hashlib.sha256(json.dumps(PARAMS_H6SR, sort_keys=True, default=list).encode()).hexdigest()
+
 # Strateji → (ATR stop katı, en çok seans). None stop = stop yok.
 EXITS: Dict[str, Tuple[Optional[float], int]] = {
     "H4": (C["stop_atr"], C["max_bars"]),
     "H5": (C["stop_atr"], C["max_bars"]),
     "H6": (None, PARAMS_H6["hold_sessions"]),
     "H6S": (PARAMS_H6S["stop_atr"], PARAMS_H6S["hold_sessions"]),
+}
+
+# Kazananı koşturan stratejiler → (ATR stop katı, temel tutuş, iz süren stop ATR katı, en çok seans).
+RUNNERS: Dict[str, Tuple[float, int, float, int]] = {
+    "H6SR": (PARAMS_H6SR["stop_atr"], PARAMS_H6SR["hold_sessions"], PARAMS_H6SR["trail_atr"],
+             PARAMS_H6SR["max_sessions"]),
 }
 
 
@@ -144,13 +160,41 @@ def walk(frame: pd.DataFrame, ie: int, stop: float, max_bars: int = None) -> Tup
     return last, float(Cl[last]), ("TIME" if ie + max_bars <= n else "OPEN")
 
 
+def walk_runner(frame: pd.DataFrame, ie: int, stop0: float, atr: float, hold: int, max_bars: int,
+                trail_atr: float) -> Tuple[int, float, str]:
+    """Ek O1 / lab/swing_o.walk_runner: ``hold``. kapanış girişin üstündeyse iz süren stop ile devam.
+
+    Neden: STOP | TIME (temel tutuşta kârda değil) | TRAIL | TIME_MAX | OPEN (henüz karar yok).
+    """
+    xi, xp, why = walk(frame, ie, stop0, hold)
+    O, L, Cl = (frame[k].to_numpy(dtype=float) for k in ("Open", "Low", "Close"))
+    if why != "TIME" or not Cl[xi] > O[ie]:
+        return xi, xp, why
+    n = len(Cl)
+    hi = float(np.nanmax(Cl[ie: xi + 1]))
+    stop = max(stop0, hi - trail_atr * atr)
+    for k in range(xi + 1, min(n, ie + max_bars)):
+        if not np.isfinite(Cl[k]):
+            continue
+        if L[k] <= stop:
+            return k, float(min(O[k], stop)), "TRAIL"
+        hi = max(hi, float(Cl[k]))
+        stop = max(stop, hi - trail_atr * atr)
+    last = min(n, ie + max_bars) - 1
+    while last > ie and not np.isfinite(Cl[last]):
+        last -= 1
+    return last, float(Cl[last]), ("TIME_MAX" if ie + max_bars <= n else "OPEN")
+
+
 def plan_trade(frame: pd.DataFrame, signal_day: date, strategy: str = "H5") -> Dict:
     """Sinyal barı ``signal_day`` → giriş/stop/çıkış (hizalanmış çerçeve üzerinde).
 
     Çerçeve sinyal günü ve sonrasındaki seansları içermeli. Sonuç alanları:
-    status PENDING (giriş barı yok) | SKIPPED | OPEN | CLOSED. Çıkış kuralı ``EXITS[strategy]``.
+    status PENDING (giriş barı yok) | SKIPPED | OPEN | CLOSED. Çıkış kuralı ``EXITS[strategy]``
+    (kazananı koşturanlar: ``RUNNERS[strategy]``).
     """
-    stop_atr, max_bars = EXITS[strategy]
+    runner = RUNNERS.get(strategy)
+    stop_atr, max_bars = (runner[0], runner[3]) if runner else EXITS[strategy]
     idx = list(frame.index.date)
     if signal_day not in idx:
         return dict(status="SKIPPED", reason="NO_SIGNAL_BAR")
@@ -167,7 +211,10 @@ def plan_trade(frame: pd.DataFrame, signal_day: date, strategy: str = "H5") -> D
     if not np.isfinite(o) or o <= 0:
         return dict(status="SKIPPED", reason="NO_ENTRY_BAR", atr=a)
     stop = None if stop_atr is None else float(o - stop_atr * a)
-    xi, xp, why = walk(frame, i + 1, stop, max_bars)
+    if runner:
+        xi, xp, why = walk_runner(frame, i + 1, stop, a, runner[1], runner[3], runner[2])
+    else:
+        xi, xp, why = walk(frame, i + 1, stop, max_bars)
     out = dict(atr=a, entry_day=idx[i + 1], entry_price=float(o), stop=stop,
                bars=xi - i, exit_reason=why, mark_price=xp, mark_day=idx[xi],
                ret_pct=100.0 * (xp / o - 1))

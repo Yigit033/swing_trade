@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from .rules import PARAMS, PARAMS_H6, PARAMS_H6S
+from .rules import PARAMS, PARAMS_H6, PARAMS_H6S, PARAMS_H6SR
 
 COST = PARAMS["common"]["cost_pct"]
 GATE = {
@@ -15,6 +15,7 @@ GATE = {
     "H4": dict(min_closed=50, min_months=6, max_months=12),
     "H6": dict(min_closed=PARAMS_H6["min_closed"], min_months=6, max_months=12),
     "H6S": dict(min_closed=PARAMS_H6S["min_closed"], min_months=6, max_months=12),
+    "H6SR": dict(min_closed=PARAMS_H6SR["min_closed"], min_months=6, max_months=12),
 }
 
 

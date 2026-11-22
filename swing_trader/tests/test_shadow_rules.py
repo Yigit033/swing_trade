@@ -297,3 +297,71 @@ def test_h4_events_match_lab():
     lab = pd.read_parquet(LAB / "challengers/events_H4.parquet")
     exp = sorted((r.ticker, pd.Timestamp(r.F).date()) for r in lab.itertuples())
     assert got == exp
+
+
+# ── Ek Q: H6SR "kazananı koştur" ────────────────────────────────────────────
+
+def test_h6sr_params_frozen_separately():
+    """Ek Q: ayrı kilit; H6S kilidi ve EXITS değişmez (yukarıdaki testler aynen geçer)."""
+    p = rules.PARAMS_H6SR
+    assert (p["stop_atr"], p["hold_sessions"], p["trail_atr"], p["max_sessions"]) == (2.5, 8, 2.5, 40)
+    assert (p["cost_pct"], p["min_closed"]) == (0.5, 100)
+    assert rules.RUNNERS == {"H6SR": (2.5, 8, 2.5, 40)}
+    assert rules.PARAMS_H6SR_SHA256 == "6d9c5a98b04e4b5e2044be56e69b054ddb06f0a5e85870f4cff702d0d54aabb5"
+
+
+def test_h6sr_walk_runner_matches_lab():
+    """Gölge çıkışı lab/swing_o.walk_runner (Ek O1 ölçümü) ile birebir — rastgele 400 yol, eksik barlı."""
+    import sys
+    sys.path.insert(0, str(ROOT))
+    swing_o = pytest.importorskip("lab.swing_o")
+    rng = np.random.default_rng(3)
+    days = rules.sessions_between(date(2025, 1, 2), date(2025, 6, 30))
+    n, checked = len(days), 0
+    for _ in range(400):
+        c = 20 * np.exp(np.cumsum(rng.normal(0.003, 0.03, n)))
+        o = c * np.exp(rng.normal(0, 0.01, n))
+        h = np.maximum(o, c) * (1 + np.abs(rng.normal(0, 0.01, n)))
+        lo = np.minimum(o, c) * (1 - np.abs(rng.normal(0, 0.015, n)))
+        miss = rng.random(n) < 0.03
+        for x in (o, h, lo, c):
+            x[miss] = np.nan
+        ie = int(rng.integers(1, 70))
+        if not np.isfinite(o[ie]):
+            continue
+        a = float(rng.uniform(0.2, 1.5))
+        stop0 = o[ie] - 2.5 * a
+        f = pd.DataFrame(dict(Open=o, High=h, Low=lo, Close=c), index=pd.to_datetime(days))
+        gi, gp, gw = rules.walk_runner(f, ie, stop0, a, 8, 40, 2.5)
+        ei, ep, ew = swing_o.walk_runner(ie, (o, h, lo, c), a, stop0)
+        assert (gi, gw) == (ei, "OPEN" if ew == "END_OF_DATA" else ew)
+        assert gp == pytest.approx(ep, rel=1e-12)
+        checked += 1
+    assert checked > 350
+
+
+def _bars(days, c, lo_mult=0.99):
+    c = np.asarray(c, dtype=float)
+    return pd.DataFrame(dict(Open=c * 0.999, High=c * 1.01, Low=c * lo_mult, Close=c), index=pd.to_datetime(days))
+
+
+def test_h6sr_plan_runs_winner_to_max_and_cuts_loser_at_8():
+    days = rules.sessions_between(date(2025, 1, 2), date(2025, 6, 30))
+    up = _bars(days, 20 + np.linspace(0, 8, len(days)))              # istikrarlı yükseliş: iz stop değmez
+    p = rules.plan_trade(up, days[20], "H6SR")
+    assert p["status"] == "CLOSED" and p["exit_reason"] == "TIME_MAX" and p["bars"] == 40
+    h6s = rules.plan_trade(up, days[20], "H6S")
+    assert h6s["exit_reason"] == "TIME" and h6s["bars"] == 8          # H6S aynı sinyalde 8. seansta çıkar
+    flat = _bars(days, 20 - np.linspace(0, 1, len(days)), lo_mult=0.995)   # hafif düşüş: kârda değil
+    q = rules.plan_trade(flat, days[20], "H6SR")
+    assert q["status"] == "CLOSED" and q["exit_reason"] == "TIME" and q["bars"] == 8
+
+
+def test_h6sr_plan_trails_after_winner_reverses():
+    days = rules.sessions_between(date(2025, 1, 2), date(2025, 6, 30))
+    c = np.r_[np.full(21, 20.0), 20 + np.arange(1, 16) * 0.5, np.full(len(days) - 36, 22.0)]
+    p = rules.plan_trade(_bars(days, c), days[20], "H6SR")
+    assert p["status"] == "CLOSED" and p["exit_reason"] == "TRAIL"
+    assert 8 < p["bars"] < 40 and p["exit_price"] > p["entry_price"]      # kârın bir kısmı korunur
+    still = rules.plan_trade(_bars(days[:33], c[:33]), days[20], "H6SR")
+    assert still["status"] == "OPEN" and still["exit_reason"] == "OPEN"   # 8. kapanış kârda, karar sürüyor

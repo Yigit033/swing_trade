@@ -281,3 +281,28 @@ def test_h6s_defers_when_iwm_bar_missing(tmp_path):
     src.bars["IWM"] = b[b.Date < pd.Timestamp("2025-06-13")]          # son seansın IWM barı gecikti
     out = runner.run_shadow_daily(now=datetime(2025, 6, 16, 7, 0, tzinfo=NY), ledger=L, src=src)
     assert out["H6S"]["deferred"] == "IWM_BAR_MISSING" and L.trades("H6S") == []
+
+
+@pytest.mark.parametrize("regime,expect", [("BULL", ["PENDING", "PENDING"]),
+                                           ("BEAR", ["SKIPPED", "SKIPPED"]),
+                                           ("CAUTION", ["PENDING", "SKIPPED"])])
+def test_h6sr_mirrors_h6s_entries_and_brake(tmp_path, monkeypatch, regime, expect):
+    """Ek Q: H6SR aynı isabetleri aynı frenle kendi defterine yazar; H6S defteri ve kilidi değişmez."""
+    L, src = ShadowLedger(str(tmp_path / "s.db")), FakeSrc()
+    src.vce = {date(2025, 6, 13): [("XYZ", 9e7), ("ABC", 5e7)]}
+    monkeypatch.setattr(runner, "_small_cap_regime", lambda s, asof: {"regime": regime})
+    out = runner.run_shadow_daily(now=datetime(2025, 6, 16, 7, 0, tzinfo=NY), ledger=L, src=src)
+    rows = sorted(L.trades("H6SR"), key=lambda t: -t["key"])
+    assert [r["status"] for r in rows] == expect and out["H6SR"]["regime"] == regime
+    assert [r["status"] for r in sorted(L.trades("H6S"), key=lambda t: -t["key"])] == expect
+    assert L.get_meta("params_h6sr_sha256") == rules.PARAMS_H6SR_SHA256
+    assert L.get_meta("params_h6s_sha256") == rules.PARAMS_H6S_SHA256
+    if regime == "BULL":
+        for day in range(17, 31):                                     # ~10 seans sonra H6S kapanır, H6SR sürer
+            runner.run_shadow_daily(now=datetime(2025, 6, day, 7, 0, tzinfo=NY), ledger=L, src=src)
+        s = {t["ticker"]: t for t in L.trades("H6S")}
+        r = {t["ticker"]: t for t in L.trades("H6SR")}
+        assert s["XYZ"]["status"] == "CLOSED" and s["XYZ"]["exit_reason"] == "TIME"
+        assert r["XYZ"]["status"] == "OPEN" and r["XYZ"]["bars"] > 8   # yükselen seride kazanan koşuyor
+        rep = L.get_meta("report")["strategies"]
+        assert {"H6S", "H6SR"} <= set(rep) and rep["H6SR"]["gate"]["need_closed"] == 100

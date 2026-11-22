@@ -240,14 +240,19 @@ def _small_cap_regime(src, asof: date) -> Optional[Dict]:
     return regime_from_spy_close(iwm["Close"].tail(252).reset_index(drop=True), v)
 
 
-def run_h6s(ledger: ShadowLedger, src, asof: date, now: datetime, res: Dict) -> Dict:
-    """Ek J2: H6 isabetleri + küçük hisse piyasa freni (BEAR giriş yok, CAUTION en çok 1 açık)."""
-    p = rules.PARAMS_H6S
-    if ledger.get_meta("params_h6s_sha256") is None:
-        ledger.set_meta("params_h6s_sha256", rules.PARAMS_H6S_SHA256)
-        ledger.set_meta("h6s_live_start", asof.isoformat())
-    if ledger.get_meta("params_h6s_sha256") != rules.PARAMS_H6S_SHA256:
-        return dict(error="H6S_PARAMS_CHANGED_WITHOUT_PREREGISTRATION")
+def run_h6s(ledger: ShadowLedger, src, asof: date, now: datetime, res: Dict, name: str = "H6S") -> Dict:
+    """Ek J2: H6 isabetleri + küçük hisse piyasa freni (BEAR giriş yok, CAUTION en çok 1 açık).
+
+    ``name="H6SR"`` (Ek Q): aynı giriş ve fren, kendi defteri/kilidi; çıkış ``rules.RUNNERS``.
+    """
+    p = rules.PARAMS_H6S                                  # giriş + fren iki varyantta da aynı
+    sha = {"H6S": rules.PARAMS_H6S_SHA256, "H6SR": rules.PARAMS_H6SR_SHA256}[name]
+    key = name.lower()
+    if ledger.get_meta(f"params_{key}_sha256") is None:
+        ledger.set_meta(f"params_{key}_sha256", sha)
+        ledger.set_meta(f"{key}_live_start", asof.isoformat())
+    if ledger.get_meta(f"params_{key}_sha256") != sha:
+        return dict(error=f"{name}_PARAMS_CHANGED_WITHOUT_PREREGISTRATION")
     hits = sorted(res.get("hits") or [], key=lambda h: -float(h["dv20"]))
     if not hits:
         return dict(hits=0, added=0)
@@ -255,7 +260,7 @@ def run_h6s(ledger: ShadowLedger, src, asof: date, now: datetime, res: Dict) -> 
     if reg is None:
         return dict(hits=len(hits), deferred="IWM_BAR_MISSING")
     regime = str(reg.get("regime", "UNKNOWN")).upper()
-    active = ledger.trades("H6S", statuses=("PENDING", "OPEN"))
+    active = ledger.trades(name, statuses=("PENDING", "OPEN"))
     busy = {t["ticker"] for t in active}
     n_active, added, counts = len(active), 0, {}
     for h in hits:
@@ -267,7 +272,7 @@ def run_h6s(ledger: ShadowLedger, src, asof: date, now: datetime, res: Dict) -> 
         elif h["ticker"] in busy:
             why = "TICKER_BUSY"
         n = ledger.add_trade(dict(
-            strategy="H6S", ticker=h["ticker"], event_date=asof.isoformat(), signal_date=asof.isoformat(),
+            strategy=name, ticker=h["ticker"], event_date=asof.isoformat(), signal_date=asof.isoformat(),
             decided_at=_utc_iso(now), key=float(h["dv20"]), status="SKIPPED" if why else "PENDING",
             reason=why, late_decision=_late(now, asof), warmup=0,
             details=dict(dv20=float(h["dv20"]), regime=regime, regime_index="IWM"),
@@ -382,6 +387,11 @@ def build_report(ledger: ShadowLedger, src, asof: date) -> Dict:
         d6s = date.fromisoformat(h6s_start)
         strategies["H6S"] = strategy_report("H6S", trades, rules.sessions_between(d6s, asof), d6s, asof,
                                             iwm_bh if d6s == live_start else _buy_hold(src, "IWM", d6s, asof))
+    h6sr_start = ledger.get_meta("h6sr_live_start")
+    if h6sr_start:                                        # Ek Q: kazananı koştur, H6S ile yan yana
+        dr = date.fromisoformat(h6sr_start)
+        strategies["H6SR"] = strategy_report("H6SR", trades, rules.sessions_between(dr, asof), dr, asof,
+                                             iwm_bh if dr == live_start else _buy_hold(src, "IWM", dr, asof))
     champion = None
     if h6_start:
         h6_d = date.fromisoformat(h6_start)
@@ -456,6 +466,11 @@ def run_shadow_daily(now: Optional[datetime] = None, ledger: Optional[ShadowLedg
         except Exception as e:
             logger.exception("Shadow H6S failed")
             out["H6S"] = dict(error=str(e))
+        try:                              # Ek Q: aynı isabetler + aynı fren, kazananı koşturan çıkış
+            out["H6SR"] = run_h6s(ledger, src, asof, now, vce, name="H6SR")
+        except Exception as e:
+            logger.exception("Shadow H6SR failed")
+            out["H6SR"] = dict(error=str(e))
     if universe:
         for name, fn in (("H5", lambda: run_h5(ledger, src, universe, asof, now)),
                          ("H4", lambda: run_h4(ledger, src, universe, today_et, now, deadline=deadline))):
