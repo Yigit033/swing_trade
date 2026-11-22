@@ -488,3 +488,50 @@ en yüksek toplamlı tek varyant. Hiçbiri geçmezse canlı değişmez.
 **Ek O kullanıcı kararı (2026-11-22, SONUÇ GÖRÜLDÜKTEN SONRA, etiketli sapma):** kullanıcı O2'yi ön kayıt
 şartı (c, max düşüş) geçmemesine rağmen benimsedi: canlı H6S pozisyon büyüklüğü %10 → %15 (fren %7.5).
 Gölge H6S kilidi (PARAMS_H6S) değişmez; bu yalnız canlı paper hesabın boyut ayarıdır.
+
+# Ek P — H9 "Büyük Koşu Avcısı": göstergeleri büyük koşulara göre öğren, görülmemiş yıllarda sına
+
+**Yazıldığı an: 2026-11-22, hiçbir özellik/model sonucu görülmeden.** Önceki işler fikirleri tek tek
+sınadı (VCE, RVOL, gap, dip avı, 52H zirve, Form 4, PEAD); bu ek ters yönden gider: hedef = büyük koşu,
+tüm göstergeler birlikte, model eğitim yarısında öğrenir, karar yalnız test yarısında.
+Bilinen (betimleyici, tüm dönem): evrende 20 seansta +%50 olasılığı %1.29, −%30 %3.08; VCE sinyalinde
++%50 %5.48 (özellik/model bazında hiçbir şey görülmedi).
+
+- **Evren:** §0 havuzu (`pool_mask`). Survivorship yanlılığı var → birincil ölçüt havuza göre fark.
+- **Bölme:** eğitim = sinyal günü 2021-01-04 → 2023-11-30; test = 2024-01-02 → son−20 seans (etiket
+  örtüşmesine karşı ~1 ay ambargo). Test yarısı model/eşik/özellik seçiminde KULLANILMAZ.
+- **Etiket:** koşu = max(Close[t+1..t+20]) / Open[t+1] − 1 ≥ +%50 (giriş fiyatına göre, işlem yapılabilir).
+- **Özellikler (t kapanışında bilinen, sabit liste, 35):** getiri 1/5/20/60/120 seans; Close/SMA20/50/200;
+  52H zirve/dip uzaklığı, 52H zirveden beri gün; RSI14; ATR14/Close, ATR5/ATR50, BB genişliği /
+  120 seans ortalaması; gün aralığı, kapanış konumu, bugünkü gap, son 20 seansın en büyük günlük getirisi;
+  RVOL (V/ort63), 5 günlük RVOL, ort20/ort63 hacim, log dolar hacim, yükselen gün hacim payı (20);
+  log market cap, log fiyat, 252 seanslık hisse sayısı değişimi; IWM'e göre 20/60 seans göreli güç, IWM
+  20 seans getirisi, VIX, IWM rejimi (BULL/CAUTION/BEAR); sonraki/önceki bilançoya gün (60'ta kesik;
+  bilanço takvimi önceden ilan edilir); havuzun SMA50 üstü oranı.
+- **Model:** sklearn HistGradientBoostingClassifier(max_iter=300, learning_rate=0.05,
+  max_leaf_nodes=31, min_samples_leaf=200, l2_regularization=1.0, early_stopping=False,
+  random_state=7). Ayar taraması YOK.
+- **Seçim (test):** skor ≥ eğitim yarısı skorlarının 99. yüzdeliği (eşik eğitimden sabit); aynı gün
+  skora göre sıralı. H6S çerçevesi: IWM rejimi (BEAR giriş yok, CAUTION'da en çok 1), hisse başına tek
+  pozisyon, t+1 açılışta giriş, 2.5×ATR14 stop, **20. seans kapanışında çıkış** (etiket penceresi).
+- **Portföy:** Ek O portföyü (doğru sıra), %15 pozisyon (canlı), L2 freni, 10.000$, 50 bps + 1.5$;
+  duyarlılık 20 bps + 1.5$.
+
+**Terfi kararı (yalnız test yarısı, hepsi birlikte):** (P1) ≥100 işlem; (P2) işlem başı net (50 bps) > 0
+VE havuza göre fark ortalaması > 0 ve gün kümeli bootstrap %95 CI alt sınırı > 0; (P3) portföy toplamı >
+IWM al-tut VE > H6S (%15) aynı dönemde; (P4) max düşüş > −35%; (P5) 2024/2025/2026 yıllarının en az
+ikisinde havuza göre fark > 0. Geçerse H9 dondurulmuş hash'le gölge ileri teste girer ve kullanıcıya canlı
+paper için sunulur; geçmezse kapanır. Betimleyici: test yarısında seçilenlerde koşu/çöküş oranı vs taban.
+
+## Ek P sonucu (H9) ve P2 — H9b: hedef doğrudan işlem parası
+
+**H9 sonucu (görüldü):** test AUC 0.873; seçilenlerde koşu %12.0 (taban %1.5) AMA çöküş %22.1 (taban
+%3.0); 540 işlem, net −3.58%/işlem, havuz farkı −2.90 (CI −6.06…+0.30); portföy −79.7%. P2–P5 ❌ → H9
+kapandı. Tanı: model "koşu olasılığını" öğrendi = oynaklık (ATR% önemin büyük kısmı); oynaklık iki yönlü.
+
+**H9b — yazıldığı an: 2026-11-22, H9 sonucundan SONRA (etiketli: test yarısına İKİNCİ bakış, tek
+deneme, başka varyant yok).** Değişen tek şey hedef: her hisse-günü için GERÇEK işlemin getirisi —
+t+1 açılış girişi, 2.5×ATR14 stop (gün içi Low ≤ stop → min(Open, stop)), en çok 20 seans, 20. kapanışta
+çıkış; yüzde, [−60, +150]'de kırpılır. Model: sklearn HistGradientBoostingRegressor (aynı
+hiperparametreler, loss=squared_error). Seçim: tahmin ≥ eğitim yarısı tahminlerinin 99. yüzdeliği.
+Evren, bölme, özellikler, rejim çerçevesi, portföy ve P1–P5 terfi kuralları H9 ile birebir aynı.

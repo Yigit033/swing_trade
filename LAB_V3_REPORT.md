@@ -655,3 +655,26 @@ kural ayarı değil, sinyalin kendisi — o da ancak ileri testte (Mayıs 2027) 
 **Ek O kullanıcı kararı (2026-11-22):** O2 benimsendi — canlı H6S pozisyonu %15 (fren %7.5). Ön kayıtlı
 düşüş şartını geçmediği bilinerek alındı (etiketli sapma). Beklenen (geçmiş test, 50 bps + 1.5$): +66%
 / max düşüş −38%; 20 bps'de +106% / −33%.
+
+## Ek P — H9 "Büyük Koşu Avcısı" (35 gösterge, makine öğrenmesi, görülmemiş yıllarda sınav)
+
+Ön kayıt Ek P (SHA `d797f073…`) ve P2 (`f0577b2b…`), betik `lab/h9_runner.py`, çıktılar
+`output/lab/p_h9.json`, `p_h9b.json`. Eğitim 2021-01 → 2023-11, test 2024-01 → 2026-10 (karar yalnız test).
+Arka plan (tüm dönem, betimleyici): evrende 20 seansta +%50 koşu 2.430 kez (yılda ~400) ama −%30 çöküş
+2.4 kat daha sık; koşuların %27'si gece haber sıçraması; VCE koşuların yalnız %0.7'sini başında görüyor.
+
+| Test (2024–26) | Taban | H9: koşu olasılığı | H9b: işlem parası |
+|---|---:|---:|---:|
+| Model isabeti | — | AUC 0.873 | sıra korelasyonu 0.046 |
+| Seçilenlerde +%50 koşu | %1.5 | **%12.0** | %7.4 |
+| Seçilenlerde −%30 çöküş | %3.0 | **%22.1** | %7.8 |
+| İşlem (rejim çerçevesiyle) | — | 540 | 33 |
+| Net / işlem (50 bps) | — | −3.58% | −3.58% |
+| Portföy (%15, 50 bps + 1.5$) | IWM +46.7% / H6S −5.8% | **−79.7%** (DD −86%) | −10.8% (DD −39%) |
+| Karar | | ❌ P2–P5 | ❌ P1–P5 |
+
+**Okuma:** H9 büyük koşuları gerçekten önceden görüyor (8 kat) ama öğrendiği şey oynaklık; aynı hisseler
+7 kat daha sık çöküyor → para kaybı. H9b'nin en güçlü göstergeleri VIX, piyasa genişliği, IWM getirisi —
+yani "piyasa çöktükten sonra oynak küçük hisse al"; seçimlerin 112/257'si Nisan 2025 gümrük çöküşü
+haftası, 157'si BEAR rejiminde (tek olay, doğrulanamaz; rejim freniyle de çelişiyor). Teknik göstergelerle
+büyük koşu avı görülmemiş yıllarda para kazandırmadı. H9/H9b kapandı; canlı ürün değişmedi.
