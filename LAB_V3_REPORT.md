@@ -262,3 +262,51 @@ gölge moda eklenmedi.
 
 Tekrar üretim: `python lab/h0_sim.py --earnings {live,closed,off}` → `python lab/d1_eval.py`;
 `python lab/info_signals.py H4 H5 --pool large` → `python lab/d2_eval.py`.
+
+---
+
+## Ek E — Pipeline tanısı: hangi katman para kazandırıyor? (22 Kasım 2026)
+
+**Tanı.** Sonuçlar görüldükten sonra yapıldı; buradaki bulgulara bakıp ayar değiştirmek eğri
+uydurma olur (yeni ön kayıt + görülmemiş veri gerekir). Kod: [lab/pipeline_audit.py](lab/pipeline_audit.py).
+
+Ölçü: sinyal günü d → d+1 açılışta al, d+8 kapanışta sat (canlı ortanca tutuş 8 seans); aynı
+günkü havuz ortalamasına göre **fark** (puan, maliyet hariç). Bir katman işe yarıyorsa elediği
+hisseler geçirdiklerinden kötü gitmeli.
+
+| Katman | Geçen n | Geçen fark | Elenen n | Elenen fark | Yorum |
+|---|---:|---:|---:|---:|---|
+| Canlı evren (Finviz emülasyonu) | 154.431 | **+0.14** [+0.05, +0.23] | — | — | küçük ama gerçek |
+| Sert filtreler (fiyat/cap/dolar hacim) | 146.131 | +0.15 | 8.300 | −0.08 | doğru yönde |
+| Tetik (VCE / RVOL) | 7.796 | **+0.46** | 138.335 | +0.13 | +0.33 değer |
+| Swing onayı | 6.974 | +0.52 | 822 | −0.08 | doğru yönde |
+| RSI kapısı | 5.132 | +0.49 | 1.842 | +0.60 | etkisiz |
+| Weinstein aşama kapısı | 3.582 | +0.32 | 1.550 | **+0.89** | **ters yönde** (iyileri eliyor) |
+| Kalite eşiği | 539 | +0.49 | 3.043 | +0.29 | zayıf |
+| Bilanço kapısı | 478 | +0.08 | 61 | +3.71 [−0.4, +8.1] | belirsiz* |
+| Rejim eşiği + top N | 375 | −0.14 | 103 | +0.88 | ters yönde |
+| Kapasite / aynı hisse / cooldown | 351 | −0.10 | 24 | −0.71 | gürültü |
+| Gap filtresi | 328 | +0.15 | 23 | −3.69 | doğru yönde |
+
+Ters/etkisiz bulguların hiçbiri istatistiksel olarak anlamlı değil; yön bilgisi olarak okunmalı.
+*Bilanço kapısı: tam sistemde (D1) +0.22 puan/işlem kazandırdı, ama elediği 61 sinyal tek başına
+iyi gitti; değeri belirsiz, kural kararı (ön kayıtlı) geçerli.
+
+**Huninin sonunda açılan işlemler havuzu 8 seansta ancak +0.15 puan geçiyor; 50 bps maliyet
+bunun 3 katı.** Edge'in neredeyse tamamı evren seçimi ve tetikte; sonraki katmanlar eklemiyor.
+
+**Çıkış motoru** (aynı 331 giriş, brüt ortalama): gerçekleşen **+0.26%**; stop/hedef olmadan
+8 seans tutmak +0.48%, tip süresi kadar tutmak +0.49%. Stop'lanan 69 işlem −10.96% (sabit
+tutuşta −9.45%), trail'lenen 39 işlem +1.91% (sabit tutuşta +5.22%); 5 hedef işlemi +32.7%
+(sabit +16.4%). Çıkış mekanizması işlem başına ~0.2 puan kaybettiriyor.
+
+**Kalite skoru sıralama yapmıyor** (8 seans fark): <60 +0.76, 60–70 +0.26, 70–78 +0.21,
+78–82 −0.46, 82–86 +2.24, 86+ +0.14 — tekdüze değil. (Eski "Q80+ çok daha iyi" bulgusu kusurlu
+backtest'le ölçülmüştü.)
+
+**Tetik yolu:** VCE +1.62 [−1.3, +4.3] (211 sinyal), RVOL −0.24 [−1.4, +1.0] (328 sinyal). VCE
+yönü iyi ama kanıtsız; RVOL değer katmıyor. **Yıllar:** −0.6, +2.7, +2.8, −0.8, −2.0, +2.5 —
+kararsız.
+
+**Ürün ölçüm sorunu:** paper trading işlem maliyeti düşmüyor (yalnız stop gap kayması); ekrandaki
+kâr/zarar brüt, gerçek paradan işlem başına ~0.5 puan iyimser.
