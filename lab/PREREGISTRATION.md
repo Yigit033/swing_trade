@@ -266,3 +266,22 @@ evren + sert filtreler + bilanço kapısı + VCE tetiği + sabit tutuş. Tetikte
   DD < %35. Ayrıca aynı dönemde canlı ürünün kendi paper işlemleri (aynı 50 bps maliyetle)
   yan yana raporlanır. Otomatik terfi yok.
 - **Parametreler** H4/H5'ten ayrı bir hash ile kilitlenir; H4/H5 kuralları ve hash'i değişmez.
+
+---
+
+# Ek G — Durgun gün statik liste birleşimi (H0S)
+
+**Yazıldığı an: 2026-11-22, H0S'nin hiçbir sonucu görülmeden.** Canlı evren, Finviz 30'dan az
+hisse döndürdüğünde (`min_finviz_tickers_skip_static_merge=30`) 234 hisselik statik listeyle
+birleştiriliyor (tavan 300). 2021–2026'da bu günlerin oranı %14 (201 gün, Finviz emülasyonu).
+Lab replikası (H0) bu birleşimi içermiyordu.
+
+- **H0S:** H0 ile birebir aynı; tek fark durgun günlerde evren = Finviz üyeleri + statik liste
+  (canlı sırayla, tekilleştirilmiş, 300 tavan). Statik liste bugünkü koddaki liste.
+- **Ölçüt:** 50 bps net işlem başı ortalama ve %10/işlem portföy toplamı (onarılmış bilanço verisi).
+- **Karar kuralı:** H0S, H0'dan **hem** net/işlem **hem** portföy toplamında büyükse birleşim kalır.
+  Aksi halde birleşim kaldırılır: durgun günde yalnız Finviz'in döndürdüğü hisseler taranır
+  (statik liste yalnız kullanıcı Finviz'i kapatırsa kullanılır).
+- **Ayrıca raporlanır:** statik liste hisselerinden gelen sinyal sayısı ve 8 seans havuz farkı.
+- **Bilinen yanlılık:** statik listenin 32 hissesi lab verisinde yok (delist/ad değişikliği) →
+  dışarıda; liste geçmişte farklı olabilirdi (bugünkü liste geriye uygulanıyor).

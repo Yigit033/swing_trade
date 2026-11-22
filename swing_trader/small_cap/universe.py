@@ -460,6 +460,9 @@ class SmallCapUniverse:
         Criteria: market cap $250M-$2.5B, avg volume >500K, established momentum names.
         Used as fallback when Finviz is unavailable.
         """
+        # 2026-11-22 (Lab v3 Ek G): fiyat verisi olmayan 28 hisse çıkarıldı (üç bağımsız yfinance
+        # denemesinde veri yok: satın alınan/birleşen/iflas eden). Sinyal üretemiyorlardı; yalnız her
+        # taramada boşa Yahoo isteği ve hata üretiyorlardı. Birleşimin kendisi ölçüldü ve kaldı.
         static_list = [
             # === TECHNOLOGY / SEMICONDUCTORS ===
             'ACLS', 'AEIS', 'AMBA', 'COHU', 'CRDO', 'ENTG', 'FORM', 'HIMX',
@@ -468,50 +471,48 @@ class SmallCapUniverse:
             'OSIS', 'LYTS', 'DIOD', 'AOSL', 'AMAT', 'ONTO',
 
             # === SOFTWARE / CLOUD / AI ===
-            'APPF', 'BRZE', 'CARG', 'CFLT', 'DOCN', 'DUOL', 'ESTC', 'GTLB',
+            'APPF', 'BRZE', 'CARG', 'DOCN', 'DUOL', 'ESTC', 'GTLB',
             'HUBS', 'IONQ', 'MNDY', 'NCNO', 'PCTY', 'RAMP', 'RDDT', 'SMCI',
-            'SOUN', 'TASK', 'TOST', 'VERX', 'WEAV', 'XPOF', 'ZI', 'AMPL',
+            'SOUN', 'TASK', 'TOST', 'VERX', 'WEAV', 'XPOF', 'AMPL',
             'BBAI', 'CXAI', 'RSKD', 'BMBL', 'LSPD', 'ENVX',
 
             # === DEFENSE / AEROSPACE ===
             'BWXT', 'CACI', 'DRS', 'FTAI', 'HII', 'KTOS', 'LHX', 'MRCY',
-            'MOOG', 'RKLB', 'SPCE', 'TESI', 'VEC', 'ACHR', 'JOBY', 'LUNR',
-            'RDW', 'ASTS', 'ASTR', 'MNTS',
+            'RKLB', 'SPCE', 'TESI', 'ACHR', 'JOBY', 'LUNR',
+            'RDW', 'ASTS', 'MNTS',
 
             # === INDUSTRIALS / CONSTRUCTION ===
-            'AAON', 'APOG', 'AWI', 'BCC', 'CSWI', 'DY', 'EPAC', 'FELE',
-            'FLIR', 'GMS', 'HLIT', 'IBP', 'IESC', 'KFRC', 'LMB', 'MYRG',
-            'NVT', 'POWL', 'ROAD', 'SKYW', 'SSD', 'TPIC', 'TPC', 'WLDN',
-            'MLI', 'HAYW', 'GVP', 'NVEE', 'ROCK', 'SXI',
+            'AAON', 'APOG', 'AWI', 'BCC', 'DY', 'EPAC', 'FELE',
+            'HLIT', 'IBP', 'IESC', 'KFRC', 'LMB', 'MYRG',
+            'NVT', 'POWL', 'ROAD', 'SKYW', 'SSD', 'TPC', 'WLDN',
+            'MLI', 'HAYW', 'ROCK', 'SXI',
 
             # === ENERGY / CLEAN ENERGY / NUCLEAR ===
-            'AROC', 'BORR', 'DNOW', 'FTLF', 'HLX', 'MNRL', 'NNE', 'OKLO',
+            'AROC', 'BORR', 'DNOW', 'FTLF', 'NNE', 'OKLO',
             'RES', 'SMR', 'SOC', 'UUUU', 'WHD', 'OII', 'PUMP', 'TRGP',
-            'SWN', 'NEXT', 'SHLS', 'NOVA', 'FLNC', 'BLNK', 'EVGO',
+            'NEXT', 'SHLS', 'FLNC', 'BLNK', 'EVGO',
 
             # === HEALTHCARE / MEDICAL DEVICES ===
-            'ACAD', 'ADMA', 'ALEC', 'CERT', 'CPRX', 'HALO', 'HIMS',
-            'HRMY', 'IOVA', 'ITCI', 'LNTH', 'MDXH', 'NEOG', 'NTRA',
+            'ACAD', 'ADMA', 'ALEC', 'CERT', 'HALO', 'HIMS',
+            'HRMY', 'IOVA', 'LNTH', 'MDXH', 'NEOG', 'NTRA',
             'NVAX', 'PRCT', 'PRTA', 'PTGX', 'RDNT', 'ROIV', 'VCEL',
-            'VRDN', 'ACLX', 'BCAB', 'CRSP', 'NBIX', 'PCVX', 'VKTX',
+            'VRDN', 'BCAB', 'CRSP', 'NBIX', 'PCVX', 'VKTX',
 
             # === CONSUMER / RESTAURANTS / RETAIL ===
-            'BOOT', 'CAKE', 'CAVA', 'CELH', 'CHEF', 'CHUY', 'EAT', 'ELF',
+            'BOOT', 'CAKE', 'CAVA', 'CELH', 'CHEF', 'EAT', 'ELF',
             'FIGS', 'FIZZ', 'GRBK', 'JACK', 'KRUS', 'LOCO', 'PLAY', 'PTLO',
             'RVLV', 'SFM', 'SHAK', 'USPH', 'VITL', 'WING', 'XPOF', 'BROS',
-            'TXRH', 'NCLH', 'HGV', 'MODV', 'OUST', 'LOVE',
+            'TXRH', 'NCLH', 'HGV', 'OUST', 'LOVE',
 
             # === FINANCIAL / FINTECH ===
             'ARIS', 'AVNT', 'CATY', 'ESAB', 'EVTC', 'FCNCA', 'FULT', 'HCI',
-            'HFWA', 'IIIV', 'JNPR', 'MGNI', 'NMIH', 'PAYO', 'PLMR', 'PPBI',
-            'STEP', 'TBBK', 'TNET', 'TPVG', 'WSFS', 'CUBI', 'NBTB', 'FFBC',
+            'HFWA', 'IIIV', 'MGNI', 'NMIH', 'PAYO', 'PLMR',             'STEP', 'TBBK', 'TNET', 'TPVG', 'WSFS', 'CUBI', 'NBTB', 'FFBC',
 
             # === MATERIALS / SPECIALTY ===
-            'AXTI', 'GATO', 'HWKN', 'KALU', 'MTRN', 'NGVT', 'PRIM', 'SXC',
-            'TREC', 'USLM', 'WDFC', 'WTS', 'ZEUS', 'SLCA', 'FWRD', 'ATRI',
-
+            'AXTI', 'HWKN', 'KALU', 'MTRN', 'NGVT', 'PRIM', 'SXC',
+            'USLM', 'WDFC', 'WTS', 'FWRD', 
             # === MOMENTUM / BREAKOUT NAMES (current cycle) ===
-            'AEHR', 'ATKR', 'NNE', 'SMR', 'OKLO', 'IONQ', 'RKLB',
+            'AEHR', 'NNE', 'SMR', 'OKLO', 'IONQ', 'RKLB',
             'SOFI', 'PLTR', 'ACHR', 'BBAI', 'SOUN', 'SMCI', 'CRDO',
             'NVAX', 'HIMS', 'CAVA', 'ELF', 'CELH', 'RDDT',
         ]

@@ -366,3 +366,28 @@ sağlık kuralı (brüt fark > 0) sağlandı → gölgeye alındı. Beklenti: F4
 kilidi (`178c293e…`) değişmedi, H6 ayrı kilitli (`86a8947e…`). Production çıkış kuralı lab'daki
 300 H6 işlemini birebir üretiyor. Gölge sayfası aynı dönemde canlı ürünün paper işlemlerini aynı
 50 bps maliyetle yan yana gösteriyor. Kapı: ≥6 ay, ≥100 işlem, net > 0 (CI), portföy > IWM, DD < %35.
+
+---
+
+## Ek G — Durgun gün statik liste birleşimi (22 Kasım 2026)
+
+Canlı evren, Finviz 30'dan az hisse döndürdüğünde statik listeyle birleşiyor. 2021–2026'da bu
+günlerin oranı **%14** (201 gün). Ön kayıt Ek G (sonuçtan önce) karar kuralıyla ölçüldü.
+
+| | Taranan | Sinyal | Sinyal oranı |
+|---|---:|---:|---:|
+| Durgun günlerde Finviz hisseleri | 3.616 | 19 | %0.53 |
+| Durgun günlerde eklenen statik hisseler | 40.181 | **3** | %0.008 |
+
+Statik hisselerin %30'u sert filtrede (büyük cap / yüksek fiyat / düşük hacim), %70'i tetikte
+eleniyor: önceden süzülmemiş isimler neredeyse hiç kırılım vermiyor.
+
+| | İşlem | Net/işlem (50 bps) | Portföy | Max DD |
+|---|---:|---:|---:|---:|
+| H0 (birleşimsiz) | 331 | −0.240% | −11.8% | −22.3% |
+| H0S (canlı tasarım) | 333 | −0.236% | −11.7% | −22.6% |
+
+**Karar (ön kayıtlı kural): birleşim kalıyor** — iki ölçüt de çok az yukarıda; pratik etkisi 6 yılda
+2 işlem. Davranışı değiştirmeyen temizlik: statik listedeki **28 ölü hisse** (üç bağımsız yfinance
+denemesinde veri yok: satın alınan/birleşen/iflas eden) çıkarıldı; sinyal üretemiyorlardı, her
+taramada boşa istek ve hata üretiyorlardı. Liste 234 → 206.
