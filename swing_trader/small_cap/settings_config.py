@@ -185,6 +185,9 @@ class SmallCapSettings(BaseModel):
     # NET P/L de bunu kullanır (paper_trading/costs.py). 2026-11-22: 5 → 10 — ölçülmüş proxy
     # (taban 8 bps + likidite/ATR eki) gidiş-dönüş ~0.19 puan verdi; 5 ölçümsüz bir varsayımdı.
     slippage_bps_per_side: int = Field(default=10, ge=0, le=100)
+    # Aracı kurum sabit emir ücreti, kenar başına $ (Midas ABD: 1.5$/emir, getmidas.com/ucretler, 2026-11).
+    # Tutara bağlı değil → spread'den ayrı düşülür: 1.000$'lık pozisyonda gidiş-dönüş %0.30.
+    commission_usd_per_side: float = Field(default=1.5, ge=0.0, le=50.0)
 
     # --- Regime-driven scan floors (scanner / backtest) ---
     regime_thresholds: RegimeThresholds = Field(default_factory=RegimeThresholds)

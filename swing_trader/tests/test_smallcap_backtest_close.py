@@ -19,7 +19,7 @@ def _open(**kw):
 @pytest.fixture
 def bt():
     b = SmallCapBacktester(config=None)
-    b.settings = b.settings.model_copy(update={"slippage_bps_per_side": 0})
+    b.settings = b.settings.model_copy(update={"slippage_bps_per_side": 0, "commission_usd_per_side": 0.0})
     b.initial_capital = b.capital = 10_000
     return b
 
@@ -54,9 +54,24 @@ def test_fill_prices_slip_zero(bt):
 
 def test_slippage_charged_on_both_legs():
     b = SmallCapBacktester(config=None)
-    b.settings = b.settings.model_copy(update={"slippage_bps_per_side": 50})
+    b.settings = b.settings.model_copy(update={"slippage_bps_per_side": 50, "commission_usd_per_side": 0.0})
     b.initial_capital = b.capital = 10_000
     tr = _open(entry_price=100.0, size=10, exit_price=100.0, initial_risk=100.0)
     b._close_trade(tr, 100.0, tr["exit_day"], "TIMEOUT", "", 3)
     # giriş 100.5, çıkış 99.5 → 10 × −1.0
     assert b.trades[0]["pnl_dollar"] == pytest.approx(-10.0)
+
+
+def test_midas_fee_charged_per_order(bt):
+    """Sabit emir ücreti: tam işlemde 2 emir, kısmi satışlı işlemde 3 emir."""
+    bt.settings = bt.settings.model_copy(update={"commission_usd_per_side": 1.5})
+    tr = _open()
+    bt._close_trade(tr, 11.0, tr["exit_day"], "TIMEOUT", "", 3)
+    assert bt.trades[0]["pnl_dollar"] == 10.0 - 3.0 and abs(bt.capital - 10_007.0) < 0.01
+    tr = _open(sold=5, partial_price=11.0, partial_day=pd.Timestamp("2026-10-02"))
+    bt.open_trades = [tr]
+    bt._settle_exits(pd.Timestamp("2026-10-02"))
+    tr["exit_price"] = 12.0
+    bt._settle_exits(pd.Timestamp("2026-10-05"))
+    assert bt.trades[1]["pnl_dollar"] == 15.0 - 4.5
+    assert abs(bt.capital - (10_007.0 + 10.5)) < 0.01

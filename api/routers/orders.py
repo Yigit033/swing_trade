@@ -49,7 +49,9 @@ def _nth_session(start: date, n: int) -> date:
     return d
 
 
-def build_orders(trades: List[Dict], today: date, account: float) -> Dict:
+def build_orders(trades: List[Dict], today: date, account: float, cost_pct: float = 0.0, fee: float = 0.0) -> Dict:
+    """account = başlangıç tutarı; özsermaye = başlangıç + kapanmış H6S işlemlerinin net sonucu (Ek M)."""
+    from swing_trader.paper_trading.costs import account_equity
     from swing_trader.paper_trading.storage import strategy_of
     from swing_trader.shadow.rules import PARAMS_H6S
     from swing_trader.utils.market_calendar import is_trading_day, next_trading_day
@@ -83,10 +85,14 @@ def build_orders(trades: List[Dict], today: date, account: float) -> Dict:
                    overdue=exit_day < session, trade_id=t.get("id"))
         (sell if exit_day <= session else hold_rows).append(row)
     from swing_trader.paper_trading.risk_rules import loss_streak_active
-    brake = loss_streak_active([t for t in trades if strategy_of(t) == "H6S"])
+    mine = [t for t in trades if strategy_of(t) == "H6S"]
+    brake = loss_streak_active(mine)
+    equity = account_equity(account, mine, cost_pct, fee)
+    free = round(equity - held, 2)
     key = lambda r: r["ticker"]
-    return dict(session=session.isoformat(), account=account, held=round(held, 2), loss_streak_brake=brake,
-                free=round(account - held, 2), hold_sessions=hold, stop_atr=k,
+    return dict(session=session.isoformat(), start=account, account=equity, held=round(held, 2),
+                loss_streak_brake=brake, free=free, idle_pct=round(100 * free / equity, 1) if equity > 0 else 0.0,
+                fee_per_order=fee, hold_sessions=hold, stop_atr=k,
                 buy=sorted(buy, key=key), sell=sorted(sell, key=key), hold=sorted(hold_rows, key=key))
 
 
@@ -94,7 +100,9 @@ def build_orders(trades: List[Dict], today: date, account: float) -> Dict:
 def get_orders():
     """Bugünün Midas emirleri (H6S hesabı, auto-scan sahibi). Giriş zorunlu."""
     from api.deps import get_paper_storage
+    from swing_trader.paper_trading.costs import commission_usd, round_trip_cost_pct
     from swing_trader.small_cap.settings_config import load_settings
+    s = load_settings()
     rows = [t for t in (get_paper_storage().get_all_trades(None) or []) if t.get("user_id") is None]
     today = datetime.now(timezone.utc).astimezone(NY).date()
-    return build_orders(rows, today, float(load_settings().auto_scan.portfolio_value))
+    return build_orders(rows, today, float(s.auto_scan.portfolio_value), round_trip_cost_pct(s), commission_usd(s))

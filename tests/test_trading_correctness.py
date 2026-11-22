@@ -294,6 +294,7 @@ def test_backtest_exit_is_live_execution_evaluate():
     bt=SmallCapBacktester()
     bt.settings=bt.settings.model_copy(deep=True)
     bt.settings.slippage_bps_per_side=0  # isolate accounting, not a production edit
+    bt.settings.commission_usd_per_side=0.0  # çıkış paritesi; ücret ayrı testte
     tape=bars([('2026-10-01',100,130,99,120)]);tape.Date=pd.to_datetime(tape.Date)
     bt._data={'TEST':tape};bt._end=pd.Timestamp('2026-10-01')
     sig=dict(ticker='TEST',swing_type='A',quality_score=85,rank_score=85,hold_days_max=20)

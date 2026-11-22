@@ -58,7 +58,12 @@ def boot_ci(T, col, n=2000, seed=7):
 
 
 def portfolio(T, frac=0.10, cost=COST, cap0=10_000.0):
-    """Daily mark-to-market, fixed fraction of current equity per trade, cash-limited."""
+    """Daily mark-to-market, fixed fraction of current equity per trade, cash-limited.
+
+    Ek M (2026-11-22) gün içi sıra düzeltmesi: girişler AÇILIŞTA önceki kapanış değerlemesiyle boyutlanır;
+    o gün kapanışta/gün içinde çıkan işlemin nakdi aynı açılıştaki girişe kullandırılmaz. Eski sürüm H6S
+    için portföyü ~+12 puan iyimser gösteriyordu (67.1% → 54.7%, L2 freniyle).
+    """
     P = panels()
     C = P["Close"]
     T = T.sort_values(["entry_day", "key"], ascending=[True, False]) if "key" in T else T.sort_values("entry_day")
@@ -67,15 +72,7 @@ def portfolio(T, frac=0.10, cost=COST, cap0=10_000.0):
     cash, pos, curve, taken = cap0, [], [], 0
     taken_ret = []
     for d in days:
-        # exits at today's close (stop exits intraday — value at recorded exit price)
-        keep = []
-        for p in pos:
-            if p["exit_day"] == d:
-                cash += p["sh"] * p["exit_price"] * (1 - cost / 200)
-            else:
-                keep.append(p)
-        pos = keep
-        eq_open = cash + sum(p["sh"] * (C.at[d, p["t"]] if np.isfinite(C.at[d, p["t"]]) else p["last"]) for p in pos)
+        eq_open = cash + sum(p["sh"] * p["last"] for p in pos)          # önceki kapanış değerlemesi
         for r in by_entry.get(d, pd.DataFrame()).itertuples():
             alloc = frac * eq_open
             if alloc > cash or r.entry_price <= 0:
@@ -85,10 +82,14 @@ def portfolio(T, frac=0.10, cost=COST, cap0=10_000.0):
             taken += 1
             taken_ret.append(r.ret_pct - cost)
             xp = r.entry_price * (1 + r.ret_pct / 100)
-            if r.exit_day == d:
-                cash += sh * xp * (1 - cost / 200)
+            pos.append(dict(t=r.ticker, sh=sh, exit_day=r.exit_day, exit_price=xp, last=r.entry_price))
+        keep = []                                     # gün içi / kapanış çıkışları — girişlerden SONRA
+        for p in pos:
+            if p["exit_day"] == d:
+                cash += p["sh"] * p["exit_price"] * (1 - cost / 200)
             else:
-                pos.append(dict(t=r.ticker, sh=sh, exit_day=r.exit_day, exit_price=xp, last=r.entry_price))
+                keep.append(p)
+        pos = keep
         for p in pos:
             v = C.at[d, p["t"]]
             if np.isfinite(v):

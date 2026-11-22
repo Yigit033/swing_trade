@@ -393,3 +393,34 @@ nakit sınırlı portföy (50 bps). Her kural AYRI ölçülür; tek parametre se
 - **Karar kuralı (her kural için):** portföy toplam getirisi ≥ taban VE max düşüş ≤ taban (ikisi birden;
   biri kötüleşirse eklenmez). İkisi de geçerse birleşimi raporlanır; birleşim aynı kurala tabidir.
 - Geçen kural canlı H6S hesabına eklenir; gölge H6S (Ek J2, donmuş) değişmez ve kuralın kontrolü olur.
+
+# Ek M — Kâğıttan Midas'a: uygulanabilir çıkış, boyutlama, gece boşluğu, boş nakit
+
+**Yazıldığı an: 2026-11-22, hiçbir sonuç görülmeden.** Taban: canlı ürün = H6S + L2 freni, Ek L portföyü
+(%10 bileşik, nakit sınırlı, 50 bps). Tek parametre seti, tarama yok.
+
+**Gün içi sıralama düzeltmesi (gerçeklik şartı, sonuca bakılmadan):** Ek L portföyü giriş günü boyutunu o
+günün KAPANIŞ değerlemesiyle hesaplıyor ve o günün kapanışında çıkan işlemin nakdini/sonucunu aynı günün
+AÇILIŞINDAKİ girişe (ve frene) kullandırıyordu — küçük ileri bakış. Ek M portföyü günü sırayla işler:
+açılışta gerçekleşen çıkışlar (açılıştan dolan stop, M1 açılış çıkışı) → açılış girişleri (boyut önceki
+kapanış değerlemesiyle) → gün içi/kapanış çıkışları → kapanış değerlemesi. Taban bu düzeltmeyle yeniden
+hesaplanır; eski değer de yanında raporlanır. Tüm M kararları düzeltilmiş tabana göredir.
+
+- **M1 — Süre çıkışı 9. seans açılışında** (8. seans kapanışı yerine). Stop çıkışları aynı; stop 9. seans
+  açılışına kadar geçerli (açılış stopun altındaysa zaten açılıştan çıkılır). Gerekçe: NYSE kapanışı
+  Türkiye saatiyle 24:00 (yazın 23:00), açılış 17:30 (yazın 16:30); alış zaten açılışta → tüm emirler tek
+  saatte. **Karar:** portföy toplamı ≥ taban − 2 puan VE max düşüş taban − 1 puandan kötü değil VE işlem
+  başı net ≥ taban − 0.05 puan → benimse. Tolerans önceden ilan edildi: gece yarısı emri kaçırmanın
+  beklenen maliyeti bu farktan büyük.
+- **M2 — Eşit riskli boyut:** pozisyon tutarı = özsermaye × r ÷ (2.5 × ATR14 ÷ sinyal kapanışı), en çok
+  %20. r, aday işlemlerin ortalama tutarı %10 olacak şekilde YALNIZ ATR'den çözülür (getiri kullanılmaz).
+  Fren r'yi yarıya indirir. **Karar:** toplam ≥ taban VE max düşüş ≤ taban VE iki yarının her birinde
+  (2021–2023 / 2024–son, her biri 10.000$'dan) toplam ≥ tabanın o yarıdaki toplamı.
+- **M3 — Gece boşluğu (tanımlayıcı):** sinyal günü kapanışında girmek (aynı çıkış) ertesi açılışa göre
+  işlem başı ne kazandırırdı? Kurmaya değer eşiği (kapanıştan önce tahmini tarama + Türkiye saatiyle
+  ~23:45 emir gerektirir): işlem başı iyileşme ≥ +0.30 puan VE iki yarıda da pozitif. Değilse kapanır.
+- **M4 — Boş nakit (tanımlayıcı):** taban portföyün ortalama boş nakit oranı ve bu nakdin 3 aylık hazine
+  bonosu getirisiyle (^IRX, günlük tahakkuk) ekleyeceği toplam. Karar kuralı yok; bilgi olarak raporlanır.
+- **Gerçeklik şartı (canlı, sonuca bakılmadan):** canlı H6S hesabı lab gibi bileşik olur: hesap =
+  başlangıç + kapanmış H6S işlemlerinin maliyet sonrası kâr/zararı; pozisyon boyutu ve nakit sınırı
+  bundan hesaplanır (şu an sabit başlangıç tutarı kullanılıyor — gerçek Midas hesabı böyle davranmaz).

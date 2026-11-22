@@ -76,13 +76,14 @@ def test_performance_reports_net_of_trading_cost(monkeypatch):
     monkeypatch.setattr(performance, 'get_paper_storage', lambda: storage)
     body = client_for(performance.router, '/api/performance').get('/api/performance').json()
     s = body['summary']
-    assert s['cost_round_trip_pct'] == 0.5
+    assert s['cost_round_trip_pct'] == 0.5 and s['commission_usd_per_side'] == 1.5   # Midas 1.5$/emir
     assert s['win_rate'] == 100.0 and s['total_pnl_pct'] == 10.3          # brüt değişmedi
-    assert s['net_total_pnl_pct'] == pytest.approx(9.3)                    # 0.30−0.50 + 10.0−0.50
+    # her işlem 1.000$ → 2 emir × 1.5$ = %0.30 ek: (0.30−0.50−0.30) + (10.0−0.50−0.30)
+    assert s['net_total_pnl_pct'] == pytest.approx(8.7)
     assert (s['net_wins'], s['net_losses'], s['net_win_rate']) == (1, 1, 50.0)
-    assert s['net_total_pnl'] == pytest.approx(3.0 - 5.0 + 100.0 - 5.0)    # tutar × %0.50
+    assert s['net_total_pnl'] == pytest.approx(3.0 - 5.0 - 3.0 + 100.0 - 5.0 - 3.0)
     rows = {t['ticker']: t for t in body['recent_closed']}
-    assert rows['WIN']['net_pnl_pct'] == pytest.approx(-0.2) and 'net_pnl' not in rows['REJ']
+    assert rows['WIN']['net_pnl_pct'] == pytest.approx(-0.5) and 'net_pnl' not in rows['REJ']
 
 
 def test_execution_warning_survives_update_and_patch_contract(monkeypatch):
@@ -210,3 +211,36 @@ def test_midas_orders_show_loss_streak_brake():
                    realized_pnl_pct=-2.0) for i in range(3)]
     assert build_orders(losers, _d(2026, 11, 23), 10000.0)["loss_streak_brake"] is True
     assert build_orders(losers[:2], _d(2026, 11, 23), 10000.0)["loss_streak_brake"] is False
+
+
+def test_net_of_cost_includes_fixed_midas_fee():
+    from swing_trader.paper_trading.costs import net_of_cost
+    t = dict(entry_price=10.0, position_size=100, realized_pnl=20.0, realized_pnl_pct=2.0)
+    assert net_of_cost(t, 0.20, 1.5) == (15.0, 1.5)                       # 20 − 2 spread − 2×1.5 ücret
+    assert net_of_cost(dict(t, partial_exit_price=11.0), 0.20, 1.5) == (13.5, 1.35)   # kısmi satış = 3. emir
+    assert net_of_cost(t, 0.20) == (18.0, 1.8)                            # ücretsiz çağrı eski sonuç
+
+
+def test_account_equity_compounds_closed_net():
+    from swing_trader.paper_trading.costs import account_equity
+    rows = [dict(status="TIMEOUT", entry_price=10.0, position_size=100, realized_pnl=50.0, realized_pnl_pct=5.0),
+            dict(status="STOPPED", entry_price=20.0, position_size=50, realized_pnl=-30.0, realized_pnl_pct=-3.0),
+            dict(status="OPEN", entry_price=5.0, position_size=10, realized_pnl=None, realized_pnl_pct=None),
+            dict(status="REJECTED", entry_price=5.0, position_size=10, realized_pnl=0.0, realized_pnl_pct=0.0)]
+    # 10.000 + (50 − 2 − 3) + (−30 − 2 − 3) = 10.010
+    assert account_equity(10_000, rows, 0.20, 1.5) == 10_010.0
+
+
+def test_midas_orders_use_compounded_equity():
+    from datetime import date as _d
+    from api.routers.orders import build_orders
+    rows = [dict(id=1, ticker="WIN", status="TIMEOUT", strategy="H6S", exit_date="2026-11-18",
+                 entry_price=10.0, position_size=100, realized_pnl=500.0, realized_pnl_pct=50.0),
+            dict(id=2, ticker="NEW", status="PENDING", strategy="H6S", entry_date="2026-11-20 16:40",
+                 signal_price=20.0, entry_price=20.0, position_size=50, atr=1.0),
+            dict(id=3, ticker="OLDW", status="TIMEOUT", strategy=None, exit_date="2026-11-18",
+                 entry_price=10.0, position_size=100, realized_pnl=900.0, realized_pnl_pct=90.0)]
+    o = build_orders(rows, _d(2026, 11, 23), 10000.0, 0.20, 1.5)
+    assert o["start"] == 10000.0 and o["account"] == 10000 + 500 - 2 - 3      # LEGACY kârı H6S hesabına girmez
+    assert o["free"] == 10495.0 - 1000.0 and o["idle_pct"] == round(100 * 9495 / 10495, 1)
+    assert o["fee_per_order"] == 1.5

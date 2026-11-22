@@ -118,11 +118,11 @@ def get_performance(user_id: Optional[str] = Depends(get_current_user_id),
     avg_pnl_pct = round(sum(pnl_pcts) / len(pnl_pcts), 2) if pnl_pcts else 0
 
     # Maliyet sonrası (gerçek para) — paper fiyatları maliyetsiz; tek kaynak slippage_bps_per_side.
-    from swing_trader.paper_trading.costs import net_of_cost, round_trip_cost_pct
-    cost_pct = round_trip_cost_pct()
+    from swing_trader.paper_trading.costs import commission_usd, net_of_cost, round_trip_cost_pct
+    cost_pct, fee = round_trip_cost_pct(), commission_usd()
     net_rows = []
     for t in valid_closed:
-        n_usd, n_pct = net_of_cost(t, cost_pct)
+        n_usd, n_pct = net_of_cost(t, cost_pct, fee)
         if n_pct is not None:
             t["net_pnl"], t["net_pnl_pct"] = n_usd, n_pct
             net_rows.append((n_usd, n_pct))
@@ -130,6 +130,7 @@ def get_performance(user_id: Optional[str] = Depends(get_current_user_id),
     net_losses = sum(1 for _, p in net_rows if p < 0)
     net_summary = {
         "cost_round_trip_pct": round(cost_pct, 3),
+        "commission_usd_per_side": fee,
         "net_total_pnl": round(sum(u for u, _ in net_rows), 2),
         "net_total_pnl_pct": round(sum(p for _, p in net_rows), 2),
         "net_avg_pnl_pct": round(sum(p for _, p in net_rows) / len(net_rows), 2) if net_rows else 0,

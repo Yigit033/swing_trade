@@ -232,6 +232,8 @@ export interface PerformanceSummary {
     avg_loss: number;
     // Maliyet sonrası (gerçek para): gidiş-dönüş maliyet = 2 × slippage_bps_per_side
     cost_round_trip_pct?: number;
+    /** Aracı kurum sabit emir ücreti, $ (Midas ABD 1.5) — net P/L'e dahil */
+    commission_usd_per_side?: number;
     net_total_pnl?: number;
     net_total_pnl_pct?: number;
     net_avg_pnl_pct?: number;
@@ -487,6 +489,7 @@ export interface BacktestResult {
         /** null = canlı ürün gibi sınırsız (yalnız rejim kapasitesi) */
         max_concurrent: number | null;
         slippage_bps_per_side?: number;
+        commission_usd_per_side?: number;
         partial_at_t1_fraction?: number;
         cooldown_days?: number;
         live_parity?: boolean;
@@ -763,5 +766,7 @@ export type OrderPos = { ticker: string; shares: number; entry_price: number; st
     sell_day: string; current_price?: number | null; overdue: boolean; trade_id?: number };
 export type OrdersData = { session: string; account: number; held: number; free: number; hold_sessions: number;
     loss_streak_brake?: boolean;
+    /** Ek M: başlangıç tutarı; account = bileşik özsermaye (başlangıç + kapanmış net) */
+    start?: number; idle_pct?: number; fee_per_order?: number;
     stop_atr: number; buy: OrderBuy[]; sell: OrderPos[]; hold: OrderPos[] };
 export const getOrders = () => api.get<OrdersData>("/api/orders").then((r) => r.data);

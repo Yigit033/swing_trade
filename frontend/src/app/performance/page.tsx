@@ -100,6 +100,7 @@ export default function PerformancePage() {
     const netPct = (t: Trade) => t.net_pnl_pct ?? t.realized_pnl_pct ?? 0;
     const netUsd = (t: Trade) => t.net_pnl ?? t.realized_pnl ?? 0;
     const costPct = s?.cost_round_trip_pct;
+    const feeUsd = s?.commission_usd_per_side;
 
     const sortedClosed = [...closed].sort((a, b) => (a.exit_date || "").localeCompare(b.exit_date || ""));
     let cumPnl = 0;
@@ -146,7 +147,7 @@ export default function PerformancePage() {
                 <MetricCard
                     label="NET işlem getirileri toplamı % (maliyet sonrası; portföy getirisi değil)"
                     value={s ? fmtSigned(s.net_total_pnl_pct ?? s.total_pnl_pct) + "%" : "—"}
-                    sub={s ? `Ort. net ${(s.net_avg_pnl_pct ?? s.avg_pnl_pct).toFixed(2)}% / işlem · brüt toplam ${fmtSigned(s.total_pnl_pct)}%${costPct != null ? ` · maliyet ${costPct.toFixed(2)}% / işlem` : ""}` : undefined}
+                    sub={s ? `Ort. net ${(s.net_avg_pnl_pct ?? s.avg_pnl_pct).toFixed(2)}% / işlem · brüt toplam ${fmtSigned(s.total_pnl_pct)}%${costPct != null ? ` · maliyet ${costPct.toFixed(2)}% / işlem` : ""}${feeUsd ? ` + ${feeUsd}$ × emir` : ""}` : undefined}
                     color={s && (s.net_total_pnl_pct ?? s.total_pnl_pct) >= 0 ? "#22c55e" : "#ef4444"}
                     icon={Percent}
                 />

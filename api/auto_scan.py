@@ -271,24 +271,26 @@ def _auto_track_h6s(tracker, us) -> dict:
     if regime == "BEAR" and PARAMS_H6S["bear_block"]:
         logger.info("Auto-scan H6S: small-cap regime BEAR — %d hit(s), no entries", len(hits))
         return out
-    account = float(us.portfolio_value)
-    # Ek L2: kayıp serisi freni — son 3 kapanış hepsi zararlıysa yarım boyut (ölçüldü, eklendi)
+    from swing_trader.paper_trading.costs import account_equity, commission_usd, round_trip_cost_pct
+    from swing_trader.paper_trading.risk_rules import loss_streak_active
+    from swing_trader.paper_trading.storage import strategy_of
+    start = float(us.portfolio_value)
     pct = float(us.h6s_position_pct)
-    brake = False
-    if us.h6s_loss_streak_brake:
-        from swing_trader.paper_trading.risk_rules import loss_streak_active
-        from swing_trader.paper_trading.storage import strategy_of
-        try:
-            closed = [t for t in (tracker.storage.get_closed_trades(limit=200, user_id=None) or [])
-                      if t.get("user_id") is None and strategy_of(t) == "H6S"]
-            brake = loss_streak_active(closed)
-        except Exception:
-            # Geçmiş okunamazsa temkinli taraf: yarım boyut (girişleri tümden kaçırmak yerine)
-            logger.exception("Auto-scan H6S: closed trades unavailable — loss-streak brake assumed ON")
-            brake = True
-        if brake:
-            pct /= 2
+    try:
+        closed = [t for t in (tracker.storage.get_closed_trades(limit=100_000, user_id=None) or [])
+                  if t.get("user_id") is None and strategy_of(t) == "H6S"]
+        # Ek M: hesap bileşik — başlangıç + kapanmış H6S işlemlerinin maliyet+ücret sonrası sonucu
+        account = account_equity(start, closed, round_trip_cost_pct(), commission_usd())
+        # Ek L2: kayıp serisi freni — son 3 kapanış hepsi zararlıysa yarım boyut (ölçüldü, eklendi)
+        brake = bool(us.h6s_loss_streak_brake) and loss_streak_active(closed)
+    except Exception:
+        # Geçmiş okunamazsa temkinli taraf: başlangıç tutarı + (fren açıksa) yarım boyut
+        logger.exception("Auto-scan H6S: closed trades unavailable — start equity, loss-streak brake assumed ON")
+        account, brake = start, bool(us.h6s_loss_streak_brake)
+    if brake:
+        pct /= 2
     out["loss_streak_brake"] = brake
+    out["equity"] = account
     active = tracker.storage.count_active_trades_for_owner(None, strategy="H6S")
     held = tracker.storage.active_notional_for_owner(None, strategy="H6S")
     added, skipped = [], []

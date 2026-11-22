@@ -531,3 +531,59 @@ zararı küçültüyor, boşa çıkan nakit sonraki kazançlı işlemlere gidiyo
 Canlı: `auto_scan.h6s_loss_streak_brake` (açık), kural `paper_trading/risk_rules.py`; geçmiş okunamazsa
 temkinli taraf (yarım boyut). Midas Emirleri sayfası fren aktifken uyarı gösteriyor. Gölge H6S (donmuş)
 frensiz devam ediyor → frenin ileri veride kontrolü.
+
+## Ek M — Kâğıttan Midas'a: çıkış saati, boyutlama, gece boşluğu, boş nakit, gerçek ücret (22 Kasım 2026)
+
+Ön kayıt Ek M (SHA256 `f359c1e4…`, 12:40Z, sonuçtan önce). Taban = canlı ürün (H6S + L2 freni).
+Betik: `lab/execution_m.py` → `output/lab/m_execution.json`.
+
+**Önce bir düzeltme (bulunan hata, örtbas yok):** lab portföyü bir günün kapanışında çıkan işlemin nakdini
+aynı günün AÇILIŞINDAKİ girişe kullandırıyordu ve boyutu giriş günü kapanışıyla hesaplıyordu. Gün içi
+gerçek sırayla taban **+67.1% → +54.7%** (max DD −29.4%). `lab/evaluate.portfolio` düzeltildi; önceki
+eklerdeki portföy sayıları bu kadar iyimserdir (stratejiler arası kıyas aynı yanlılıkla yapıldığı için
+sıralamalar değişmez). Ek L freni düzeltilmiş sırayla yeniden doğrulandı: frensiz +50.0% → frenli +54.7%,
+DD eşit (−29.4%) → **geçiyor**.
+
+| Ölçüm (6 yıl, $10K, %10/işlem, 50 bps) | İşlem başı net | Portföy | Max DD | Karar |
+|---|---:|---:|---:|---|
+| Taban (H6S + fren, düzeltilmiş sıra) | +0.64% | **+54.7%** | −29.4% | — |
+| M1 çıkış 9. seans açılışında | +0.75% | +59.9% | **−35.1%** | ❌ DD 5.7 puan kötü (tolerans 1) |
+| M2 eşit riskli boyut (r=%0.88, ort. tutar %8.7) | +0.64% | +44.1% | −22.9% | ❌ toplam düştü |
+| M3 sinyal kapanışında giriş (gece boşluğu) | +0.16 puan | — | — | ❌ eşik +0.30 (kurmaya değmez) |
+| **M4 boş nakde hazine faizi (^IRX ort. %3.29)** | — | **+78.0%** | **−26.3%** | bilgi: **+23.3 puan** |
+
+**Asıl bulgu — boş nakit:** hesap zamanın ortalama **%74'ünde nakitte**. Sinyaller kümelenerek geliyor: o
+günlerde nakit yetmiyor (1.145 sinyalin ~480'i atlandı), diğer günler para boş duruyor. Bu boş nakde faiz
+almak hem getiriyi artırıyor hem düşüşü küçültüyor. Midas'ta boştaki dolar "Dolar Getirisi" ile günlük
+faiz işler (aktivasyon gerekir; oran Midas'tan teyit edilmeli) → ek emir gerekmez. Emirler sayfası boş
+nakdi ve bu hatırlatmayı gösteriyor.
+
+**IWM kıyası (dürüst tablo):** aynı dönemde IWM fiyatı +46.6% (DD −31.9%). H6S (+54.7%) toplamda IWM'i
+ancak az farkla geçiyor ve **farkın tamamı 2021–2023'ten** geliyor: 2021–23 H6S +50.8% / IWM +6.2%;
+2024–26 H6S **+2.6%** / IWM +38.1%. Yani H6S'nin kazancı büyük ölçüde rejim freninin 2022 düşüşünden
+kaçmasından geliyor; yükselen piyasada (2024–26) endeksin çok gerisinde kaldı. İleri test bunu çözecek.
+
+**Gerçek Midas ücreti (sonradan, gerçeklik kontrolü):** Midas ABD işlemlerinde emir başına sabit **1.5$**
+alıyor (getmidas.com/ucretler). 10.000$ hesapta 1.000$'lık pozisyonda gidiş-dönüş %0.30, fren yarım
+boyutunda %0.60. Fren bu ücretle yeniden ölçüldü:
+
+| Hesap, spread/kayma | Frensiz | Frenli | Fren kuralı (toplam ≥ VE DD ≤) |
+|---|---|---|---|
+| 10K$, 20 bps (canlı ayar) + 1.5$ | +60.1% / −28.9% | +63.2% / −28.1% | ✅ |
+| 10K$, 50 bps + 1.5$ (kötümser) | +30.6% / −30.9% | +35.7% / −31.8% | DD 0.9 puan kötü |
+| 25K$, 20 bps + 1.5$ | +73.0% / −28.4% | +76.7% / −26.4% | ✅ |
+| 25K$, 50 bps + 1.5$ | +42.2% / −29.7% | +46.5% / −30.6% | DD 0.9 puan kötü |
+
+Fren her senaryoda toplam getiriyi +3–5 puan artırıyor; DD etkisi ±1 puan içinde (gürültü) → korunuyor.
+Hesap büyüdükçe sabit ücretin payı küçülüyor (25K$'da aynı strateji +11–14 puan daha fazla).
+
+**Canlıya alınanlar (gerçeklik şartları, sonuca bakılmadan):**
+- **Bileşik hesap:** H6S hesabı = başlangıç + kapanmış H6S işlemlerinin maliyet+ücret sonrası sonucu;
+  pozisyon boyutu ve nakit sınırı bundan (`paper_trading/costs.account_equity`). Önceden sabit 10.000$'dan
+  boyutluyordu — gerçek hesap böyle davranmaz.
+- **Midas ücreti:** yeni ayar `commission_usd_per_side` (1.5$); net P/L (Performans), H6S hesabı ve
+  backtest her emirde düşüyor (kısmi satış = 3. emir).
+- **Emirler sayfası:** bileşik hesap, emir ücreti, boş nakit + "Dolar Getirisi" hatırlatması.
+
+**Kapananlar (tekrar önerme):** M1 (çıkış 9. seans açılışı — satış kapanışta kalıyor, Türkiye saatiyle
+~24:00/yazın 23:00), M2 eşit riskli boyut, M3 kapanışta giriş.

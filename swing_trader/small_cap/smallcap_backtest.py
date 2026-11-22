@@ -191,6 +191,7 @@ class SmallCapBacktester:
             'top_n': self.top_n,
             'max_concurrent': self._max_concurrent,
             'slippage_bps_per_side': self.settings.slippage_bps_per_side,
+            'commission_usd_per_side': self._fee(),
             'partial_at_t1_fraction': self.settings.partial_at_t1_fraction,
             'cooldown_days': self.settings.cooldown_days,
             'live_parity': self._max_concurrent is None,
@@ -458,6 +459,10 @@ class SmallCapBacktester:
     def _slip(self) -> float:
         return self.settings.slippage_bps_per_side / 10000.0
 
+    def _fee(self) -> float:
+        """Emir başına sabit aracı kurum ücreti ($) — canlı net P/L ile aynı ayar."""
+        return float(getattr(self.settings, "commission_usd_per_side", 0.0) or 0.0)
+
     def _entry_fill_price(self, quoted: float) -> float:
         return round(quoted * (1.0 + self._slip()), 2)
 
@@ -469,7 +474,7 @@ class SmallCapBacktester:
         for tr in self.open_trades:
             if tr['sold'] and not tr['partial_realized'] and tr['partial_day'] is not None and tr['partial_day'] <= day:
                 self.capital += tr['sold'] * (self._exit_fill_price(tr['partial_price'])
-                                              - self._entry_fill_price(tr['entry_price']))
+                                              - self._entry_fill_price(tr['entry_price'])) - self._fee()
                 tr['partial_realized'] = True
             if tr['exit_day'] is not None and tr['exit_day'] <= day:
                 self._close_trade(tr, tr['exit_price'], tr['exit_day'], tr['status'], tr['reason'], tr['bars'])
@@ -486,10 +491,11 @@ class SmallCapBacktester:
         exit_fill = self._exit_fill_price(raw_exit)
         partial_pnl = sold * (self._exit_fill_price(tr['partial_price']) - entry_fill) if sold else 0.0
         rest_pnl = rest * (exit_fill - entry_fill)
+        fee = self._fee()
         if sold and not tr['partial_realized']:
-            self.capital += partial_pnl
-        self.capital += rest_pnl
-        total = partial_pnl + rest_pnl
+            self.capital += partial_pnl - fee
+        self.capital += rest_pnl - 2 * fee                     # alış + son satış emri
+        total = partial_pnl + rest_pnl - fee * (3 if sold else 2)
         blended = ((self._exit_fill_price(tr['partial_price']) * sold + exit_fill * rest) / size) if size else exit_fill
         self._last_exit[tr['ticker']] = exit_day
         self.trades.append({

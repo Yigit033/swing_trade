@@ -1242,6 +1242,15 @@ export default function SettingsPage() {
                     min={0}
                     max={100}
                 />
+                <FieldNum
+                    label="Aracı kurum ücreti ($ / emir)"
+                    hint="Sabit emir ücreti, alış ve satışta ayrı ayrı (Midas ABD: 1,5$). Tutara bağlı değil: 1.000$'lık pozisyonda gidiş-dönüş %0,30, 500$'lıkta %0,60. Net kâr/zarar, H6S hesap büyüklüğü ve backtest bunu düşer."
+                    value={num("commission_usd_per_side", 1.5)}
+                    onChange={(v) => setNum("commission_usd_per_side", v)}
+                    step={0.5}
+                    min={0}
+                    max={50}
+                />
             </Section>
 
             {/* 2026-08-04: "Tarama geçitleri" bölümü KALDIRILDI. İçindeki 5 alanın

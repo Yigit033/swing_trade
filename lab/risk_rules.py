@@ -21,7 +21,12 @@ COST = 0.50
 
 
 def portfolio(T, frac_full=0.10, frac_half=0.05, brake=False, streak=3, cost=COST, cap0=10_000.0):
-    """lab/evaluate.portfolio ile aynı mantık; L2 açıkken boyut hesabın KENDİ kapanışlarına göre."""
+    """lab/evaluate.portfolio ile aynı mantık; L2 açıkken boyut hesabın KENDİ kapanışlarına göre.
+
+    UYARI (Ek M): bu sürüm o gün kapanışta çıkan işlemin nakdini/sonucunu aynı günün açılış girişine
+    kullandırıyor ve boyutu giriş günü kapanışıyla hesaplıyor (iyimser). Ek L kararını düzeltilmiş sırayla
+    yeniden doğrulayan sürüm: lab/execution_m.portfolio (fren yine geçti: 50.0% → 54.7%, DD eşit).
+    """
     C = panels()["Close"]
     T = T.sort_values(["entry_day", "key"], ascending=[True, False])
     days = C.index[(C.index >= T.entry_day.min()) & (C.index <= T.exit_day.max())]

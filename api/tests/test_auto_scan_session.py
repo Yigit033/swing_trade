@@ -272,3 +272,33 @@ def test_auto_scan_h6s_brake_fails_safe_to_half_size(monkeypatch):
     monkeypatch.setattr(deps, "get_paper_tracker", lambda: tracker)
     auto_scan._run_auto_scan_once()
     assert tracker.add_trade_from_signal.call_args.args[0]["position_size"] == 10
+
+
+def test_auto_scan_h6s_sizes_from_compounded_equity(monkeypatch):
+    """Ek M: pozisyon boyutu ve nakit sınırı başlangıç + kapanmış net sonuçtan (gerçek hesap gibi)."""
+    from unittest.mock import Mock
+    from swing_trader.small_cap.settings_config import SmallCapSettings
+    from swing_trader.shadow import runner as shadow_runner, sources as shadow_src
+    import api.routers.scanner as scanner
+    import api.scanner_jobs as jobs
+    import api.deps as deps
+    s = SmallCapSettings()
+    s.auto_scan.legacy_control = False
+    monkeypatch.setattr("swing_trader.small_cap.settings_config.load_settings", lambda *a, **k: s)
+    monkeypatch.setattr(jobs, "create_exclusive_scan_job", lambda: "job")
+    monkeypatch.setattr(jobs, "release_scan_slot", lambda j: None)
+    monkeypatch.setattr(scanner, "_execute_smallcap_scan", lambda *a, **k: dict(signals=[], market_regime="BULL", stats={}))
+    monkeypatch.setattr(shadow_src, "live_vce_hits",
+                        lambda asof: dict(hits=[dict(ticker="BIG", dv20=9e7, close=50.0, atr14=2.0)], stats={}))
+    monkeypatch.setattr(shadow_runner, "_small_cap_regime", lambda src, asof: {"regime": "BULL"})
+    tracker = Mock()
+    tracker.storage.count_active_trades_for_owner.return_value = 0
+    tracker.storage.active_notional_for_owner.return_value = 0.0
+    tracker.storage.get_closed_trades.return_value = [                     # +2.000$ brüt kazanç
+        dict(strategy="H6S", user_id=None, status="TIMEOUT", exit_date="2026-11-10",
+             entry_price=10.0, position_size=1000, realized_pnl=2000.0, realized_pnl_pct=20.0)]
+    tracker.add_trade_from_signal.side_effect = lambda sig, owner: 1
+    monkeypatch.setattr(deps, "get_paper_tracker", lambda: tracker)
+    auto_scan._run_auto_scan_once()
+    equity = 10_000 + 2000 - 10_000 * 0.20 / 100 - 2 * 1.5                # spread 10 bps/kenar + 2 emir ücreti
+    assert tracker.add_trade_from_signal.call_args.args[0]["position_size"] == int(0.10 * equity / 50.0) == 23
