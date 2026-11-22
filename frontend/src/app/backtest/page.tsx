@@ -327,6 +327,7 @@ export default function BacktestPage() {
                                 <div style={{ color: "var(--text-muted)", marginTop: 2 }}>
                                     Elenen: rejim kapasitesi {result.diagnostics.skip_capacity ?? 0} · aynı hisse açık {result.diagnostics.skip_duplicate ?? 0} ·
                                     cooldown {result.diagnostics.skip_cooldown ?? 0} · gap↑ {result.diagnostics.entry_skip_gap_up ?? 0} · gap↓ {result.diagnostics.entry_skip_gap_down ?? 0}
+                                    {(result.diagnostics.skip_cash ?? 0) > 0 && ` · nakit yetmedi ${result.diagnostics.skip_cash}`}
                                     {(result.diagnostics.skip_max_concurrent ?? 0) > 0 && ` · manuel eşzamanlı sınır ${result.diagnostics.skip_max_concurrent}`}
                                 </div>
                                 {((result.diagnostics.earnings_unknown_tickers ?? 0) > 0 || (result.diagnostics.cap_unknown_tickers ?? 0) > 0) && (

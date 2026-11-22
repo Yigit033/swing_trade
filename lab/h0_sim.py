@@ -61,10 +61,14 @@ def main():
     ap.add_argument("--earnings", default="live", choices=["live", "closed", "off"])
     # Ek H: (date, ticker) parquet — bu sinyaller seçimden önce elenir (filtre hipotezleri)
     ap.add_argument("--exclude", default=None)
+    # Nakit hesabı: açık + bekleyen pozisyon tutarı + yeni pozisyon ≤ hesap (kaldıraçsız, Midas)
+    ap.add_argument("--cash-limit", action="store_true")
     a = ap.parse_args()
     tag = a.universe + ("" if a.earnings == "live" else f"_earn{a.earnings}")
     if a.exclude:
         tag += "_ex" + Path(a.exclude).stem
+    if a.cash_limit:
+        tag += "_cash"
     import logging
     logging.disable(logging.CRITICAL)
     from swing_trader.small_cap import settings_config as sc
@@ -105,6 +109,7 @@ def main():
     print(f"[{a.earnings}] signals after earnings gate: {len(sig)} (earnings missing for {missing})")
 
     us = S.auto_scan
+    cash_skips = 0
     trades, closed = [], []          # closed: (ticker, exit_day) for cooldown
     active = []                      # dicts with exit_day (None = still open)
     by_day = {d: g for d, g in sig.groupby("date")}
@@ -120,6 +125,7 @@ def main():
         cap = auto_entry_capacity(regime, S.backtest_loop, len(live_active))
         if cap is not None:
             g = g.head(cap)
+        held = sum(t.get("notional", 0.0) for t in live_active)
         for r in g.itertuples():
             selected_log.append(dict(date=d, ticker=r.ticker))
             if any(t["ticker"] == r.ticker for t in live_active):
@@ -127,6 +133,12 @@ def main():
             cutoff = d - pd.Timedelta(days=int(S.cooldown_days))
             if any(tk == r.ticker and xd >= cutoff for tk, xd in closed):
                 continue                                     # cooldown
+            if a.cash_limit:
+                need = float(r.entry_price) * int(r.position_size or 0)
+                if held + need > float(S.auto_scan.portfolio_value):
+                    cash_skips += 1
+                    continue                                 # nakit yok → giriş yok
+                held += need
             e_day = nxt.get(d)
             df = F[r.ticker]
             if e_day is None or not (df.Date == e_day).any():
@@ -178,12 +190,15 @@ def main():
             trades.append(rec)
             if status in ("OPEN", "REVIEW"):
                 rec["exit_day"] = None
-            active.append(dict(ticker=r.ticker, entry_day=d, exit_day=rec["exit_day"]))
+            active.append(dict(ticker=r.ticker, entry_day=d, exit_day=rec["exit_day"],
+                               notional=float(entry) * int(trade["position_size"])))
             if rec["exit_day"] is not None:
                 closed.append((r.ticker, rec["exit_day"]))
     T = pd.DataFrame(trades)
     T.to_parquet(OUT / f"trades_{tag}.parquet", index=False)
     pd.DataFrame(selected_log).to_parquet(OUT / f"selected_{tag}.parquet", index=False)
+    if a.cash_limit:
+        print(f"cash-limit skips: {cash_skips}")
     print(T.status.value_counts().to_string())
     done = T[~T.status.isin(["REJECTED", "OPEN", "REVIEW"])]
     print(f"closed trades {len(done)}: mean {done.ret_pct.mean():.2f}% median {done.ret_pct.median():.2f}% "

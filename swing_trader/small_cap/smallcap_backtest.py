@@ -96,6 +96,7 @@ class SmallCapBacktester:
             "entries_opened": 0,
             "earnings_unknown_tickers": 0,
             "skip_earnings_unknown": 0,
+            "skip_cash": 0,
             "cap_unknown_tickers": 0,
         }
 
@@ -345,6 +346,11 @@ class SmallCapBacktester:
 
         cooldown = int(self.settings.cooldown_days)
         busy = {t['ticker'] for t in self.open_trades} | {p['signal']['ticker'] for p in self.pending_signals}
+        # Canlı auto-scan ile aynı nakit kuralı (kaldıraç yok): açık + bekleyen tutar + yeni ≤ hesap.
+        # Hesap = lot hesabında kullanılan sabit sermaye (canlı: auto_scan.portfolio_value).
+        held = sum(t['entry_price'] * (t['size'] - (t['sold'] if t.get('partial_realized') else 0))
+                   for t in self.open_trades)
+        held += sum(p['signal_close'] * int(p['signal'].get('position_size') or 0) for p in self.pending_signals)
         for sig in selected:
             t = sig['ticker']
             if self._max_concurrent is not None and \
@@ -359,6 +365,11 @@ class SmallCapBacktester:
                 self._diag["skip_cooldown"] += 1
                 continue
             w = windows[t]
+            need = float(w['Close'].iloc[-1]) * int(sig.get('position_size') or 0)
+            if held + need > float(self.initial_capital):
+                self._diag["skip_cash"] += 1
+                continue
+            held += need
             self.pending_signals.append({
                 "signal": sig,
                 "signal_date": day,

@@ -3,6 +3,9 @@
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
+from api import auto_scan
 from api.auto_scan import auto_entry_capacity, run_covers_auto_session, session_already_auto_scanned
 
 
@@ -125,3 +128,42 @@ def test_saturday_maintenance_still_scans_friday(monkeypatch):
     assert out["scan"] == "ran"
     assert out["bar_session"] == "2026-08-28"
     assert auto_scan._last_run_session == FRIDAY
+
+
+def test_active_notional_counts_open_pending_and_partial(tmp_path):
+    from swing_trader.paper_trading.storage import PaperTradeStorage
+    st = PaperTradeStorage(str(tmp_path / "t.db"))
+    base = dict(entry_date="2026-10-01", stop_loss=9.0, target=12.0, swing_type="A")
+    st.add_trade(dict(base, ticker="OPN", status="OPEN", entry_price=10.0, position_size=100))
+    st.add_trade(dict(base, ticker="PND", status="PENDING", entry_price=20.0, position_size=50))
+    prt = st.add_trade(dict(base, ticker="PRT", status="OPEN", entry_price=10.0, position_size=300))
+    st.update_trade(prt, {"partial_exit_price": 11.0, "partial_exit_pct": 33.0})   # T1 kısmi satış
+    st.add_trade(dict(base, ticker="CLS", status="STOPPED", entry_price=10.0, position_size=999))
+    st.add_trade(dict(base, ticker="USR", status="OPEN", entry_price=10.0, position_size=999), user_id="u1")
+    got = st.active_notional_for_owner(None)
+    assert got == pytest.approx(1000 + 1000 + 3000 * 0.67)     # kapanan ve kullanıcınınki sayılmaz
+
+
+def test_auto_scan_never_exceeds_cash_account(monkeypatch):
+    """Midas gibi nakit hesap: açık+bekleyen+yeni ≤ portfolio_value; sıradaki küçük sinyal sığarsa girer."""
+    from unittest.mock import Mock
+    from swing_trader.small_cap.settings_config import SmallCapSettings
+    import api.routers.scanner as scanner
+    import api.scanner_jobs as jobs
+    import api.deps as deps
+    s = SmallCapSettings()
+    monkeypatch.setattr("swing_trader.small_cap.settings_config.load_settings", lambda *a, **k: s)
+    monkeypatch.setattr(jobs, "create_exclusive_scan_job", lambda: "job")
+    monkeypatch.setattr(jobs, "release_scan_slot", lambda j: None)
+    sigs = [dict(ticker="BIG", entry_price=50.0, position_size=100),     # 5.000$
+            dict(ticker="TOO", entry_price=40.0, position_size=100),     # 4.000$ → sığmaz
+            dict(ticker="FIT", entry_price=10.0, position_size=100)]     # 1.000$ → sığar
+    monkeypatch.setattr(scanner, "_execute_smallcap_scan",
+                        lambda *a, **k: dict(signals=sigs, market_regime="BULL", stats={}))
+    tracker = Mock()
+    tracker.storage.active_notional_for_owner.return_value = 3500.0      # zaten bağlı
+    tracker.add_trade_from_signal.side_effect = lambda sig, owner: 1
+    monkeypatch.setattr(deps, "get_paper_tracker", lambda: tracker)
+    assert auto_scan._run_auto_scan_once() == "ran"
+    opened = [c.args[0]["ticker"] for c in tracker.add_trade_from_signal.call_args_list]
+    assert opened == ["BIG", "FIT"]                                      # 3.5K + 5K + 1K ≤ 10K

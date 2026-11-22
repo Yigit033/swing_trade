@@ -322,3 +322,19 @@ def test_backtest_regime_uses_one_year_spy_history(monkeypatch):
     monkeypatch.setattr(bt,'_scan_and_track',lambda *a:None)
     bt.run_backtest(['T'],'2026-10-01','2026-10-02')
     assert (pd.Timestamp('2026-10-01')-pd.Timestamp(seen['start'])).days>=365
+
+
+def test_backtest_respects_cash_account_like_live(monkeypatch):
+    """Canlı auto-scan ile aynı: açık+bekleyen+yeni tutar ≤ hesap (kaldıraçsız nakit hesap)."""
+    from swing_trader.small_cap.smallcap_backtest import SmallCapBacktester
+    bt=SmallCapBacktester();bt._reset_state();bt.initial_capital=10000
+    tape=pd.DataFrame(dict(Date=pd.bdate_range(end='2026-10-02',periods=80),Open=50.,High=51.,
+                           Low=49.,Close=50.,Volume=1e6))
+    bt._data={'AAA':tape,'BBB':tape,'CCC':tape};bt._earnings={t:[pd.Timestamp('2026-08-05')] for t in bt._data}
+    bt.open_trades=[dict(ticker='OLD',entry_price=20.,size=150,sold=0,partial_realized=False)]   # 3.000$
+    sizes={'AAA':100,'BBB':80,'CCC':20}          # 5.000$ / 4.000$ / 1.000$ @ 50$
+    monkeypatch.setattr(bt.engine,'scan_stock',lambda t,w,**k:dict(ticker=t,quality_score=90,
+        rank_score={'AAA':3,'BBB':2,'CCC':1}[t],position_size=sizes[t]))
+    bt._scan_and_track(pd.Timestamp('2026-10-02'),{'regime':'BULL','confidence':'CONFIRMED'},60,10)
+    assert [p['signal']['ticker'] for p in bt.pending_signals]==['AAA','CCC']
+    assert bt._diag['skip_cash']==1

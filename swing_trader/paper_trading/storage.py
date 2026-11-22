@@ -497,6 +497,26 @@ class PaperTradeStorage:
             if conn:
                 conn.close()
 
+    def active_notional_for_owner(self, user_id: Optional[str] = None) -> float:
+        """OPEN + PENDING pozisyonların bağladığı tutar ($) — nakit hesabı sınırı için.
+
+        Tutar = kalan lot × (giriş fiyatı, yoksa sinyal fiyatı); T1 kısmi satıştan sonra kalan lot.
+        Sahiplik ``count_active_trades_for_owner`` ile aynı (None = auto-scan hesabı).
+        """
+        rows = self.get_all_trades(user_id) if user_id else self.get_all_trades(None)
+        total = 0.0
+        for t in rows or []:
+            if t.get("status") not in ("OPEN", "PENDING"):
+                continue
+            if user_id is None and t.get("user_id") is not None:
+                continue
+            if user_id and t.get("user_id") != user_id:
+                continue
+            px = t.get("entry_price") or t.get("signal_price") or 0.0
+            left = 1.0 - float(t.get("partial_exit_pct") or 0.0) / 100.0 if t.get("partial_exit_price") else 1.0
+            total += float(px) * float(t.get("position_size") or 0) * left
+        return total
+
     def count_active_trades_for_owner(self, user_id: Optional[str] = None) -> int:
         """Count OPEN + PENDING trades for one execution owner.
 

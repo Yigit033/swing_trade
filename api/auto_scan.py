@@ -257,19 +257,33 @@ def _run_auto_scan_once() -> str:
             return "ran"
         signals = signals[:capacity]
 
-    added, skipped = [], []
+    # Nakit hesabı (kaldıraç yok — Midas'ta gerçekte açılabilecek olan): açık + bekleyen pozisyon
+    # tutarı + yeni pozisyon ≤ hesap. 2026-11-22: sınır yokken paper portföy zirvede hesabın 2.8
+    # katını taşıyordu (Lab v3: 19 eşzamanlı pozisyon, 28.4K$ / 10K$) — gerçekte açılamaz işlemler.
+    account = float(us.portfolio_value)
+    held = tracker.storage.active_notional_for_owner(None)
+    added, skipped, no_cash = [], [], []
     for signal in signals:
+        need = float(signal.get("entry_price") or 0) * int(signal.get("position_size") or 0)
+        if held + need > account:
+            no_cash.append(signal.get("ticker"))
+            continue
         try:
             trade_id = tracker.add_trade_from_signal(signal, None)
         except Exception:
             logger.exception("Auto-scan: failed to track %s", signal.get("ticker"))
             skipped.append(signal.get("ticker"))
             continue
-        (added if trade_id > 0 else skipped).append(signal.get("ticker"))
+        if trade_id > 0:
+            added.append(signal.get("ticker"))
+            held += need
+        else:
+            skipped.append(signal.get("ticker"))
 
     logger.info(
-        "Auto-scan auto-track: %d added (PENDING), %d skipped (duplicate/cooldown/window): %s / %s",
-        len(added), len(skipped), added, skipped,
+        "Auto-scan auto-track: %d added (PENDING), %d skipped (duplicate/cooldown/window), "
+        "%d no cash (held $%.0f of $%.0f): %s / %s / %s",
+        len(added), len(skipped), len(no_cash), held, account, added, skipped, no_cash,
     )
     return "ran"
 
