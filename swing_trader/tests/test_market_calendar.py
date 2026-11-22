@@ -98,3 +98,41 @@ def test_us_market_session_converts_timezones():
         from backports.zoneinfo import ZoneInfo
     ist = datetime(2026, 7, 17, 12, 10, tzinfo=ZoneInfo("Europe/Istanbul"))
     assert us_market_session(ist) == "pre_market"
+
+
+def test_special_closure_carter_mourning_2025():
+    # 2025-01-09: NYSE ulusal yas günü kapalı. Eksikken açık pozisyonlar
+    # execution.evaluate içinde MISSING_SESSION ile REVIEW_REQUIRED'a düşüyordu.
+    assert not is_trading_day(date(2025, 1, 9))
+    assert next_trading_day(date(2025, 1, 8)) == date(2025, 1, 10)
+    assert date(2025, 1, 9) in nyse_holidays(2025)
+
+
+def test_special_closure_bush_mourning_2018():
+    assert not is_trading_day(date(2018, 12, 5))
+
+
+def test_saturday_new_year_does_not_close_prior_friday():
+    # 2022-01-01 ve 2028-01-01 Cumartesi; NYSE önceki Cuma açıktı / açık olacak.
+    assert is_trading_day(date(2021, 12, 31))
+    assert is_trading_day(date(2027, 12, 31))
+    assert date(2021, 12, 31) not in nyse_holidays(2022)
+    assert date(2027, 12, 31) not in nyse_holidays(2028)
+    # Pazar 1 Ocak → Pazartesi gözlenir (2023-01-02)
+    assert not is_trading_day(date(2023, 1, 2))
+
+
+def test_open_trade_spanning_carter_closure_is_not_frozen():
+    """2025-01-09'u kapsayan pozisyon artık MISSING_SESSION'a düşmemeli."""
+    import pandas as pd
+    from swing_trader.paper_trading import execution
+
+    days = ["2025-01-06", "2025-01-07", "2025-01-08", "2025-01-10", "2025-01-13"]
+    hist = pd.DataFrame({"Date": pd.to_datetime(days), "Open": 10.0, "High": 10.2,
+                         "Low": 9.9, "Close": 10.1, "Volume": 1e6})
+    trade = {"id": 1, "ticker": "TST", "entry_date": "2025-01-06T14:30:00Z", "entry_price": 10.0,
+             "position_size": 100, "stop_loss": 9.0, "initial_stop": 9.0, "target": 12.0,
+             "target_2": 13.0, "max_hold_days": 10, "atr": 0.4, "status": "OPEN"}
+    _updates, result = execution.evaluate(trade, hist, 0.33)
+    reason = result[3]
+    assert "REVIEW_REQUIRED" not in reason, reason

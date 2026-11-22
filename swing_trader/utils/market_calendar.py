@@ -67,11 +67,22 @@ def _observed(d: date) -> date:
     return d
 
 
+# Kurala bağlı olmayan, NYSE'nin tek seferlik tam gün kapanışları. Kural tabanlı
+# tatil hesabı bunları göremez. 2025-01-09 eksikti: takvim o günü seans sayıyordu,
+# bar gelmeyince o gün açık pozisyonlar REVIEW_REQUIRED (MISSING_SESSION) ile
+# donuyordu (Lab v3, 2026-11-22).
+SPECIAL_CLOSURES: frozenset = frozenset({
+    date(2012, 10, 29),   # Sandy kasırgası
+    date(2012, 10, 30),   # Sandy kasırgası
+    date(2018, 12, 5),    # Ulusal yas — Başkan G.H.W. Bush
+    date(2025, 1, 9),     # Ulusal yas — Başkan Jimmy Carter
+})
+
+
 @lru_cache(maxsize=16)
 def nyse_holidays(year: int) -> Set[date]:
-    """Full-day NYSE market holidays for a given year (observed dates)."""
+    """Full-day NYSE market closures for a given year (observed holidays + special closures)."""
     h = {
-        _observed(date(year, 1, 1)),                 # New Year's Day
         _nth_weekday(year, 1, 0, 3),                 # MLK Jr. Day (3rd Mon Jan)
         _nth_weekday(year, 2, 0, 3),                 # Washington's Birthday (3rd Mon Feb)
         _easter(year) - timedelta(days=2),           # Good Friday
@@ -81,8 +92,14 @@ def nyse_holidays(year: int) -> Set[date]:
         _observed(date(year, 12, 25)),               # Christmas
         _observed(date(year, 7, 4)),                 # Independence Day
     }
+    # New Year's Day: NYSE Kural 7.2 — 1 Ocak Cumartesi ise önceki Cuma (önceki
+    # yılın 31 Aralık'ı) KAPANMAZ (örn. 2021-12-31 ve 2027-12-31 açık seans).
+    new_year = date(year, 1, 1)
+    if new_year.weekday() != 5:
+        h.add(_observed(new_year))
     if year >= 2022:
         h.add(_observed(date(year, 6, 19)))          # Juneteenth (federal since 2021)
+    h.update(d for d in SPECIAL_CLOSURES if d.year == year)
     return h
 
 
