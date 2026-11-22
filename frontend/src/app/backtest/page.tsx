@@ -331,7 +331,8 @@ export default function BacktestPage() {
                                 </div>
                                 {((result.diagnostics.earnings_unknown_tickers ?? 0) > 0 || (result.diagnostics.cap_unknown_tickers ?? 0) > 0) && (
                                     <div style={{ color: "var(--text-muted)", marginTop: 2 }}>
-                                        Veri eksik: bilanço tarihi yok {result.diagnostics.earnings_unknown_tickers ?? 0} hisse (bilanço kapısı atlandı) ·
+                                        Veri eksik: bilanço tarihi yok {result.diagnostics.earnings_unknown_tickers ?? 0} hisse
+                                        (canlı gibi elendi — bu yüzden reddedilen sinyal {result.diagnostics.skip_earnings_unknown ?? 0}) ·
                                         market cap yok {result.diagnostics.cap_unknown_tickers ?? 0} hisse
                                     </div>
                                 )}

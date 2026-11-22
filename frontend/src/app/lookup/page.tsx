@@ -308,7 +308,8 @@ function ResultCard({ r, onAdd, adding }: { r: AnalysisResult; onAdd: (r: Analys
                                                 reason.includes("Float") ? "💡 Float çok yüksek. Düşük float'lu hisseler daha patlayıcı hareket eder." :
                                                     reason.includes("Volume") ? "💡 Ortalama işlem hacmi çok düşük — likidite riski." :
                                                         reason.includes("ATR") ? "💡 Volatilite çok düşük — swing trade için yeterli hareket potansiyeli yok." :
-                                                            reason.includes("Earnings") ? "💡 Kazanç raporu yakında — rapor sonrası büyük düşüş riski." : "";
+                                                            reason.includes("unverified") || reason.includes("check error") ? "💡 Bilanço tarihi iki kaynaktan da alınamadı — emin olunamadığı için güvenli tarafta elendi. Biraz sonra tekrar deneyin." :
+                                                                reason.includes("Earnings") ? "💡 Kazanç raporu yakında — rapor sonrası büyük düşüş riski." : "";
                                         return tip ? <div style={{ marginTop: 6, fontSize: "0.78rem", color: "var(--text-muted)" }}>{tip}</div> : null;
                                     })()}
                                 </>

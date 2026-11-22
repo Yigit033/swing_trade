@@ -95,6 +95,7 @@ class SmallCapBacktester:
             "entry_skip_no_bar": 0,
             "entries_opened": 0,
             "earnings_unknown_tickers": 0,
+            "skip_earnings_unknown": 0,
             "cap_unknown_tickers": 0,
         }
 
@@ -208,11 +209,15 @@ class SmallCapBacktester:
             import yfinance as yf
             tk = yf.Ticker(t)
             earn, shares = None, None
-            try:
-                ed = tk.get_earnings_dates(limit=24)
-                earn = list(ed.index) if ed is not None and len(ed) else []
-            except Exception:
-                earn = None
+            # Boş liste "bilanço yok" DEĞİL, bilinmiyor (Yahoo kısıtlaması boş döndürür) → None.
+            for _ in range(2):
+                try:
+                    ed = tk.get_earnings_dates(limit=24)
+                    if ed is not None and len(ed):
+                        earn = list(ed.index)
+                        break
+                except Exception:
+                    pass
             meta = stock_meta.get(t) or {}
             if not meta.get('marketCap'):
                 try:
@@ -305,6 +310,7 @@ class SmallCapBacktester:
             if len(w) < 20 or w['Date'].iloc[-1] != day:
                 continue          # canlı yalnız o seansın tamamlanmış barıyla tarar
             w = w.reset_index(drop=True)
+            earn = self._earnings.get(ticker)
             try:
                 sig = self.engine.scan_stock(
                     ticker, w,
@@ -312,10 +318,15 @@ class SmallCapBacktester:
                     backtest_mode=True,                     # yalnız anlatı/LLM'i atlar
                     portfolio_value=self.initial_capital,   # canlı: sabit auto_scan.portfolio_value
                     regime=regime_name,
-                    earnings_dates=self._earnings.get(ticker),
+                    earnings_dates=earn if earn is not None else [],
                 )
             except Exception as e:
                 logger.debug("Scan error %s: %s", ticker, e)
+                continue
+            if sig and earn is None:
+                # Canlı: bilanço tarihi iki kaynaktan da doğrulanamazsa sinyal reddedilir
+                # (fail-closed, Lab v3 Ek D1). Backtest'te ikinci kaynak (takvim) yok.
+                self._diag["skip_earnings_unknown"] += 1
                 continue
             if sig:
                 sig["market_regime"] = regime_name

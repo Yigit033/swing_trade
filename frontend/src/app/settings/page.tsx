@@ -1379,7 +1379,7 @@ export default function SettingsPage() {
                     hisseyi elemiyordu. Sıkılık scoring.score_float_tightness. */}
                 <FieldNum
                     label="Kazanç hariç gün"
-                    hint="Sinyal gününden 0–N gün sonraki bilanço hard reject (bilanço sonrası serbest)."
+                    hint="Sinyal gününden 0–N gün sonraki bilanço hard reject (bilanço sonrası serbest). Canlıda iki kaynak (hissenin kendi tarihleri + bilanço takvimi); ikisi de yanıt vermezse sinyal elenir."
                     value={nn(["universe_filters", "earnings_exclusion_days"], 3)}
                     onChange={(v) => sn(["universe_filters", "earnings_exclusion_days"], Math.round(v))}
                     step={1}

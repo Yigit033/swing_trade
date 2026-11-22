@@ -6,7 +6,8 @@ and fixed here):
   - last close in [min_price, max_price]     default $7–$200
   - market cap in [min, max]                 default $250M–$10B
   - 20-day avg (Volume × Close) ≥ $5M/day
-  - earnings in the next 0..N days           default N=3; post-earnings allowed
+  - earnings in the next 0..N days           default N=3; post-earnings allowed;
+                                             live: 2 sources, both unknown → reject
 
 ATR% and float are RECORDED for scoring/display. They do not reject.
 v13: ATR hard floor contradicted VCE (squeeze = low ATR).
@@ -149,47 +150,91 @@ class SmallCapFilters:
 
         return True, f"Price OK (${price:.2f})"
 
+    def _days_to_earnings(self, candidates, signal_day) -> Optional[int]:
+        """First earnings within 0..N calendar days of the signal day, else None."""
+        for earn_date in candidates:
+            earn_ts = pd.Timestamp(earn_date)
+            if earn_ts.tzinfo is not None:
+                earn_ts = earn_ts.tz_localize(None)
+            days_diff = (earn_ts.date() - signal_day).days
+            if 0 <= days_diff <= self.EARNINGS_EXCLUSION_DAYS:
+                return days_diff
+        return None
+
+    @staticmethod
+    def _ticker_earnings(ticker: str) -> Optional[list]:
+        """Source 1: the ticker's own dates (yfinance). None = unknown (error OR empty).
+
+        Empty is NOT "no earnings": every listed company reports, and yfinance returns
+        empty on throttling ("No earnings dates found"). One immediate retry.
+        """
+        import yfinance as yf
+        for _ in range(2):
+            try:
+                ed = yf.Ticker(ticker).earnings_dates
+                if ed is not None and len(ed):
+                    return list(ed.index)
+            except Exception as e:
+                logger.debug("earnings_dates error for %s: %s", ticker, e)
+        return None
+
     def check_earnings(self, ticker: str, signal_date, earnings_dates=None) -> Tuple[bool, str]:
         """Reject if earnings fall on signal day or within the next N days.
 
-        Pass ``earnings_dates`` to skip yfinance (backtest/live parity).
+        ``earnings_dates`` given (backtest / discovery / tests): used as-is, the caller
+        vouches for it ([] = verified no earnings).
+
+        ``earnings_dates=None`` (live): two independent sources —
+          1. the ticker's own dates (yfinance, one retry)
+          2. the earnings calendar for [signal day, +N] (one fetch per scan, cached)
+        Either shows earnings in the window → reject. Both unknown → reject (fail-closed).
+        2026-11-22: the old code passed on empty/error ("No nearby earnings" / "check
+        skipped"); live SAIC opened on its earnings day. Lab v3 Ek D1: the gate is worth
+        +0.22 pts/trade and +7 pts portfolio (H0 vs gate off), so "unknown" must not pass.
+
         Negative days_diff (already reported) is allowed — gap-and-go is a
         valid swing. LIFE 2026-08-03: RVOL fired the same day as earnings;
         live rejected, a dateless backtest would have kept it.
         """
-        from datetime import datetime
+        from datetime import datetime, timedelta
 
         try:
-            if earnings_dates is None:
-                import yfinance as yf
-                earnings_dates = yf.Ticker(ticker).earnings_dates
+            if isinstance(signal_date, str):
+                signal_date = datetime.strptime(signal_date[:10], '%Y-%m-%d')
+            signal_day = signal_date.date() if hasattr(signal_date, 'date') else signal_date
 
-            if earnings_dates is None or len(earnings_dates) == 0:
+            if earnings_dates is not None:
+                # DataFrame/Series → dates on the index. Do NOT use getattr(x, "index")
+                # on a list: list.index is a method and would silently break.
+                if isinstance(earnings_dates, (pd.DataFrame, pd.Series)):
+                    earnings_dates = earnings_dates.index
+                d = self._days_to_earnings(earnings_dates, signal_day)
+                if d is not None:
+                    return False, f"Earnings in {d} days (pre-event risk)"
                 return True, "No nearby earnings"
 
-            if isinstance(signal_date, str):
-                signal_date = datetime.strptime(signal_date, '%Y-%m-%d')
+            from ..data import earnings_calendar
 
-            # DataFrame/Series → dates on the index. Do NOT use getattr(x, "index")
-            # on a list: list.index is a method and would silently break.
-            if isinstance(earnings_dates, (pd.DataFrame, pd.Series)):
-                candidates = earnings_dates.index
-            else:
-                candidates = earnings_dates
-
-            for earn_date in candidates:
-                earn_ts = pd.Timestamp(earn_date)
-                if earn_ts.tzinfo is not None:
-                    earn_ts = earn_ts.tz_localize(None)
-                days_diff = (earn_ts.date() - signal_date.date()).days
-                if 0 <= days_diff <= self.EARNINGS_EXCLUSION_DAYS:
-                    return False, f"Earnings in {days_diff} days (pre-event risk)"
-
+            own = self._ticker_earnings(ticker)
+            if own is not None:
+                d = self._days_to_earnings(own, signal_day)
+                if d is not None:
+                    return False, f"Earnings in {d} days (pre-event risk)"
+            cal = earnings_calendar.reporters(signal_day, signal_day + timedelta(days=self.EARNINGS_EXCLUSION_DAYS))
+            if cal is not None:
+                days = cal.get(earnings_calendar.normalize_symbol(ticker))
+                if days:
+                    d = (min(days) - signal_day).days
+                    return False, f"Earnings in {d} days (pre-event risk, calendar)"
+            if own is None and cal is None:
+                return False, "Earnings date unverified (both sources failed — rejected, fail-closed)"
+            if own is None:
+                return True, "No nearby earnings (calendar; ticker dates unavailable)"
             return True, "No nearby earnings"
 
         except Exception as e:
-            logger.debug(f"Earnings check error for {ticker}: {e}")
-            return True, "Earnings check skipped"
+            logger.warning("Earnings check error for %s: %s", ticker, e)
+            return False, "Earnings check error (rejected, fail-closed)"
 
     def apply_all_filters(
         self,
@@ -261,9 +306,11 @@ class SmallCapFilters:
             if not passed:
                 return False, results
         elif backtest_mode:
+            # Yalnız eski araştırma betikleri (scripts/measure_*) buraya düşer. Ürünün backtest'i
+            # (smallcap_backtest) bilanço verisi olmayan hisseyi canlı gibi kendisi eler.
             results['filters']['earnings'] = {
                 'passed': True,
-                'reason': 'Bilanço verisi geçirilmedi (canlıdan SAPMA — parite eksik)',
+                'reason': 'Bilanço verisi geçirilmedi (araştırma betiği — canlıdan SAPMA)',
             }
         else:
             passed, reason = self.check_earnings(ticker, signal_date)
