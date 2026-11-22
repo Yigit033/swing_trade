@@ -9,7 +9,7 @@ scipy>=1.10.0
 
 # Data sources
 yfinance>=0.2.28
-finvizfinance>=0.14.0
+finvizfinance==1.7.1  # 2026-11-22: sabit — sürüm kayması evreni sessizce bozdu (universe.py)
 
 # Technical indicators (pure pandas/numpy — no external library needed)
 

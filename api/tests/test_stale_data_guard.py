@@ -142,3 +142,33 @@ def test_malformed_frames_are_ignored():
     r = _assess_data_staleness(data, now=NOW)
     assert r["total"] == 1
     assert r["abort"] is False
+
+
+def test_universe_unavailable_stops_scan_before_fetching(monkeypatch):
+    """2026-11-22: Finviz sorguları çökünce tarama sessizce bayat statik listeyle koşuyordu."""
+    from unittest.mock import Mock
+    from api.routers import scanner
+
+    provider = Mock(last_universe_source="static_fallback", _last_query_errors=["Q6: parse error"])
+    engine = Mock(universe_provider=provider)
+    engine.get_small_cap_universe.return_value = ["GATO", "JNPR"]
+    fetcher = Mock()
+    monkeypatch.setattr(scanner, "get_smallcap_engine", lambda: engine)
+    monkeypatch.setattr(scanner, "get_fetcher", lambda: fetcher)
+    monkeypatch.setattr(scanner, "us_market_session", lambda: "closed")
+    out = scanner._execute_smallcap_scan(scanner.ScanRequest())
+    assert out["signals"] == [] and out["stats"]["reason"] == "universe_unavailable"
+    assert out["stats"]["universe_errors"] == ["Q6: parse error"]
+    fetcher.fetch_multiple_stocks_batch.assert_not_called()
+    engine.scan_universe.assert_not_called()
+
+
+def test_auto_scan_retries_after_universe_unavailable():
+    """Evren alınamayan auto tarama o seansı 'tamamlandı' saymaz → tekrar denenir."""
+    from datetime import date
+    from api import auto_scan
+    session = date(2026, 11, 20)
+    ok = dict(scan_source="auto", reason="no_qualifying", bar_session="2026-11-20")
+    assert auto_scan.run_covers_auto_session(ok, "2026-11-20T21:40:00Z", session) is True
+    bad = dict(ok, reason="universe_unavailable")
+    assert auto_scan.run_covers_auto_session(bad, "2026-11-20T21:40:00Z", session) is False

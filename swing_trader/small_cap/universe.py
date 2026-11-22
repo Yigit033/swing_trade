@@ -13,6 +13,7 @@ Finviz erişilemezse static yedek listeye düşer.
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Dict, List, Optional
 from datetime import datetime, timedelta
 
@@ -41,11 +42,40 @@ FINVIZ_MIN_AVG_VOLUME_SMALL = "Over 300K"
 FINVIZ_MIN_AVG_VOLUME_MID = "Over 500K"
 
 _TICKER_SAFE_OVERVIEW_CLS = None
+_LEGACY_OVERVIEW_CLS = None
+_TICKER_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
+
+
+def _upstream_parses_tickers() -> bool:
+    """finvizfinance ≥1.7: Finviz'in yeni (SSR grid) sayfasını okur ve ticker'ı hücrenin
+    ``data-boxover-ticker`` / ``data-ticker`` özniteliğinden alır — çift harf hatası upstream'de
+    çözülmüş. Bu sürümde ``_get_table`` hücre listesi alır (BeautifulSoup satırı değil); eski
+    yamamız onu ezince HER sorgu ``'list' object has no attribute 'find_all'`` ile düşüyor ve
+    evren sessizce statik listeye iniyordu (2026-11-22)."""
+    from finvizfinance.screener.overview import Overview
+    return hasattr(Overview, "_ssr_data")
 
 
 def _ticker_safe_overview_cls():
+    """Kurulu finvizfinance sürümü için doğru ``Overview`` sınıfı.
+
+    Yeni kütüphane ticker'ı zaten doğru okuyor → kütüphanenin kendi sınıfı. Eski kütüphane
+    (≤1.3) → aşağıdaki ticker-güvenli yama.
     """
-    finvizfinance ``Overview``'ına ticker-güvenli parse yaması (lazy import).
+    global _TICKER_SAFE_OVERVIEW_CLS
+    if _TICKER_SAFE_OVERVIEW_CLS is not None:
+        return _TICKER_SAFE_OVERVIEW_CLS
+    if _upstream_parses_tickers():
+        from finvizfinance.screener.overview import Overview
+        _TICKER_SAFE_OVERVIEW_CLS = Overview
+    else:
+        _TICKER_SAFE_OVERVIEW_CLS = _legacy_ticker_safe_overview_cls()
+    return _TICKER_SAFE_OVERVIEW_CLS
+
+
+def _legacy_ticker_safe_overview_cls():
+    """
+    ESKİ finvizfinance (≤1.3) ``Overview``'ına ticker-güvenli parse yaması (lazy import).
 
     Finviz (2026-07) screener tablosunun ticker hücresine logo + ilk-harf
     fallback span'i ekledi::
@@ -60,12 +90,15 @@ def _ticker_safe_overview_cls():
     Ticker kolonunu tab-link anchor'ından okur; sırasıyla fallback:
     ``data-boxover-ticker`` attribute'u → ``td.text``.
     """
-    global _TICKER_SAFE_OVERVIEW_CLS
-    if _TICKER_SAFE_OVERVIEW_CLS is not None:
-        return _TICKER_SAFE_OVERVIEW_CLS
+    global _LEGACY_OVERVIEW_CLS
+    if _LEGACY_OVERVIEW_CLS is not None:
+        return _LEGACY_OVERVIEW_CLS
 
     from finvizfinance.screener.overview import Overview
-    from finvizfinance.util import number_covert
+    try:                                                  # ≥1.7 yazımı düzeltti
+        from finvizfinance.util import number_convert as number_covert
+    except ImportError:
+        from finvizfinance.util import number_covert
 
     class _TickerSafeOverview(Overview):
         @staticmethod
@@ -102,7 +135,7 @@ def _ticker_safe_overview_cls():
                 return pd.DataFrame(frame)
             return pd.concat([df, pd.DataFrame(frame)], ignore_index=True)
 
-    _TICKER_SAFE_OVERVIEW_CLS = _TickerSafeOverview
+    _LEGACY_OVERVIEW_CLS = _TickerSafeOverview
     return _TickerSafeOverview
 
 
@@ -147,6 +180,10 @@ class SmallCapUniverse:
         self._cache_cap: Optional[int] = None
         self._finviz_df_cache: Optional[pd.DataFrame] = None
         self._last_rank_info: Optional[Dict] = None
+        self._last_query_errors: List[str] = []
+        # finviz | finviz+static (sakin piyasa, tasarlanmış birleşim) | static (Finviz kapalı)
+        # | static_fallback (Finviz sorguları ÇÖKTÜ — tarayıcı durur) | None (henüz çekilmedi)
+        self.last_universe_source: Optional[str] = None
         logger.info("SmallCapUniverse initialized (settings-backed scan + ranking)")
 
     def get_last_rank_info(self) -> Optional[Dict]:
@@ -192,21 +229,36 @@ class SmallCapUniverse:
             return 0.0
 
     def _run_finviz_query(self, filters_dict: Dict, label: str) -> pd.DataFrame:
-        """Run a single Finviz screener query and return DataFrame."""
+        """Run a single Finviz screener query and return DataFrame.
+
+        Hata (ağ / ayrıştırma) ``_last_query_errors``'a yazılır: "0 sonuç" (sakin piyasa) ile
+        "sorgu çöktü" ayrı şeyler — ikincisi tarama durdurma kararına girer.
+        """
         try:
             foverview = _ticker_safe_overview_cls()()
             foverview.set_filter(filters_dict=filters_dict)
-            df = foverview.screener_view()
+            df = foverview.screener_view(verbose=0)
 
             if df is None or len(df) == 0:
                 logger.info(f"  [{label}] returned 0 results")
                 return pd.DataFrame()
+
+            # Ticker bütünlüğü: Finviz sayfa yapısı değişince ticker bozulabiliyor (2026-07
+            # "AARVN"). Geçersizleri at; hepsi geçersizse sorgu çökmüş say.
+            tick = df['Ticker'].astype(str).str.strip().str.upper()
+            ok = tick.map(lambda t: bool(_TICKER_RE.match(t)))
+            if not ok.all():
+                logger.warning(f"  [{label}] {int((~ok).sum())} invalid tickers dropped: {list(tick[~ok])[:5]}")
+                if not ok.any():
+                    raise ValueError("all tickers invalid — Finviz page layout changed?")
+                df = df[ok.values]
 
             logger.info(f"  [{label}] returned {len(df)} tickers")
             return df
 
         except Exception as e:
             logger.warning(f"  [{label}] query failed: {e}")
+            self._last_query_errors.append(f"{label}: {e}"[:200])
             return pd.DataFrame()
 
     def get_finviz_universe(self, max_tickers: Optional[int] = None) -> List[str]:
@@ -214,6 +266,7 @@ class SmallCapUniverse:
         try:
             cap = self._us.max_scan_tickers if max_tickers is None else max_tickers
             self._last_rank_info = None  # başarısız fetch'te bayat telemetri kalmasın
+            self._last_query_errors = []
             logger.info("Fetching small-cap universe from Finviz (v3.0 optimized)...")
 
             frames: List[pd.DataFrame] = []
@@ -510,10 +563,19 @@ class SmallCapUniverse:
         logger.info("Fetching FRESH liquidity-ranked universe (cache bypassed)")
 
         if uf:
+            self._last_query_errors = []
             finviz_tickers = self.get_finviz_universe(cap)
             min_skip = us.min_finviz_tickers_skip_static_merge
             if len(finviz_tickers) >= min_skip:
+                self.last_universe_source = "finviz"
                 return finviz_tickers
+            # Finviz'den HİÇ ticker yok → evren alınamadı. Dört sorgunun (20g zirve + RVOL patlaması,
+            # small + mid) aynı anda 0 dönmesi pratikte olmaz (en durgun günde bile ~20 geliyor);
+            # olduğunda sebep sayfa/erişim değişikliğidir: finvizfinance 1.5 yeni Finviz sitesinde
+            # HATA VERMEDEN boş dönüyordu, 1.7 + eski yamamız hata veriyordu — ikisinde de tarama
+            # sessizce 234 hisselik bayat statik listeyle koştu (Kasım 2026). Tarayıcı bu durumda
+            # durur (reason=universe_unavailable). 1–29 ticker → sakin piyasa, tasarlanmış birleşim.
+            self.last_universe_source = "static_fallback" if not finviz_tickers else "finviz+static"
             logger.warning(
                 "Finviz returned only %s tickers (< min_finviz_tickers_skip_static_merge=%s), merging with static",
                 len(finviz_tickers),
@@ -526,5 +588,6 @@ class SmallCapUniverse:
             return merged[:cap]
 
         self._last_rank_info = None  # static path: dolar-hacim sıralaması yok
+        self.last_universe_source = "static"
         return self.get_static_universe()[:cap]
 

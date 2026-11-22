@@ -372,8 +372,31 @@ def _execute_smallcap_scan(
 
     prog(2, "universe", "Fetching small-cap universe…")
     tickers = engine.get_small_cap_universe()
-    logger.info(f"SmallCap universe: {len(tickers)} tickers")
+    universe_source = getattr(engine.universe_provider, "last_universe_source", None)
+    logger.info(f"SmallCap universe: {len(tickers)} tickers (source={universe_source})")
     prog(6, "universe", f"Universe: {len(tickers)} tickers")
+
+    # ── Evren devre kesicisi ──────────────────────────────────────────────
+    # 2026-11-22: finvizfinance 1.7 + eski ticker yamamız her Finviz sorgusunu düşürüyordu;
+    # tarama SESSİZCE 234 hisselik statik listeyle (delist hisseler dahil) koşuyordu. Statik
+    # liste ölçülmüş canlı evren değil — bayat evrenle sinyal üretmek yerine dur.
+    if universe_source == "static_fallback":
+        errors = list(getattr(engine.universe_provider, "_last_query_errors", []) or [])
+        logger.error("Universe unavailable: all Finviz queries failed (%s)", errors[:2])
+        stats = {
+            "reason": "universe_unavailable",
+            "message": (
+                "Finviz evreni alınamadı (tüm tarama sorguları hata verdi). Ölçülmüş canlı evren yerine "
+                "bayat statik listeyle sinyal üretmemek için tarama durduruldu. Genelde Finviz sayfa "
+                "yapısı/erişim değişikliğidir — backend loglarına bakın."
+            ),
+            "universe_source": universe_source,
+            "universe_errors": errors[:4],
+            "market_session": market_session,
+        }
+        if session_warning:
+            stats["session_warning"] = session_warning
+        return {"signals": [], "stats": stats, "market_regime": "UNKNOWN"}
 
     prog(8, "fetch", f"Fetching price data for {len(tickers)} tickers…")
     # 6mo (~126 bar): VCE trigger'ın >=55 bar şartına 3mo (~62 bar) tehlikeli
@@ -575,6 +598,8 @@ def _execute_smallcap_scan(
         stats["session_warning"] = session_warning
     if universe_fallback:
         stats["universe_fallback"] = universe_fallback
+    if universe_source:
+        stats["universe_source"] = universe_source
     if rank_info:
         stats["universe_ranked_total"] = rank_info["ranked_total"]
         stats["universe_cap"] = rank_info["cap"]

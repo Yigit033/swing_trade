@@ -89,7 +89,7 @@ def run_covers_auto_session(
     if stats.get("scan_source") != _AUTO_SOURCE:
         return False
     reason = stats.get("reason")
-    if reason in ("stale_data", "data_quality", "rate_limited", "error"):
+    if reason in ("stale_data", "data_quality", "rate_limited", "universe_unavailable", "error"):
         return False
     bar = stats.get("bar_session")
     if bar:

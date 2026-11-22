@@ -49,6 +49,12 @@ function ScanHealthBanners({ stats }: { stats: Record<string, unknown> }) {
             key: "rl", color: "#f59e0b", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.3)",
             text: message || "Veri kaynağı rate limit uyguladı. Birkaç dakika sonra tekrar deneyin.",
         });
+    } else if (reason === "universe_unavailable") {
+        // 2026-11-22: Finviz sorguları çökünce tarama sessizce bayat statik listeye düşüyordu.
+        banners.push({
+            key: "universe", color: "var(--red)", bg: "rgba(239,68,68,0.1)", border: "rgba(239,68,68,0.3)",
+            text: message || "Finviz evreni alınamadı — tarama bayat statik listeyle sinyal üretmemek için durduruldu.",
+        });
     } else if (reason === "stale_data") {
         // 2026-08-04: sağlayıcı son seansı OHLC=NaN döndürdüğünde sistem sessizce
         // eski bara düşüyordu. Artık tarama duruyor ve sebebi burada görünüyor.
@@ -999,7 +1005,7 @@ export default function ScannerPage() {
                         <div className="glass-card" style={{ padding: 48, textAlign: "center", color: "var(--text-muted)" }}>
                             <TrendingUp size={48} style={{ marginBottom: 12, opacity: 0.3 }} />
                             <div>
-                                {["data_quality", "rate_limited", "stale_data"].includes(String((result.stats as Record<string, unknown>).reason))
+                                {["data_quality", "rate_limited", "stale_data", "universe_unavailable"].includes(String((result.stats as Record<string, unknown>).reason))
                                     ? "Tarama veri sorunu nedeniyle tamamlanamadı — yukarıdaki uyarıya bakın."
                                     : "Mevcut filtrelerle sinyal bulunamadı. Min Quality'yi düşürmeyi deneyin."}
                             </div>
