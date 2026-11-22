@@ -457,3 +457,30 @@ zamanlayamıyor (2021–23'te de BEAR günleri +11.2%, BULL günleri −8.6%). B
 **Ek M/N notu (2026-11-22, kullanıcı ilkesi):** faiz kullanılmaz. M4'ün faiz kısmı ve ürün içi faiz
 hatırlatması kaldırıldı; boş nakit yalnız swing işlemleriyle değerlendirilecek. (Yukarıdaki geçmiş
 ön kayıt metni denetim izi için değiştirilmedi.)
+
+# Ek O — Swing tarafı: kazananı koştur (O1), büyük pozisyon (O2), CAUTION sınırı (O3)
+
+**Yazıldığı an: 2026-11-22, O1–O3'ün hiçbir sonucu görülmeden.** Kullanıcı ilkesi: kazanç yalnız swing
+işlemlerinden (faiz yok, endeks çekirdeği yok). Ek N teşhisi: hesap ~%66–74 nakitte, maliyet işlem başı
+brüt kazancı yiyor, kazanç kuyrukta (en iyi %5 çıkınca ortalama negatif). İkinci sinyal ailesi (H1–H5)
+ölçülmez: hepsi 50 bps sonrası negatif (Lab v3 §2, Ek A) — boşluğu zararla doldurmak olur.
+
+Taban: canlı ürün H6S + L2 freni, Ek M portföyü (doğru gün içi sıra), 10.000$, birincil maliyet 50 bps +
+Midas 1.5$/emir; duyarlılık 20 bps + 1.5$. Her varyant TEK parametre setiyle, tarama yok.
+
+- **O1 — Kazananı koştur.** 8. seans kapanışı giriş açılışının ÜSTÜNDEYSE çıkılmaz; 9. seanstan itibaren
+  iz süren stop: stop = max(önceki stop, giriş sonrası en yüksek kapanış − 2.5 × sinyal günü ATR14),
+  her seans önceki kapanışa göre güncellenir; gün içi Low ≤ stop → min(Open, stop) dolum. En çok 40
+  seans (40. kapanışta çık). 8. kapanış giriş açılışının altında/eşitse taban gibi çıkılır. Gerekçe: edge
+  kuyrukta; 8 seans kazananları kesiyor; para kazananda daha uzun çalışır, ek işlem/maliyet yok.
+- **O2 — Pozisyon %15** (fren yarısı %7.5). Gerekçe: nakit çoğu zaman boşta; sabit 1.5$ ücret 1.500$'da
+  gidiş-dönüş %0.20 (1.000$'da %0.30).
+- **O3 — CAUTION sınırı kaldırılır** (CAUTION'da da BULL gibi giriş; BEAR yasağı aynen kalır). Gerekçe:
+  CAUTION günlerin %19–27'si; IWM rejimi IWM'i zamanlayamıyor (Ek N0). Etiket: CAUTION'da alınan
+  işlemlerin (sınır 1) sonucu Ek N0'da görüldü (2021–23 n=17 −3.44; 2024–26 n=21 +15.43).
+
+**Karar (her varyant tabana karşı, ayrı ayrı):** (a) tüm dönem toplamı ≥ taban + 5 puan; (b) iki yarının
+her biri (2021–23 / 2024–son, her biri 10.000$'dan) ≥ tabanın o yarısı − 2 puan; (c) max düşüş ≥ taban
+− 3 puan VE > −35%; (d) duyarlılıkta (20 bps) (a) de sağlanır. Birden fazla geçerse geçenlerin
+birleşimi aynı kurallarla denenir ve en iyi tek varyantın toplamından düşük değilse benimsenir; değilse
+en yüksek toplamlı tek varyant. Hiçbiri geçmezse canlı değişmez.

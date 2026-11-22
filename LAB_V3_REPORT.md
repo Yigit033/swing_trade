@@ -624,3 +624,30 @@ yenememesi + paranın üçte ikisinin nakitte durması. IWM çekirdeği açığ�
 bedeli kötü yıllarda daha derin düşüş (2022'de IWM'le birlikte düşüyor) — ön kayıtlı şartlar bunu kabul
 etmedi. Kullanıcı yönü: kazanç swing işlemlerinden gelecek (faiz yok, endeks çekirdeği değil) → boş nakit
 ve maliyet erimesi swing tarafında çözülmeli. Hisse seçiminin edge'i ileri testte (Mayıs 2027) anlaşılır.
+
+## Ek O — Swing tarafı: kazananı koştur, büyük pozisyon, CAUTION sınırı
+
+Ön kayıt: `lab/PREREGISTRATION.md` Ek O (SHA256 `00778d9e…`), betik `lab/swing_o.py`, çıktı
+`output/lab/o_swing.json`. Taban = canlı H6S + fren, Ek M portföyü (parite: 35.7% = 35.7%), 10.000$.
+İkinci sinyal ailesi ölçülmedi: H1–H5'in hepsi 50 bps sonrası negatif.
+
+| 50 bps + 1.5$ | 6 yıl | 2021–23 | 2024–26 | Max düşüş | İşlem | Net/işlem | Nakit | Karar |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| Taban | +35.7% | +42.6% | −8.5% | −31.8% | 663 | +0.79% | %74 | — |
+| O1 kazananı koştur (iz süren stop, ≤40 seans) | +43.2% | **+7.2%** | +28.4% | −29.1% | 500 | +1.40% | %65 | ❌ (b) 2021–23 −35 puan, (d) 20 bps'de +1.4 |
+| O2 pozisyon %15 | **+66.2%** | +69.0% | −5.1% | **−37.9%** | 508 | +0.98% | %70 | ❌ (c) düşüş −35'i aşıyor |
+| O3 CAUTION sınırı yok | −6.6% | +11.1% | −17.5% | **−52.5%** | 881 | +0.20% | %67 | ❌ hepsi |
+
+20 bps + 1.5$ (canlı maliyet): taban +63.2% (DD −28.1), O1 +64.6% (−27.7), O2 +106.4% (−32.8), O3 +22.5% (−47.4).
+
+**Okuma:**
+- **O3:** CAUTION'da tek pozisyon sınırı ürünün en değerli kurallarından biri — kaldırınca toplam −42
+  puan, düşüş −52%. Rejim freni işlemler için çalışıyor (IWM'i zamanlamasa da).
+- **O1:** işlem başı net neredeyse ikiye katlanıyor (+0.79 → +1.40) ama para kazananlarda uzun kalınca
+  kümelenen sinyallerin farklı bir alt kümesi alınıyor; sonuç dönemlere göre ters dönüyor (2021–23
+  çöküyor, 2024–26 düzeliyor). Sağlam değil.
+- **O2:** aynı edge'e daha büyük bahis — iki yarıda da daha çok para, düşüş de orantılı derin. Edge
+  değil risk ayarı; ön kayıtlı düşüş sınırını geçemedi. Ayar zaten kullanıcıda (`h6s_position_pct`).
+
+**Sonuç:** canlı ürün değişmedi. Swing kuralları bu sinyalle sınırına yakın; 2024–26 açığının çözümü
+kural ayarı değil, sinyalin kendisi — o da ancak ileri testte (Mayıs 2027) ölçülür.
