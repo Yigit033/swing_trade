@@ -74,6 +74,7 @@ def _import_router_modules():
         backtest,
         genai,
         lookup,
+        orders,
         pending,
         performance,
         regime,
@@ -94,6 +95,7 @@ def _import_router_modules():
         settings_router,
         regime,
         shadow,
+        orders,
     )
 
 
@@ -112,6 +114,7 @@ def _include_routers(app: FastAPI, modules: tuple) -> None:
         settings_router,
         regime,
         shadow,
+        orders,
     ) = modules
     app.include_router(trades.router, prefix="/api/trades", tags=["trades"])
     app.include_router(pending.router, prefix="/api/pending", tags=["pending"])
@@ -123,6 +126,7 @@ def _include_routers(app: FastAPI, modules: tuple) -> None:
     app.include_router(settings_router.router)
     app.include_router(regime.router)
     app.include_router(shadow.router)
+    app.include_router(orders.router)
     _routers_mounted = True
 
 

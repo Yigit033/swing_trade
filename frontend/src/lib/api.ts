@@ -755,3 +755,12 @@ export type ShadowData = {
 
 export const getShadow = () =>
     api.get<ShadowData>("/api/shadow", { timeout: 60000 }).then((r) => r.data);
+
+// ── Midas Emirleri (H6S): bugün açılışta AL / kapanışta SAT / TUT ──
+export type OrderBuy = { ticker: string; shares: number; est_price: number; est_cost: number; stop_distance: number;
+    est_stop: number; buy_day: string; sell_day: string; overdue: boolean; trade_id?: number };
+export type OrderPos = { ticker: string; shares: number; entry_price: number; stop: number; entry_day: string;
+    sell_day: string; current_price?: number | null; overdue: boolean; trade_id?: number };
+export type OrdersData = { session: string; account: number; held: number; free: number; hold_sessions: number;
+    stop_atr: number; buy: OrderBuy[]; sell: OrderPos[]; hold: OrderPos[] };
+export const getOrders = () => api.get<OrdersData>("/api/orders").then((r) => r.data);
