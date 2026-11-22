@@ -81,6 +81,15 @@ function ChampionCard({ c, h6 }: { c: ShadowChampion; h6?: ShadowStrategyReport 
                 <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>H6 kazanma (net)</div>
                     <div style={{ fontWeight: 600 }}>{h6?.win_rate === undefined ? "—" : `%${h6.win_rate.toFixed(0)}`}</div></div>
             </div>
+            {c.dilution_split && (
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 10 }}>
+                    Hisse ihracı kontrolü (ileri ölçüm): girişten önceki 30 günde başvurusu olan işlemler{" "}
+                    <strong style={{ color: tone(c.dilution_split.dilution.net_mean) }}>{pct(c.dilution_split.dilution.net_mean)}</strong>{" "}
+                    ({c.dilution_split.dilution.closed}) · olmayanlar{" "}
+                    <strong style={{ color: tone(c.dilution_split.clean.net_mean) }}>{pct(c.dilution_split.clean.net_mean)}</strong>{" "}
+                    ({c.dilution_split.clean.closed}). Fark sürerse filtre kapı olur.
+                </div>
+            )}
         </div>
     );
 }

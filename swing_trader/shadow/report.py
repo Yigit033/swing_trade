@@ -109,8 +109,13 @@ def strategy_report(name: str, trades: List[Dict], sessions: List[date], live_st
     return out
 
 
-def champion_report(rows: List[Dict], since: str, cost: float = COST) -> Dict:
-    """Aynı dönemde canlı ürünün paper işlemleri, H6 ile aynı maliyetle (Ek F kıyası)."""
+def champion_report(rows: List[Dict], since: str, cost: float = COST,
+                    flags: Optional[Dict[str, List]] = None) -> Dict:
+    """Aynı dönemde canlı ürünün paper işlemleri, H6 ile aynı maliyetle (Ek F kıyası).
+
+    ``flags`` (Ek H ileri ölçümü): {işlem id: giriş öncesi 30 günde seyreltme başvuruları}. İşaretli
+    ve işaretsiz işlemlerin net sonucu ayrı raporlanır — H8 filtresinin gerçek veride testi.
+    """
     pct = pd.Series([float(r["realized_pnl_pct"]) for r in rows], dtype=float)
     out = dict(since=since, closed=int(len(pct)), cost_pct=cost,
                label="Canlı ürün (paper işlemleri, manuel eklenenler dahil)")
@@ -118,6 +123,14 @@ def champion_report(rows: List[Dict], since: str, cost: float = COST) -> Dict:
         net = pct - cost
         out.update(gross_mean=round(float(pct.mean()), 3), net_mean=round(float(net.mean()), 3),
                    win_rate=round(float((net > 0).mean() * 100), 1))
+    if flags is not None:
+        split = {}
+        for name, want in (("dilution", True), ("clean", False)):
+            sel = [float(r["realized_pnl_pct"]) - cost for r in rows
+                   if str(r.get("id")) in flags and bool(flags[str(r.get("id"))]) == want]
+            split[name] = dict(closed=len(sel), net_mean=round(float(np.mean(sel)), 3) if sel else None)
+        split["unflagged"] = sum(1 for r in rows if str(r.get("id")) not in flags)
+        out["dilution_split"] = split
     return out
 
 

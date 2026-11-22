@@ -544,6 +544,18 @@ def _execute_smallcap_scan(
 
     filtered = select_scan_signals(signals, effective_min_quality, effective_top_n)
 
+    # Kıdemli swing kontrolü: son 30 günde hisse ihracı / satış kaydı (S-1/S-3/F-x/424B) var mı?
+    # GÖRÜNÜR İŞARET — kapı değil (Lab v3 Ek H: H8 sağlamlık şartını geçemedi; ileri ölçülüyor).
+    # SEC'e ulaşılamazsa tarama etkilenmez; işaret "bilinmiyor" kalır.
+    if filtered:
+        try:
+            from swing_trader.data.sec_filings import recent_dilution
+            dil = recent_dilution([s["ticker"] for s in filtered], last_completed_session())
+            for s in filtered:
+                s["dilution_filings"] = dil.get(str(s["ticker"]).upper(), [])
+        except Exception as e:
+            logger.warning("Dilution check unavailable: %s", e)
+
     # Motorun ürettiği ama eşiğin altında kaldığı için GÖSTERİLMEYEN sinyalleri
     # açıkça logla. Aksi halde motor "SMALL CAP SWING 🚀: PRCH ... Q:61" diye
     # sevinçli bir satır basıyor, kullanıcı ekranda 0 sinyal görüyor ve loglar

@@ -51,6 +51,20 @@ def _sec_get(url: str, timeout: int = 30, retries: int = 4) -> bytes:
         except HTTPError as e:
             if e.code == 404:
                 raise
+            if e.code == 403:
+                # SEC Archives olmayan dosyaya (ör. federal tatilde günlük indeks: 2026-11-11 Veterans
+                # Day — NYSE açık, SEC kapalı) S3 "AccessDenied" XML'iyle 403 döner. Bu "dosya yok"dur;
+                # 404 say ki H4 o günü atlasın (yoksa günde 1 gün işleyen H4 orada kilitlenirdi).
+                # Gerçek engel (hız sınırı / otomasyon) farklı gövdeyle gelir → yeniden dene / yükselt.
+                try:
+                    body = e.read(20000) or b""
+                    if body[:2] == b"\x1f\x8b":          # SEC hata gövdesini istenmese de gzip'liyor
+                        import gzip
+                        body = gzip.decompress(body)
+                except Exception:
+                    body = b""
+                if b"<Code>AccessDenied</Code>" in body:
+                    raise HTTPError(url, 404, "missing (S3 AccessDenied)", e.headers, None)
             if e.code in (403, 429, 500, 502, 503) and attempt < retries - 1:
                 time.sleep(2 * (attempt + 1))
                 continue
@@ -291,3 +305,25 @@ def champion_trades(since: date) -> List[Dict]:
     s = since.isoformat()
     return [r for r in rows if r.get("status") != "REJECTED" and str(r.get("entry_date") or "")[:10] >= s
             and r.get("realized_pnl_pct") is not None]
+
+
+def dilution_flags(rows: List[Dict]) -> Dict[str, List[Dict]]:
+    """Canlı ürün işlemleri için giriş öncesi 30 günde seyreltme başvurusu: {trade_id: [..]}.
+
+    Sinyal günü = giriş gününden önceki seans (onaylanan işlemde entry_date t+1 açılışıdır).
+    """
+    from ..data.sec_filings import recent_dilution
+    from ..utils.market_calendar import prev_trading_day
+
+    by_day: Dict[date, List[Dict]] = {}
+    for r in rows:
+        d = str(r.get("entry_date") or "")[:10]
+        if not d:
+            continue
+        by_day.setdefault(prev_trading_day(date.fromisoformat(d)), []).append(r)
+    out: Dict[str, List[Dict]] = {}
+    for sd, rs in by_day.items():
+        hits = recent_dilution([r["ticker"] for r in rs], sd)
+        for r in rs:
+            out[str(r["id"])] = hits.get(str(r["ticker"]).upper(), [])
+    return out

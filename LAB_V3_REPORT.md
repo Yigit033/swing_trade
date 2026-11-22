@@ -417,3 +417,44 @@ bunu ayıklamak için konmuştu; production'a alınmadı. Geçerli test: ileri v
 Tekrar üretim: `python lab/fetch_altdata.py` → `python lab/info_edgar.py build` →
 `python lab/h0_sim.py --exclude output/lab/altdata/ex_{dilution,shortvol}.parquet` →
 `python lab/info_edgar.py evaluate`.
+
+---
+
+## Ek I — Kıdemli swing trader denetimi (22 Kasım 2026)
+
+Canlı ürün, profesyonel bir swing trader'ın kontrol listesine karşı kodda tek tek doğrulandı.
+
+| Kural | Durum |
+|---|---|
+| Piyasa yönü: ayı piyasasında yeni alım yok, temkinli piyasada sınırlı | ✔ BEAR 0, CAUTION 1 |
+| Her işlemde sabit risk (%1.5) + ATR stop (2.5×, tip tavanı) | ✔ |
+| Bilanço öncesi alım yok | ✔ (Ek D1'de düzeltildi) |
+| Likidite (≥5M$/gün) ve hacimli kırılım (RVOL ≥1.5) | ✔ |
+| Gap ile kovalamama (+5 / −7) | ✔ |
+| Kısmi kâr (T1'de 1/3) + iz süren stop + zaman stopu | ✔ |
+| Doğru evren / dürüst (net) sonuç | ✔ (Ek F'de düzeltildi) |
+| **Nakit sınırı (kaldıraç yok)** | ✘ → **düzeltildi** |
+| **Hisse ihracı / seyreltme kontrolü** | ✘ → **işaret + ileri ölçüm eklendi** |
+| Sektör yoğunlaşması sınırı | ✘ ölçülmedi (sıradaki) |
+| Düşüş / kayıp serisi freni | ✘ ölçülmedi |
+
+**Nakit sınırı.** BULL rejiminde eşzamanlı pozisyon sınırı yoktu ve nakit kontrol edilmiyordu. Lab
+replikasında paper portföy zirvede 19 pozisyon / 28.401$ taşıyordu (10.000$ hesap, günlerin %3.4'ünde
+hesap aşılıyor) — nakit hesapta (Midas) açılamaz işlemler. Gerçeklik şartı olarak uygulandı (sonuca
+göre karar verilmedi): otomatik giriş ve backtest, açık + bekleyen + yeni tutar > hesap ise girmez.
+
+| 10.000$ hesap, 2021–2026 | Önce | Nakit sınırıyla |
+|---|---:|---:|
+| Zirve bağlanan sermaye | 28.401$ | 9.930$ |
+| Canlı lotla net | −470$ | −387$ |
+| %10/işlem portföy / Max DD | −11.8% / −22.3% | −8.4% / −19.9% |
+
+**Seyreltme kontrolü.** Tarama sonuçlarında son 30 günde S-1/S-3/F-x/424B başvurusu olan hisseye
+"⚠ Hisse ihracı başvurusu" işareti (kapı değil — Ek H'de sağlamlık şartını geçemedi). Gölge raporu
+canlı ürünün kapanan işlemlerini bu işarete göre ayırıyor: fark ileri veride sürerse filtre kapı olur.
+Gerçek veri denemesi: ASTS (424B5, 17–18 Kas), IONQ (424B7, 13 Kas) yakalandı.
+
+**Yan bulgu (düzeltildi).** SEC, olmayan dosyaya (federal tatilde günlük indeks, ör. 11 Kas Veterans
+Day — NYSE açık) 404 yerine gzip'li S3 `AccessDenied` 403 döndürüyor. Gölge H4 günleri sırayla
+işlediği için ilk SEC tatilinde kilitlenirdi; artık bu yanıt "dosya yok" sayılıyor, gerçek engeller
+(hız sınırı) hâlâ hata olarak yükseliyor.

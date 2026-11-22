@@ -183,6 +183,14 @@ function SignalCard({ s, onTrack, tracking }: { s: Signal; onTrack: (s: Signal) 
                     <TypeLabel type={s.swing_type} label={s.swing_type_label} />
                     <PathwayBadge pathway={s.trigger_pathway} />
                     <span>{qualityEmoji} {qualityLabel}</span>
+                    {(s.dilution_filings?.length ?? 0) > 0 && (
+                        <span
+                            title={`Son 30 günde SEC'e hisse ihracı / satış kaydı başvurusu: ${s.dilution_filings!.map(f => `${f.form} (${f.date})`).join(", ")}. Yeni hisse arzı yükselişi kesebilir. Bilgi amaçlı işaret — sinyal elenmedi (geçmiş testte filtre olarak kanıtlanamadı, ileri ölçülüyor).`}
+                            style={{ fontSize: "0.72rem", fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                                     background: "rgba(245,158,11,0.15)", color: "#f59e0b", border: "1px solid rgba(245,158,11,0.4)" }}>
+                            ⚠ Hisse ihracı başvurusu ({s.dilution_filings![0].form}, {s.dilution_filings![0].date.slice(5)})
+                        </span>
+                    )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     {hasRegimePenalty ? (

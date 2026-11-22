@@ -142,6 +142,8 @@ export interface Signal {
     // v14: hangi tetikleyici kapıdan geldi — 'vce_breakout' | 'rvol_thrust'
     trigger_pathway?: string;
     trigger_reason?: string;
+    // Son 30 günde hisse ihracı / satış kaydı başvuruları (S-1/S-3/F-x/424B) — işaret, kapı değil
+    dilution_filings?: { form: string; date: string }[];
     entry_price: number;
     stop_loss: number;
     target_1: number;
@@ -732,6 +734,9 @@ export type ShadowTrade = {
 export type ShadowChampion = {
     since: string; closed: number; cost_pct: number; label: string;
     gross_mean?: number; net_mean?: number; win_rate?: number;
+    // Ek H ileri ölçümü: girişten önceki 30 günde hisse ihracı başvurusu olan / olmayan işlemler
+    dilution_split?: { dilution: { closed: number; net_mean: number | null };
+                       clean: { closed: number; net_mean: number | null }; unflagged: number };
 };
 
 export type ShadowData = {

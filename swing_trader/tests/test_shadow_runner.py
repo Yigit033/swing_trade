@@ -36,6 +36,10 @@ class FakeSrc:
     def champion_trades(self, since):
         return self.champion
 
+    def dilution_flags(self, rows):
+        return {str(r["id"]): ([dict(form="424B5", date="2025-06-01")] if r["ticker"] == "DIL" else [])
+                for r in rows}
+
     def candidate_universe(self):
         return {"ABC", "XYZ"}
 
@@ -163,7 +167,8 @@ def test_h6_lifecycle_fixed_hold_and_champion(tmp_path):
     """Ek F: canlı VCE isabeti → PENDING → t+1 açılışta OPEN → 8. seans kapanışında CLOSED (stop yok)."""
     L, src = ShadowLedger(str(tmp_path / "s.db")), FakeSrc()
     src.vce = {date(2025, 6, 13): [("XYZ", 9e7), ("ABC", 5e7)]}
-    src.champion = [dict(realized_pnl_pct=2.0), dict(realized_pnl_pct=-1.0)]
+    src.champion = [dict(id=1, ticker="CLN", entry_date="2025-06-16", realized_pnl_pct=2.0),
+                    dict(id=2, ticker="DIL", entry_date="2025-06-16", realized_pnl_pct=-1.0)]
     out = runner.run_shadow_daily(now=datetime(2025, 6, 16, 7, 0, tzinfo=NY), ledger=L, src=src)
     assert out["H6"]["added"] == 2 and L.get_meta("h6_live_start") == "2025-06-13"
     assert L.get_meta("params_h6_sha256") == rules.PARAMS_H6_SHA256
@@ -179,6 +184,9 @@ def test_h6_lifecycle_fixed_hold_and_champion(tmp_path):
     rep = L.get_meta("report")
     assert rep["strategies"]["H6"]["closed"] == 2 and rep["strategies"]["H6"]["gate"]["need_closed"] == 100
     assert rep["champion"]["closed"] == 2 and rep["champion"]["net_mean"] == pytest.approx(0.0)
+    split = rep["champion"]["dilution_split"]                    # Ek H ileri ölçümü
+    assert split["dilution"] == dict(closed=1, net_mean=-1.5) and split["clean"] == dict(closed=1, net_mean=1.5)
+    assert L.get_meta("champion_dilution")["2"][0]["form"] == "424B5"
     assert rep["params_sha256"] == rules.PARAMS_SHA256          # H4/H5 kilidi etkilenmedi
 
 
@@ -189,3 +197,58 @@ def test_h6_params_change_blocks_only_h6(tmp_path):
     out = runner.run_shadow_daily(now=datetime(2025, 6, 16, 7, 0, tzinfo=NY), ledger=L, src=src)
     assert out["H6"]["error"] == "H6_PARAMS_CHANGED_WITHOUT_PREREGISTRATION"
     assert L.trades("H6") == [] and out["H5"]["added"] == 1     # H5 normal çalışmaya devam
+
+
+def test_sec_dilution_window_cache_and_holidays(monkeypatch):
+    """Son 30 gün; geçmiş gün önbelleğe alınır, dünün dosyası alınmaz; 404 (tatil) boş sayılır."""
+    import json
+    from urllib.error import HTTPError
+    from swing_trader.data import sec_filings as sf
+    monkeypatch.setattr(sf, "_days", {})
+    monkeypatch.setattr(sf, "_tickers", {"at": 0.0, "map": {}})
+    calls = []
+    idx = "\n".join([
+        "Form Type   Company Name   CIK   Date Filed   File Name",
+        "424B5       ACME CORP      123   20251103     edgar/data/123/0001-25-000001.txt",
+        "424B5/A     ACME CORP      123   20251103     edgar/data/123/0001-25-000002.txt",
+        "10-Q        OTHER INC      456   20251103     edgar/data/456/0001-25-000003.txt",
+    ])
+
+    def fake_get(url):
+        calls.append(url)
+        if url.endswith("company_tickers.json"):
+            return json.dumps({"0": {"cik_str": 123, "ticker": "ACME"}, "1": {"cik_str": 456, "ticker": "OTH"}}).encode()
+        if "form.20251103.idx" in url:
+            return idx.encode()
+        raise HTTPError(url, 404, "nf", None, None)
+    monkeypatch.setattr(sf, "_get", fake_get)
+    got = sf.recent_dilution(["ACME", "OTH", "NOPE"], date(2025, 11, 20), today=date(2025, 11, 21))
+    assert got == {"ACME": [dict(form="424B5", date="2025-11-03")]}      # /A ve 10-Q sayılmaz
+    assert date(2025, 11, 3) in sf._days and date(2025, 11, 20) not in sf._days
+    n = len(calls)
+    sf.recent_dilution(["ACME"], date(2025, 11, 20), today=date(2025, 11, 21))
+    assert len(calls) - n == 1                                           # yalnız önbelleksiz son gün
+    assert sf.recent_dilution(["ACME"], date(2025, 12, 20), today=date(2025, 12, 22)) == {}   # pencere dışı
+
+
+def test_sec_missing_file_403_is_treated_as_missing(monkeypatch):
+    """SEC tatilinde günlük indeks yok → S3 AccessDenied 403; 404 sayılmalı, gerçek 403 sayılmamalı."""
+    import io
+    from urllib.error import HTTPError
+    from swing_trader.shadow import sources as S
+    monkeypatch.setattr(S.time, "sleep", lambda s: None)
+
+    def fake(body):
+        def _open(req, timeout=30):
+            raise HTTPError(req.full_url, 403, "Forbidden", {}, io.BytesIO(body))
+        return _open
+    import gzip
+    denied = b'<?xml version="1.0"?><Error><Code>AccessDenied</Code></Error>'
+    for body in (denied, gzip.compress(denied)):                 # SEC gerçekte gzip'li gönderiyor
+        monkeypatch.setattr(S, "urlopen", fake(body))
+        with pytest.raises(S.SecIndexMissing):
+            S.form4_index(date(2026, 11, 11))
+    monkeypatch.setattr(S, "urlopen", fake(b"<html>Request Rate Threshold Exceeded</html>"))
+    with pytest.raises(HTTPError) as e:
+        S._sec_get("https://www.sec.gov/x", retries=2)
+    assert e.value.code == 403                                   # gerçek engel sessizce yutulmaz

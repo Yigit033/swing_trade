@@ -328,7 +328,17 @@ def build_report(ledger: ShadowLedger, src, asof: date) -> Dict:
         h6_bh = _buy_hold(src, "IWM", h6_d, asof) if h6_d != live_start else iwm_bh
         strategies["H6"] = strategy_report("H6", trades, rules.sessions_between(h6_d, asof), h6_d, asof, h6_bh)
         try:   # aynı dönemde canlı ürünün kendi paper işlemleri, aynı 50 bps maliyetle
-            champion = champion_report(src.champion_trades(h6_d), since=h6_start)
+            rows = src.champion_trades(h6_d)
+            # Ek H ileri ölçümü: her işlem giriş öncesi seyreltme başvurusuna göre BİR KEZ işaretlenir.
+            flags = ledger.get_meta("champion_dilution", {}) or {}
+            new = [r for r in rows if str(r.get("id")) not in flags]
+            if new:
+                try:
+                    flags.update(src.dilution_flags(new))
+                    ledger.set_meta("champion_dilution", flags)
+                except Exception:
+                    logger.exception("Champion dilution flags failed")
+            champion = champion_report(rows, since=h6_start, flags=flags)
         except Exception:
             logger.exception("Champion report failed")
     return dict(asof=asof.isoformat(), live_start=live_start.isoformat(),
