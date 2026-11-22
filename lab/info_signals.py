@@ -1,8 +1,9 @@
 """Pre-registered information-based swing signals H4 (insider clusters) and H5 (PEAD).
 See lab/PREREGISTRATION.md, Ek A. Parameters are FIXED.
 
-Usage: python lab/info_signals.py [H4] [H5]
+Usage: python lab/info_signals.py [H4] [H5] [--pool large]
 Output: output/lab/challengers/trades_H4.parquet / trades_H5.parquet (+ events_*.parquet)
+        --pool large (Ek D2): trades_H4L / trades_H5L (+ events_H4L / events_H5L), havuz L
 """
 import json
 import sys
@@ -14,7 +15,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from lab.common import panels, pool_mask, EVAL_START, LAB  # noqa: E402
+from lab.common import panels, pool_mask, pool_mask_large, EVAL_START, LAB  # noqa: E402
 from lab.challengers import simulate, walk, atr14, OUT  # noqa: E402
 
 
@@ -92,12 +93,12 @@ def atr_exit(ie, arr, r):
     return walk(ie, arr, arr[0][ie] - 2.5 * r.atr, 20)
 
 
-def run_h4(P, pool):
+def run_h4(P, pool, name="H4"):
     ev = h4_events(insider_purchases())
-    ev.to_parquet(OUT / "events_H4.parquet", index=False)
+    ev.to_parquet(OUT / f"events_{name}.parquet", index=False)
     cands = to_candidates(ev, "F", "value", P, pool)
-    print(f"H4 events {len(ev)}, in-pool candidates {len(cands)}", flush=True)
-    return simulate(cands, P, atr_exit, "H4")
+    print(f"{name} events {len(ev)}, in-pool candidates {len(cands)}", flush=True)
+    return simulate(cands, P, atr_exit, name)
 
 
 def h5_events(P):
@@ -129,23 +130,27 @@ def h5_events(P):
     return pd.DataFrame(ev)
 
 
-def run_h5(P, pool):
+def run_h5(P, pool, name="H5"):
     ev = h5_events(P)
-    ev.to_parquet(OUT / "events_H5.parquet", index=False)
+    ev.to_parquet(OUT / f"events_{name}.parquet", index=False)
     cands = to_candidates(ev, "R", "surprise", P, pool)
-    print(f"H5 events {len(ev)}, in-pool candidates {len(cands)}", flush=True)
-    return simulate(cands, P, atr_exit, "H5")
+    print(f"{name} events {len(ev)}, in-pool candidates {len(cands)}", flush=True)
+    return simulate(cands, P, atr_exit, name)
 
 
 def main():
-    P, pool = panels(), pool_mask()
-    pool = pool.reindex(columns=P["Close"].columns, fill_value=False)
+    args = sys.argv[1:]
+    large = "--pool" in args and args[args.index("--pool") + 1] == "large"
+    args = [a for a in args if a not in ("--pool", "large")]
+    P = panels()
+    pool = (pool_mask_large() if large else pool_mask()).reindex(columns=P["Close"].columns, fill_value=False)
     OUT.mkdir(parents=True, exist_ok=True)
-    which = sys.argv[1:] or ["H4", "H5"]
+    which = args or ["H4", "H5"]
     for name, fn in (("H4", run_h4), ("H5", run_h5)):
         if name not in which:
             continue
-        T = fn(P, pool)
+        name = name + ("L" if large else "")
+        T = fn(P, pool, name)
         T.to_parquet(OUT / f"trades_{name}.parquet", index=False)
         print(name, len(T), f"mean {T.ret_pct.mean():.2f}% median {T.ret_pct.median():.2f}%", flush=True)
 

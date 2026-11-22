@@ -57,7 +57,10 @@ def confirm_levels(sp, o, atr, swing_type, stop_loss, target_1, target_2):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--universe", default="emulated")
+    # Ek D1: live = veri yok → geç (canlı fail-open), closed = veri yok → ret, off = kapı kapalı
+    ap.add_argument("--earnings", default="live", choices=["live", "closed", "off"])
     a = ap.parse_args()
+    tag = a.universe + ("" if a.earnings == "live" else f"_earn{a.earnings}")
     import logging
     logging.disable(logging.CRITICAL)
     from swing_trader.small_cap import settings_config as sc
@@ -78,15 +81,18 @@ def main():
     # Earnings gate (pass-A ran with no earnings; reject-only filter → exact to apply here)
     keep, missing = [], 0
     for r in sig.itertuples():
+        if a.earnings == "off":
+            keep.append(True)
+            continue
         ed = earnings_dates(r.ticker)
-        if ed is None:
+        if ed is None or len(ed) == 0:
             missing += 1
-            keep.append(True)          # live: earnings fetch failure → "check skipped" → pass
+            keep.append(a.earnings == "live")   # live: fetch failure/empty → "check skipped" → pass
             continue
         ok, _ = filt.check_earnings(r.ticker, r.date.to_pydatetime(), list(ed))
         keep.append(ok)
     sig = sig[keep].copy()
-    print(f"signals after earnings gate: {len(sig)} (earnings missing for {missing})")
+    print(f"[{a.earnings}] signals after earnings gate: {len(sig)} (earnings missing for {missing})")
 
     us = S.auto_scan
     trades, closed = [], []          # closed: (ticker, exit_day) for cooldown
@@ -166,8 +172,8 @@ def main():
             if rec["exit_day"] is not None:
                 closed.append((r.ticker, rec["exit_day"]))
     T = pd.DataFrame(trades)
-    T.to_parquet(OUT / f"trades_{a.universe}.parquet", index=False)
-    pd.DataFrame(selected_log).to_parquet(OUT / f"selected_{a.universe}.parquet", index=False)
+    T.to_parquet(OUT / f"trades_{tag}.parquet", index=False)
+    pd.DataFrame(selected_log).to_parquet(OUT / f"selected_{tag}.parquet", index=False)
     print(T.status.value_counts().to_string())
     done = T[~T.status.isin(["REJECTED", "OPEN", "REVIEW"])]
     print(f"closed trades {len(done)}: mean {done.ret_pct.mean():.2f}% median {done.ret_pct.median():.2f}% "

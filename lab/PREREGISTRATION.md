@@ -163,3 +163,73 @@ paper işlemlerine ve kapasitesine dokunmaz, ayrı defterde (shadow_*) tutulur.
   - Durum: F1 sağlanmadan **TOPLANIYOR**. F1 sağlanınca F2–F4 hepsi geçerse **TERFİ ADAYI**;
     net ortalama ≤ 0 ise **KALDI** (gölge kapatılır); aksi halde **BELİRSİZ** (12. aya kadar
     devam, 12. ayda hâlâ TERFİ ADAYI değilse KALDI).
+
+---
+
+# Ek D — Bilanço kapısı düzeltmesi (D1) ve büyük hisse deneyi H4L / H5L (D2)
+
+**Yazıldığı an: 2026-11-22, D1 ve D2'nin hiçbir sonucu görülmeden.** Bilinen tek şey veri
+kapsamı: lab OHLCV'sinde bugün ≥10B$ olan 841 hisse, `earnings_full`'da bunların 796'sı var.
+
+## D1 — Bilanço kapısı: fail-open düzeltmesinin yönü
+
+Bulgu (Ek B raporu): `filters.check_earnings` yfinance boş/hatalı döndüğünde "geç" diyor;
+canlı SAIC bilanço gününde açıldı. Kural (sinyal günü veya sonraki 0..N gün içinde bilanço
+varsa ret) kodda veri yokken uygulanmıyor.
+
+- **H0** (bugünkü): lab bilanço dosyası yok/boş → sinyal geçer (canlıyla aynı fail-open).
+- **H0EC** (düzeltilmiş): lab bilanço verisi yok → sinyal reddedilir (fail-closed).
+- **H0E0** (çeldirici kontrolü): bilanço kapısı tamamen kapalı. Kapının kendisi para
+  kazandırıyor mu sorusunu cevaplar; kapı zararlıysa onu "düzeltmek" zararı büyütür.
+- Ölçüt (Ek B ile aynı): 50 bps net işlem başı ortalama ve %10/işlem portföy toplam getirisi.
+- **Karar kuralı:**
+  - H0E0, H0'dan **hem** net/işlem **hem** portföy toplamında büyükse → kapı zararlı kabul
+    edilir; fail-closed production'a **uygulanmaz**, kapının kaldırılması kullanıcıya ayrı
+    karar olarak sunulur.
+  - Aksi halde → production düzeltmesi: ikinci bağımsız kaynak (tarama başına tek istekle
+    bilanço takvimi) eklenir; iki kaynak da bilinmiyorsa sinyal reddedilir (fail-closed) ve
+    sebebi görünür şekilde kaydedilir; backtest aynı kuralı uygular (veri yok → ret).
+  - H0EC raporlanır; az sayıda sinyali etkilediği için karar ölçütü değildir.
+- **Bilinen yanlılık:** lab'daki "veri yok" Kasım 2026 indirmesine aittir, canlıdaki o
+  günkü hata/boşluk değildir.
+
+## D2 — H4L / H5L: aynı bilgi sinyalleri, büyük ve likit hisselerde
+
+Ekonomik gerekçe: Ek A'da H4/H5 havuzu brüt yendi (+0.19 / +0.27 puan) ama 50 bps
+small/mid-cap maliyetini aşamadı. Büyük hisselerde işlem maliyeti çok daha düşüktür. Karşı
+argüman (önceden yazılır): içeriden alım ve PEAD etkisi literatürde büyük hisselerde
+**daha zayıftır**; düşük maliyet, zayıf edge'i telafi etmeyebilir.
+
+- **Kurallar:** H4 ve H5, Ek A ile birebir; tek fark havuz ve maliyet.
+- **Havuz L:** Bölüm 0'daki aynı hisse kümesi; her gün t için Close ≥ 7$ (üst fiyat sınırı
+  yok), 63-seans ortalama hacim > 300K, 20-seans ortalama dolar hacim > 5M$, market cap
+  (t tarihindeki hisse sayısı × Close) **≥ 10B$** (üst sınır yok).
+- **Veri:** H4 aynı SEC DERA veri seti. H5 aynı `earnings_full` (eksik büyük hisseler aynı
+  betikle bir kez indirilir; yine eksik kalanlar dışlanır ve sayısı raporlanır).
+- **Maliyet:** birincil **10 bps gidiş-dönüş** (≥10B$ hisselerde kote spread tipik 1–5 bps;
+  açılış emri kayması dahil muhafazakâr). Duyarlılık: 20 ve 50 bps raporlanır.
+- **Benchmark:** havuz L farkı (Bölüm 0 tanımı, havuz L ile); endeks **SPY**.
+- **Terfi ölçütleri:** P1–P6, şu farklarla: P2 ve P4 10 bps net, P5 **20 bps**'te net
+  ortalama ≥ 0 (birincil maliyetin 2 katı, Bölüm 1'deki 50→100 oranı gibi). Portföy (P6)
+  10 bps maliyetle. Ek olarak (kapı değil, raporlanır): portföy toplamı vs SPY al-tut.
+- **Sonuç:** Geçen strateji Ek C düzeniyle gölge moda eklenir (maliyet 10 bps, kıyas SPY);
+  geçemezse "edge bulunamadı" raporlanır, parametre taraması yapılmaz.
+- **Bilinen yanlılıklar:** survivorship (2023'te batan SIVB/FRC/SBNY ve satın alınan büyük
+  hisseler yok — long için iyimser); `facts` olmayan büyük hisselerde hisse sayısı bugünkü
+  değerle sabit (geri alım yapanlarda geçmiş cap biraz düşük ölçülür, yalnız 10B sınırında
+  etkili); yfinance EPS tahminleri sonradan revize edilmiş olabilir.
+
+### D1 notu — sonuç KISMEN görüldükten sonra (2026-11-22, etiketli sapma)
+
+D1 varyantları ilk kez koşulunca (yalnız log özetindeki brüt ortalamalar görüldü: H0 345 işlem
++0.04%, H0EC 243 işlem +0.31%, H0E0 356 işlem +0.04%; net/portföy değerlendirmesi yapılmadı)
+H0 sinyallerinin **168/539'unda** lab bilanço verisinin boş olduğu görüldü. Kök neden: `output/
+lab/earnings` dosyalarının 130'u indirme sırasında Yahoo kısıtlamasıyla boş yazılmış ("No
+earnings dates found"); aynı hisselerin hepsi `earnings_full`'da aynı fonksiyondan
+(`get_earnings_dates(limit=40)`) dolu. Bu bir veri hatasıdır, kural değişikliği değildir.
+
+- **Onarım:** `lab.common.earnings_dates` boş/yoksa `earnings_full` zaman damgalarına düşer.
+  Onarım öncesi iki kaynağın ortak hisselerde aynı tarihleri verdiği doğrulanır.
+- **Birincil D1 değerlendirmesi onarılmış veriyle** yapılır; onarımsız sonuçlar da raporlanır.
+- **Karar kuralı aynen geçerli.** H0 taban çizgisi (Ek B/Lab v3'teki −0.46%) onarılmış veriyle
+  yeniden raporlanır; fark olursa açıkça yazılır.

@@ -21,6 +21,12 @@ small/mid-cap swing stratejisinde kanıtlanabilir bir edge bulunamadı.
 
 Aynı dönemde al-tut getirisi: **IWM +42%, IJR +57%, SPY +102%**.
 
+> **Düzeltme (Ek D1, 22 Kasım 2026):** lab'ın bilanço tarihleri H0 sinyallerinin %31'inde
+> (168/539) indirme hatası yüzünden boştu; bilanço kapısı bu sinyallerde çalışmamıştı. Kapı
+> düzgün çalışınca **H0: 331 işlem, net −0.24%/işlem, havuz farkı +0.00 [−0.97, +0.97],
+> portföy −11.8%, max DD −22.3%.** Sonuç değişmiyor: ürün maliyet sonrası kaybettiriyor ve
+> endeksin çok gerisinde.
+
 H0 canlı pozisyon boyutuyla (10.000$ hesap, işlem başı ortalama 1.396$) 6 yılda
 **brüt +1.297$, 50 bps maliyetle −1.111$**. Paper trading maliyet kesmediği için
 ekranda hafif kârlı görünebilir; gerçek işlem maliyeti bu sonucu tersine çevirir.
@@ -156,7 +162,7 @@ giriş, stop, çıkış günü ve getiri (fark yalnız 5 bps slippage). İlk den
 kayıktı; kök neden backtest'in rejimi 7 aylık SPY geçmişiyle (canlı: 1 yıl) hesaplamasıydı.
 Düzeltildi ve regresyon testi eklendi.
 
-### Yeni bulgu (düzeltilmedi): bilanço kapısı veri hatasında açık kalıyor
+### Yeni bulgu: bilanço kapısı veri hatasında açık kalıyor (Ek D1'de DÜZELTİLDİ)
 
 Canlı SAIC işlemi (sinyal 2026-08-31) bilanço gününde açıldı: SAIC 31 Ağustos 07:00 ET'de
 açıkladı, kural 0–3 gün içindeki bilançoyu reddetmeli. `filters.check_earnings`, yfinance
@@ -183,3 +189,76 @@ Lab paritesi (production kural fonksiyonları, lab verisi üzerinde):
 
 Not: SEC verisinde bazı semboller parantezli ("(CALX)"). Lab bunları evren dışı saydı;
 ön kayda sadakat için production da aynısını yapıyor.
+
+---
+
+## Ek D — Bilanço kapısı düzeltmesi (D1) ve büyük hisse deneyi (D2)
+
+Ön kayıt: [lab/PREREGISTRATION.md](lab/PREREGISTRATION.md) Ek D, sonuçlardan önce yazıldı
+(SHA256 `fe4614b7d1c68993e97063eeae7f3a3a20499339c1a12ecf34379f17237e3b59`). Sonradan eklenen
+**D1 notu** etiketli bir sapmadır (aşağıda); notla birlikte dosyanın SHA256'sı
+`3d5979d80dbafc21968a3517ed6b23761fb489debbffd315a70554872fa35c9d`.
+
+### D1 — Bilanço kapısı
+
+**Veri hatası (sonuç kısmen görüldükten sonra bulundu, ön kayda etiketli not olarak yazıldı).**
+`output/lab/earnings` dosyalarının 130'u indirme sırasında Yahoo kısıtlamasıyla boş yazılmıştı;
+H0 sinyallerinin 168/539'unda kapı veri yokluğundan geçiyordu. Aynı fonksiyonla çekilmiş
+`earnings_full` dosyaları ortak 1.281 hissede birebir aynı tarihleri veriyor (0 uyuşmazlık);
+lab artık boş dosyada ona düşüyor. Canlı SAIC'in "replikada da aynı" çıkması bu iki ayrı veri
+hatasının çakışmasıydı.
+
+| Onarılmış veri | İşlem | Net/işlem (50 bps) | Havuz farkı (95% CI) | Portföy | Max DD |
+|---|---:|---:|---|---:|---:|
+| **H0** kapı çalışıyor (veri yoksa geç) | 331 | **−0.24%** | +0.00 [−0.97, +0.97] | **−11.8%** | −22.3% |
+| H0EC veri yoksa ret (düzeltme) | 328 | −0.31% | −0.04 [−1.02, +0.91] | −13.6% | −23.9% |
+| H0E0 kapı kapalı (çeldirici) | 356 | −0.46% | −0.17 [−1.17, +0.80] | −19.1% | −29.2% |
+| *Onarımsız H0 (Lab v3 ilk rapor)* | 345 | −0.46% | −0.18 [−1.16, +0.74] | −18.7% | −28.6% |
+
+**Karar (ön kayıtlı kural):** kapı kapalıyken sonuç her iki ölçütte de kötü → kapı para
+kazandırıyor (+0.22 puan/işlem, +7 puan portföy) → fail-closed düzeltmesi uygulandı. H0EC
+yalnız 5 sinyali etkiliyor (3 işlem), karar ölçütü değil.
+
+**Float kararı yeniden kontrol edildi:** onarılmış veriyle H0F 294 işlem, net −0.73%, portföy
+−23.4% (H0: −0.24%, −11.8%) → gerçek float yine kötü, Ek B kararı geçerli.
+
+**Production düzeltmesi** (`filters.check_earnings`, `data/earnings_calendar.py`):
+
+| Durum | Eski | Yeni |
+|---|---|---|
+| Hissenin tarihleri yakında bilanço gösteriyor | ret | ret |
+| Hissenin tarihleri boş/hata, takvim bilanço gösteriyor (SAIC) | **geç** | ret |
+| İkisi de bilinmiyor | **geç** | ret (sebep: "Earnings date unverified") |
+| Biri biliniyor ve yakında bilanço yok | geç | geç |
+| Beklenmedik hata | **geç** | ret |
+
+Takvim tarama başına bir kez çekiliyor (canlı deneme: 335 şirket, 1.9 sn); hisse başına süre
+değişmedi. Ürünün backtest'i bilanço verisi olmayan hissenin sinyalini eliyor ve sayıyor
+(`skip_earnings_unknown`). Açık liste veren çağıranlar (discovery, lab, testler) değişmedi.
+Testler: `swing_trader/tests/test_earnings_gate.py` (21); eski kodda SAIC durumu "geç" veriyor.
+
+### D2 — Büyük hisseler (≥10B$, 10 bps maliyet, SPY kıyası)
+
+Havuz L: günde ortalama 665 hisse (1.218 farklı). Eksik 30 bilanço dosyası (hepsi 250$ üstü
+hisseler) bir kez indirildi; 2 yeni halka arz hâlâ boş, dışlandı.
+
+| 2021–2026 | H4L içeriden alım | H5L bilanço sürprizi |
+|---|---:|---:|
+| İşlem / ay | 340 / 63 | 3.474 / 71 |
+| Brüt ortalama | +0.65% | +0.25% |
+| Net 10 / 20 / 50 bps | +0.55 / +0.45 / +0.15% | +0.15 / +0.05 / −0.25% |
+| Aynı giriş-çıkışta SPY | +0.56% | +0.61% |
+| Havuz L farkı (95% CI) | +0.32 [−0.58, +1.28] | −0.05 [−0.36, +0.27] |
+| En iyi %5 çıkarılınca (10 bps) | −0.68% | −1.18% |
+| Pozitif fark yılı | 3/6 | 3/6 |
+| Portföy %10/işlem (10 bps) | +22.4% (DD −18.7%) | −23.5% (DD −37.9%) |
+| SPY al-tut, aynı dönem | +103.7% | +95.3% |
+| Kriter | P2, P3, P4 ❌ | P2, P3, P4, P6 ❌ |
+
+**Sonuç: edge bulunamadı.** Ön kayıttaki karşı argüman doğru çıktı: düşük maliyet işe yaramıyor
+çünkü edge büyük hisselerde kayboluyor. H4L'nin pozitif getirisi aynı günlerdeki SPY getirisine
+eşit (piyasa betası) ve birkaç büyük kazançtan geliyor. Ön kayıt gereği parametre taraması yok,
+gölge moda eklenmedi.
+
+Tekrar üretim: `python lab/h0_sim.py --earnings {live,closed,off}` → `python lab/d1_eval.py`;
+`python lab/info_signals.py H4 H5 --pool large` → `python lab/d2_eval.py`.

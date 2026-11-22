@@ -222,9 +222,13 @@ def test_trades_match_lab(strategy, n):
 
 @needs_lab
 def test_h5_events_match_lab():
-    ev = pd.read_parquet(LAB / "challengers/events_H5.parquet")
+    path = LAB / "challengers/events_H5.parquet"
+    ev = pd.read_parquet(path)
     rng = np.random.default_rng(5)
-    files = sorted((LAB / "earnings_full").glob("*.json"))
+    # Yalnız lab olayları üretildiğinde var olan veri: Ek D2 (2026-11-22) büyük hisseler için
+    # sonradan 30 dosya indirdi; onların olayları events_H5L'de, events_H5'te değil.
+    made = path.stat().st_mtime
+    files = sorted(f for f in (LAB / "earnings_full").glob("*.json") if f.stat().st_mtime <= made)
     files = [files[i] for i in rng.choice(len(files), 300, replace=False)]
     recs = [json.loads(f.read_text()) for f in files]
     tickers = {r["ticker"] for r in recs}

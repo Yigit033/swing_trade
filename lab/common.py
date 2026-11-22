@@ -142,6 +142,15 @@ def pool_mask() -> pd.DataFrame:
 
 
 @lru_cache(maxsize=1)
+def pool_mask_large() -> pd.DataFrame:
+    """Ek D2 pool L: price ≥ 7 (no ceiling), avgvol63>300K, dv20>5M, cap ≥ 10B (no ceiling)."""
+    P, I = panels(), indicators()
+    c = P["Close"]
+    m = (c >= 7) & (I["avgvol63"] > 300_000) & (I["dv20"] > 5e6) & (I["cap"] >= 1e10)
+    return m.drop(columns=[x for x in BENCH if x in m.columns])
+
+
+@lru_cache(maxsize=1)
 def finviz_members(cap_n: int = 300) -> dict:
     """date -> list of tickers the live Finviz Q6/Q6b/Q7/Q7b union would return,
     ranked by dollar volume (Volume × Price) and cut to `cap_n` (live: 300)."""
@@ -181,11 +190,30 @@ def window_6mo(df: pd.DataFrame, d: pd.Timestamp) -> pd.DataFrame:
     return w.reset_index(drop=True)
 
 
-def earnings_dates(t):
-    f = EARN / f"{t}.json"
+def _earnings_full_dates(t):
+    """Same yfinance call (get_earnings_dates(limit=40)) stored with timestamps (H5 data)."""
+    f = LAB / "earnings_full" / f"{t}.json"
     if not f.exists():
         return None
-    rec = json.loads(f.read_text())
-    if "dates" not in rec:
-        return None
-    return pd.DatetimeIndex(pd.to_datetime(rec["dates"]))
+    rows = json.loads(f.read_text()).get("rows") or []
+    days = []
+    for r in rows:
+        ts = pd.Timestamp(r["ts"])
+        days.append(pd.Timestamp(ts.tz_convert("America/New_York").date() if ts.tzinfo else ts.date()))
+    return pd.DatetimeIndex(sorted(set(days))) if days else None
+
+
+def earnings_dates(t):
+    """Earnings dates for the live gate replica.
+
+    Ek D1 notu (2026-11-22): 130 dosya indirme sırasında Yahoo kısıtlamasıyla BOŞ yazılmıştı
+    ("No earnings dates found"); H0 sinyallerinin 168/539'u bilanço kapısından veri yokluğu
+    yüzünden geçiyordu. Boş/yoksa earnings_full'a düşülür — iki kaynak ortak 1.281 hissede
+    örtüşen dönemde birebir aynı tarihleri veriyor (0 uyuşmazlık).
+    """
+    f = EARN / f"{t}.json"
+    rec = json.loads(f.read_text()) if f.exists() else {}
+    dates = rec.get("dates") or []
+    if dates:
+        return pd.DatetimeIndex(pd.to_datetime(dates))
+    return _earnings_full_dates(t)

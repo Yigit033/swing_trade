@@ -124,7 +124,7 @@ def _work(args):
             outcomes = []
             s = _ENGINE.scan_stock(t, w, stock_info=live_info, backtest_mode=False,
                                    portfolio_value=10000, outcomes=outcomes,
-                                   regime=regime, earnings_dates=[])
+                                   regime=regime, earnings_dates=[])  # [] = "bilanço yok" (açık liste); kapı pass B'de
             if s:
                 td = s.get("trigger_details") or {}
                 sig_rows.append(dict(

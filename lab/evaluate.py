@@ -21,12 +21,13 @@ LAB = ROOT / "output/lab"
 COST = 0.50  # % round trip (primary)
 
 
-def attach_benchmark(T: pd.DataFrame) -> pd.DataFrame:
+def attach_benchmark(T: pd.DataFrame, pool=None, idx: str = "IWM") -> pd.DataFrame:
     """Pool mean of Open[entry] → Close[exit] for pool members on the signal day."""
-    P, pool = panels(), pool_mask()
+    P = panels()
+    pool = pool_mask() if pool is None else pool
     O, C = P["Open"], P["Close"]
     pool = pool.reindex(columns=C.columns, fill_value=False)
-    iwm_o, iwm_c = O["IWM"], C["IWM"]
+    iwm_o, iwm_c = O[idx], C[idx]
     cache, bm, iwm = {}, [], []
     for r in T.itertuples():
         k = (r.signal_date, r.entry_day, r.exit_day)
@@ -40,7 +41,7 @@ def attach_benchmark(T: pd.DataFrame) -> pd.DataFrame:
         iwm.append(cache[k][1])
     T = T.copy()
     T["pool_ret"] = bm
-    T["iwm_ret"] = iwm
+    T["iwm_ret"] = iwm          # index return (IWM by default; SPY for Ek D2)
     return T
 
 
@@ -103,9 +104,12 @@ def portfolio(T, frac=0.10, cost=COST, cap0=10_000.0):
                 final_equity=round(float(eq.iloc[-1]), 0)), eq
 
 
-def evaluate(name, T):
+def evaluate(name, T, cost=COST, pool=None, idx="IWM", stress=None):
+    """cost: primary round trip %; stress: P5 cost (default 2× primary, = 100 bps at 50)."""
+    COST = cost
+    stress = 2 * cost if stress is None else stress
     T = T[T.ret_pct.notna()].copy()
-    T = attach_benchmark(T)
+    T = attach_benchmark(T, pool, idx)
     T["net"] = T.ret_pct - COST
     # Pool is charged the same cost, so net excess == gross excess.
     T["excess"] = T.ret_pct - T.pool_ret
@@ -118,13 +122,13 @@ def evaluate(name, T):
     trimmed = T.sort_values("ret_pct").iloc[: int(np.floor(n * 0.95))] if n else T
     pos_years = int((yearly.excess > 0).sum())
     pf = T.net[T.net > 0].sum() / max(1e-9, -T.net[T.net < 0].sum())
-    port, eq = portfolio(T)
+    port, eq = portfolio(T, cost=COST)
     crit = {
         "P1_n_and_months": bool(n >= 150 and months >= 30),
         "P2_excess_ci_gt0": bool(T.excess.mean() > 0 and lo > 0),
         "P3_years_4of6": bool(pos_years >= 4),
         "P4_trim_top5_net_gt0": bool((trimmed.ret_pct - COST).mean() > 0),
-        "P5_100bps_net_ge0": bool((T.ret_pct - 1.0).mean() >= 0),
+        "P5_stress_net_ge0": bool((T.ret_pct - stress).mean() >= 0),
         "P6_maxdd_lt35": bool(port["max_dd_pct"] > -35),
     }
     out = dict(
@@ -134,8 +138,10 @@ def evaluate(name, T):
         profit_factor=round(float(pf), 3),
         pool_mean=round(T.pool_ret.mean(), 3), excess_mean=round(T.excess.mean(), 3),
         excess_ci95=[round(lo, 3), round(hi, 3)],
+        cost_pct=COST, stress_pct=stress, index=idx,
         iwm_mean=round(T.iwm_ret.mean(), 3),
-        net_20bps=round((T.ret_pct - 0.2).mean(), 3), net_100bps=round((T.ret_pct - 1.0).mean(), 3),
+        net_10bps=round((T.ret_pct - 0.1).mean(), 3), net_20bps=round((T.ret_pct - 0.2).mean(), 3),
+        net_50bps=round((T.ret_pct - 0.5).mean(), 3), net_100bps=round((T.ret_pct - 1.0).mean(), 3),
         net_trim_top5=round((trimmed.ret_pct - COST).mean(), 3),
         censored=int(T.get("censored", pd.Series(False, index=T.index)).sum()),
         yearly=yearly.reset_index().to_dict("records"),
