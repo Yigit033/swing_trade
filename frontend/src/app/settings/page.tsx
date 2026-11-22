@@ -1563,6 +1563,12 @@ export default function SettingsPage() {
                     value={nb(["auto_scan", "legacy_control"], true)}
                     onChange={(v) => sb(["auto_scan", "legacy_control"], v)}
                 />
+                <FieldBool
+                    label="H6S kayıp serisi freni"
+                    hint="Son 3 kapanmış H6S işleminin hepsi zararlıysa yeni pozisyon yarım boyut; ilk kârlı kapanışta tam boyuta döner. Geçmiş testte portföy +64.5 → +67.1%, düşüş −31.5 → −29.9%. (Sektör sınırı ölçüldü ve eklenmedi: kazancı kesiyordu.)"
+                    value={nb(["auto_scan", "h6s_loss_streak_brake"], true)}
+                    onChange={(v) => sb(["auto_scan", "h6s_loss_streak_brake"], v)}
+                />
                 <FieldNum
                     label="H6S pozisyon büyüklüğü (hesabın oranı)"
                     hint="Ölçülen kural: 0.10 = her işleme hesabın %10'u (en çok 10 eşzamanlı pozisyon, kaldıraçsız)."

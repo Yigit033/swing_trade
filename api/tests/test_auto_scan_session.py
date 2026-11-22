@@ -196,6 +196,7 @@ def test_auto_scan_h6s_entries(monkeypatch, regime, expected):
     tracker.storage.count_active_trades_for_owner.return_value = 0
     held = {"H6S": 8000.0, "LEGACY": 0.0}                    # H6S hesabında 8.000$ zaten bağlı
     tracker.storage.active_notional_for_owner.side_effect = lambda owner, strategy=None: held[strategy]
+    tracker.storage.get_closed_trades.return_value = []                    # kayıp serisi yok → tam boyut
     tracker.add_trade_from_signal.side_effect = lambda sig, owner: 1
     monkeypatch.setattr(deps, "get_paper_tracker", lambda: tracker)
     assert auto_scan._run_auto_scan_once() == "ran"
@@ -205,3 +206,69 @@ def test_auto_scan_h6s_entries(monkeypatch, regime, expected):
     for c in h6s:
         assert c["position_size"] == int(1000 / c["entry_price"]) and c["atr14"] > 0
     assert [c["ticker"] for c in calls if c.get("strategy") != "H6S"] == ["OLD"]   # kontrol grubu
+
+
+def test_loss_streak_brake_rule():
+    from swing_trader.paper_trading.risk_rules import loss_streak_active
+    L = lambda d, p, st="TIMEOUT": dict(status=st, exit_date=d, realized_pnl_pct=p)
+    assert loss_streak_active([L("2026-11-03", -2.0), L("2026-11-05", 0.3), L("2026-11-04", -1.0)])  # +0.3 brüt = zarar
+    assert not loss_streak_active([L("2026-11-03", -2.0), L("2026-11-04", -1.0), L("2026-11-05", 4.0)])
+    assert not loss_streak_active([L("2026-11-03", -2.0), L("2026-11-04", -1.0), L("2026-11-05", 9.0, "REJECTED")])
+    assert not loss_streak_active([L("2026-11-03", -2.0), L("2026-11-04", -1.0)])           # 3 kapanış yok
+
+
+def test_auto_scan_h6s_halves_size_after_loss_streak(monkeypatch):
+    from unittest.mock import Mock
+    from swing_trader.small_cap.settings_config import SmallCapSettings
+    from swing_trader.shadow import runner as shadow_runner, sources as shadow_src
+    import api.routers.scanner as scanner
+    import api.scanner_jobs as jobs
+    import api.deps as deps
+    s = SmallCapSettings()
+    s.auto_scan.legacy_control = False
+    monkeypatch.setattr("swing_trader.small_cap.settings_config.load_settings", lambda *a, **k: s)
+    monkeypatch.setattr(jobs, "create_exclusive_scan_job", lambda: "job")
+    monkeypatch.setattr(jobs, "release_scan_slot", lambda j: None)
+    monkeypatch.setattr(scanner, "_execute_smallcap_scan", lambda *a, **k: dict(signals=[], market_regime="BULL", stats={}))
+    monkeypatch.setattr(shadow_src, "live_vce_hits",
+                        lambda asof: dict(hits=[dict(ticker="BIG", dv20=9e7, close=50.0, atr14=2.0)], stats={}))
+    monkeypatch.setattr(shadow_runner, "_small_cap_regime", lambda src, asof: {"regime": "BULL"})
+    tracker = Mock()
+    tracker.storage.count_active_trades_for_owner.return_value = 0
+    tracker.storage.active_notional_for_owner.return_value = 0.0
+    tracker.storage.get_closed_trades.return_value = [
+        dict(strategy="H6S", user_id=None, status="STOPPED", exit_date=f"2026-11-1{i}", realized_pnl_pct=-3.0)
+        for i in range(3)]
+    tracker.add_trade_from_signal.side_effect = lambda sig, owner: 1
+    monkeypatch.setattr(deps, "get_paper_tracker", lambda: tracker)
+    auto_scan._run_auto_scan_once()
+    sig = tracker.add_trade_from_signal.call_args.args[0]
+    assert sig["position_size"] == int(0.05 * 10000 / 50.0) == 10          # yarım boyut
+
+
+
+def test_auto_scan_h6s_brake_fails_safe_to_half_size(monkeypatch):
+    """Kapanan işlemler okunamazsa girişler atlanmaz; temkinli yarım boyut."""
+    from unittest.mock import Mock
+    from swing_trader.small_cap.settings_config import SmallCapSettings
+    from swing_trader.shadow import runner as shadow_runner, sources as shadow_src
+    import api.routers.scanner as scanner
+    import api.scanner_jobs as jobs
+    import api.deps as deps
+    s = SmallCapSettings()
+    s.auto_scan.legacy_control = False
+    monkeypatch.setattr("swing_trader.small_cap.settings_config.load_settings", lambda *a, **k: s)
+    monkeypatch.setattr(jobs, "create_exclusive_scan_job", lambda: "job")
+    monkeypatch.setattr(jobs, "release_scan_slot", lambda j: None)
+    monkeypatch.setattr(scanner, "_execute_smallcap_scan", lambda *a, **k: dict(signals=[], market_regime="BULL", stats={}))
+    monkeypatch.setattr(shadow_src, "live_vce_hits",
+                        lambda asof: dict(hits=[dict(ticker="BIG", dv20=9e7, close=50.0, atr14=2.0)], stats={}))
+    monkeypatch.setattr(shadow_runner, "_small_cap_regime", lambda src, asof: {"regime": "BULL"})
+    tracker = Mock()
+    tracker.storage.count_active_trades_for_owner.return_value = 0
+    tracker.storage.active_notional_for_owner.return_value = 0.0
+    tracker.storage.get_closed_trades.side_effect = RuntimeError("db down")
+    tracker.add_trade_from_signal.side_effect = lambda sig, owner: 1
+    monkeypatch.setattr(deps, "get_paper_tracker", lambda: tracker)
+    auto_scan._run_auto_scan_once()
+    assert tracker.add_trade_from_signal.call_args.args[0]["position_size"] == 10

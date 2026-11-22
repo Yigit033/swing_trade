@@ -377,3 +377,19 @@ otomatik girişin ana stratejisi H6S (aynı kurallar, aynı kod: `live_vce_hits`
 2.5×ATR stop, 8 seans, pozisyon başına hesabın %10'u, nakit sınırı); eski kurallar ayrı sanal
 hesapla kontrol grubu olarak açmaya devam eder (`paper_trades.strategy`). Gölge H6S kaydı ve F1–F4
 kapısı değişmez; nihai değerlendirme ileri veride.
+
+---
+
+# Ek L — H6S risk kuralları: sektör sınırı (L1) ve kayıp serisi freni (L2)
+
+**Yazıldığı an: 2026-11-22, hiçbir sonuç görülmeden.** Taban: H6S lab işlemleri (Ek J2) ve %10/işlem,
+nakit sınırlı portföy (50 bps). Her kural AYRI ölçülür; tek parametre seti, tarama yok.
+
+- **L1 — Sektör sınırı:** aynı sektörde aynı anda en çok **2** açık/bekleyen H6S pozisyonu. Karar anında
+  (sinyal günü) sayılır; sınır doluysa sinyal atlanır. Sektör: lab'da `info_frame().sector`, canlıda
+  Finviz sektörü. Sektörü bilinmeyen hisse sınırlanmaz.
+- **L2 — Kayıp serisi freni:** giriş gününden ÖNCE kapanmış son **3** H6S işleminin hepsi 50 bps net
+  zararlıysa yeni pozisyon **yarım boyut** (hesabın %5'i); ilk kârlı kapanıştan sonra tam boyuta dönülür.
+- **Karar kuralı (her kural için):** portföy toplam getirisi ≥ taban VE max düşüş ≤ taban (ikisi birden;
+  biri kötüleşirse eklenmez). İkisi de geçerse birleşimi raporlanır; birleşim aynı kurala tabidir.
+- Geçen kural canlı H6S hesabına eklenir; gölge H6S (Ek J2, donmuş) değişmez ve kuralın kontrolü olur.

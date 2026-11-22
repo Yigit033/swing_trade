@@ -200,3 +200,13 @@ def test_midas_orders_buy_sell_hold():
     assert [(r['ticker'], r['sell_day']) for r in o['hold']] == [('EXIT', '2026-11-24'), ('KEEP', '2026-12-02')]
     assert 'OLD' not in {r['ticker'] for k in ('buy', 'sell', 'hold') for r in o[k]}
     assert o['held'] == 1000 + 990 + 1000 + 1000 and o['free'] == 10000 - 3990
+
+
+
+def test_midas_orders_show_loss_streak_brake():
+    from datetime import date as _d
+    from api.routers.orders import build_orders
+    losers = [dict(id=10 + i, ticker=f"L{i}", status="STOPPED", strategy="H6S", exit_date=f"2026-11-1{i}",
+                   realized_pnl_pct=-2.0) for i in range(3)]
+    assert build_orders(losers, _d(2026, 11, 23), 10000.0)["loss_streak_brake"] is True
+    assert build_orders(losers[:2], _d(2026, 11, 23), 10000.0)["loss_streak_brake"] is False

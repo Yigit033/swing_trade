@@ -762,5 +762,6 @@ export type OrderBuy = { ticker: string; shares: number; est_price: number; est_
 export type OrderPos = { ticker: string; shares: number; entry_price: number; stop: number; entry_day: string;
     sell_day: string; current_price?: number | null; overdue: boolean; trade_id?: number };
 export type OrdersData = { session: string; account: number; held: number; free: number; hold_sessions: number;
+    loss_streak_brake?: boolean;
     stop_atr: number; buy: OrderBuy[]; sell: OrderPos[]; hold: OrderPos[] };
 export const getOrders = () => api.get<OrdersData>("/api/orders").then((r) => r.data);

@@ -509,3 +509,25 @@ sanal hesabı (tekrar, cooldown, nakit, kapasite strateji bazında), `execution.
 ve trail atlar, onay H6S'de gap filtresi uygulamaz. Ayarlar → Otomatik tarama: "Ana strateji: H6S"
 (kapatınca tek adımda eski kurallara dönüş), "Eski kurallar kontrol grubu". Performans sayfası
 H6S / Eski kurallar / Tümü seçicisiyle ayrı gösterir; işlemlerde "H6S" / "Eski" rozeti.
+
+---
+
+## Ek L — H6S risk kuralları: sektör sınırı ve kayıp serisi freni (22 Kasım 2026)
+
+Ön kayıt Ek L (sonuçtan önce; tek parametre seti). Karar: toplam getiri düşmeyecek VE düşüş artmayacak.
+
+| H6S lab replikası, %10/işlem, 50 bps | İşlem (portföyün aldığı) | 6 yıl portföy | Max DD | Karar |
+|---|---:|---:|---:|---|
+| Taban | 1.145 (680) | +64.5% | −31.5% | — |
+| **L1 sektör ≤ 2** | 681 (596) | **−6.8%** | −49.2% | ❌ eklenmedi |
+| **L2 kayıp serisi freni** (3 zarar → yarım boyut) | 1.145 (715, 194 yarım) | **+67.1%** | **−29.9%** | ✅ **eklendi** |
+| L1 + L2 | 681 (618) | +19.4% | −36.9% | ❌ |
+
+**L1 neden kötü:** sınır 569 sinyali kesti ve işlem başı net +0.64 → +0.14%'e düştü. Bir sektör kırılım
+verdiğinde hisseleri birlikte yükseliyor (sektör momentumu); sınır tam da en kazançlı kümeyi kesiyor.
+**L2 neden iyi:** seri zararlar genelde piyasa ritminin bozulduğu dönemlere denk geliyor; yarım boyut
+zararı küçültüyor, boşa çıkan nakit sonraki kazançlı işlemlere gidiyor (alınan işlem 680 → 715).
+
+Canlı: `auto_scan.h6s_loss_streak_brake` (açık), kural `paper_trading/risk_rules.py`; geçmiş okunamazsa
+temkinli taraf (yarım boyut). Midas Emirleri sayfası fren aktifken uyarı gösteriyor. Gölge H6S (donmuş)
+frensiz devam ediyor → frenin ileri veride kontrolü.

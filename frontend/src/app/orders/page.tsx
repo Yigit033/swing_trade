@@ -66,6 +66,13 @@ export default function OrdersPage() {
                 </button>
             </div>
 
+            {data.loss_streak_brake && (
+                <div className="card" style={{ borderLeft: "3px solid #f59e0b", fontSize: 13 }}>
+                    ⚠ <strong>Kayıp serisi freni aktif:</strong> son 3 H6S işlemi zararla kapandı. Yeni pozisyonlar yarım boyut
+                    (hesabın %5&apos;i); ilk kârlı kapanışta tam boyuta dönülür. Geçmiş testte hem getiriyi hem düşüşü iyileştirdi.
+                </div>
+            )}
+
             <Section title={`🟢 Açılışta AL (${data.buy.length})`} tone="var(--success)"
                 empty="Bugün alınacak H6S sinyali yok (piyasa freni ya da kırılım yok — bu da bir karar).">
                 {data.buy.map(b => (

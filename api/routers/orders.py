@@ -82,8 +82,10 @@ def build_orders(trades: List[Dict], today: date, account: float) -> Dict:
                    sell_day=exit_day.isoformat(), current_price=t.get("current_price"),
                    overdue=exit_day < session, trade_id=t.get("id"))
         (sell if exit_day <= session else hold_rows).append(row)
+    from swing_trader.paper_trading.risk_rules import loss_streak_active
+    brake = loss_streak_active([t for t in trades if strategy_of(t) == "H6S"])
     key = lambda r: r["ticker"]
-    return dict(session=session.isoformat(), account=account, held=round(held, 2),
+    return dict(session=session.isoformat(), account=account, held=round(held, 2), loss_streak_brake=brake,
                 free=round(account - held, 2), hold_sessions=hold, stop_atr=k,
                 buy=sorted(buy, key=key), sell=sorted(sell, key=key), hold=sorted(hold_rows, key=key))
 

@@ -263,6 +263,9 @@ class AutoScanSettings(BaseModel):
     # Eski kurallar ayrı bir sanal hesapla KONTROL GRUBU olarak açmaya devam eder (kıyas için).
     legacy_control: bool = True
     h6s_position_pct: float = Field(default=0.10, gt=0, le=0.5)
+    # Ek L2 (ölçüldü, eklendi): son 3 kapanmış H6S işleminin hepsi zararlıysa yeni pozisyon yarım boyut.
+    # Sektör sınırı (Ek L1) ölçüldü ve EKLENMEDİ (sektör momentumunu kesiyor: portföy +64.5 → −6.8%).
+    h6s_loss_streak_brake: bool = True
 
 
 class UniverseFilterSettings(BaseModel):

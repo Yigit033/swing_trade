@@ -272,6 +272,23 @@ def _auto_track_h6s(tracker, us) -> dict:
         logger.info("Auto-scan H6S: small-cap regime BEAR — %d hit(s), no entries", len(hits))
         return out
     account = float(us.portfolio_value)
+    # Ek L2: kayıp serisi freni — son 3 kapanış hepsi zararlıysa yarım boyut (ölçüldü, eklendi)
+    pct = float(us.h6s_position_pct)
+    brake = False
+    if us.h6s_loss_streak_brake:
+        from swing_trader.paper_trading.risk_rules import loss_streak_active
+        from swing_trader.paper_trading.storage import strategy_of
+        try:
+            closed = [t for t in (tracker.storage.get_closed_trades(limit=200, user_id=None) or [])
+                      if t.get("user_id") is None and strategy_of(t) == "H6S"]
+            brake = loss_streak_active(closed)
+        except Exception:
+            # Geçmiş okunamazsa temkinli taraf: yarım boyut (girişleri tümden kaçırmak yerine)
+            logger.exception("Auto-scan H6S: closed trades unavailable — loss-streak brake assumed ON")
+            brake = True
+        if brake:
+            pct /= 2
+    out["loss_streak_brake"] = brake
     active = tracker.storage.count_active_trades_for_owner(None, strategy="H6S")
     held = tracker.storage.active_notional_for_owner(None, strategy="H6S")
     added, skipped = [], []
@@ -280,7 +297,7 @@ def _auto_track_h6s(tracker, us) -> dict:
             skipped.append((h["ticker"], "CAUTION_CAPACITY"))
             continue
         price = float(h["close"])
-        size = int(float(us.h6s_position_pct) * account / price) if price > 0 else 0
+        size = int(pct * account / price) if price > 0 else 0
         need = size * price
         if size < 1 or held + need > account:
             skipped.append((h["ticker"], "NO_CASH"))
@@ -294,8 +311,8 @@ def _auto_track_h6s(tracker, us) -> dict:
             held += need
         else:
             skipped.append((h["ticker"], {-1: "DUPLICATE", -3: "ENTRY_WINDOW"}.get(tid, "NOT_CREATED")))
-    logger.info("Auto-scan H6S (%s): %d added %s, skipped %s, held $%.0f of $%.0f",
-                regime, len(added), added, skipped, held, account)
+    logger.info("Auto-scan H6S (%s, streak brake %s): %d added %s, skipped %s, held $%.0f of $%.0f",
+                regime, brake, len(added), added, skipped, held, account)
     return dict(out, added=added, skipped=skipped)
 
 

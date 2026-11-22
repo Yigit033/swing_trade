@@ -20,7 +20,7 @@ import lab.h0_signals as h0  # noqa: E402
 HOLD, STOP_ATR = 8, 2.5
 
 
-def simulate_h6r(cands, P, regimes, caution_max, bear_block=True):
+def simulate_h6r(cands, P, regimes, caution_max, bear_block=True, sector_of=None, sector_cap=None):
     O, H, L, C = (P[f] for f in ("Open", "High", "Low", "Close"))
     idx = {d: i for i, d in enumerate(C.index)}
     A = atr14(P)
@@ -42,6 +42,11 @@ def simulate_h6r(cands, P, regimes, caution_max, bear_block=True):
         if any(p[0] == t for p in active):
             skipped["busy"] += 1
             continue
+        if sector_cap and sector_of:                     # Ek L1: aynı sektörde en çok N açık pozisyon
+            sec = sector_of.get(t)
+            if sec and sum(1 for p in active if sector_of.get(p[0]) == sec) >= sector_cap:
+                skipped["sector"] = skipped.get("sector", 0) + 1
+                continue
         a = A.at[r.date, t]
         arr = (O[t].values, H[t].values, L[t].values, C[t].values)
         o = arr[0][i + 1]
