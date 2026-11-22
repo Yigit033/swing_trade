@@ -285,3 +285,51 @@ Lab replikası (H0) bu birleşimi içermiyordu.
 - **Ayrıca raporlanır:** statik liste hisselerinden gelen sinyal sayısı ve 8 seans havuz farkı.
 - **Bilinen yanlılık:** statik listenin 32 hissesi lab verisinde yok (delist/ad değişikliği) →
   dışarıda; liste geçmişte farklı olabilirdi (bugünkü liste geriye uygulanıyor).
+
+---
+
+# Ek H — Az işlenen kamu verisi: SEC başvuruları ve FINRA açığa satış hacmi (H7, H8, H10)
+
+**Yazıldığı an: 2026-11-22, hiçbir veri indirilmeden ve sonuç görülmeden.** Gerekçe: grafik
+sinyallerinin avantajı sıfır (Ek E). Yasal bilgi avantajı ancak herkese açık ama az işlenen
+veriden gelebilir. Kaynaklar: SEC EDGAR çeyreklik form indeksi (`full-index/YYYY/QTRn/form.gz`),
+SEC `company_tickers.json` (CIK→ticker, bugünkü eşleme — survivorship ile tutarlı), FINRA Reg SHO
+günlük konsolide açığa satış dosyaları (`CNMSshvolYYYYMMDD.txt`). Ortak çerçeve Bölüm 0 + Ek D1
+onarılmış bilanço verisi.
+
+## H7 — Aktivist giriş (ilk Schedule 13D)
+Ekonomik gerekçe: %5+ pay alıp şirkete müdahale niyetini açıklayan yatırımcı (Brav, Jiang, Partnoy
+& Thomas 2008); etki küçük hisselerde güçlü.
+- Olay: form tipi `SC 13D` veya `SCHEDULE 13D` (değişiklikler `/A` hariç), dosyalama günü F.
+  Hedef şirket = indeks satırlarından CIK'i lab evrenindeki bir ticker'a eşlenen; iki taraf da
+  eşlenirse başvuru başlığındaki SUBJECT COMPANY.
+- Sinyal barı t = F'ye eşit veya önceki son seans; t'de havuz üyesi (Bölüm 0). Giriş F'den sonraki
+  ilk seansın Open'ı. Stop giriş − 2.5×ATR14 (t), 20. seans kapanışında zaman çıkışı (H4/H5 ile
+  aynı, ayar yok). Aynı hissede önceki olaydan sonra 60 gün yeni olay yok. Sıralama: 20 seans dolar
+  hacim (büyükten küçüğe). Terfi: Bölüm 1 P1–P6 (50 bps); geçerse Ek C düzeninde gölgeye alınır.
+
+## H8 — Seyreltme filtresi (hisse ihracı / satış kaydı)
+Ekonomik gerekçe: küçük şirketler yükselişlerde yeni hisse satar (ATM, halka arz sonrası satış);
+arz baskısı yükselişi keser. Grafik sinyalleri bunu görmez.
+- Form kümesi D: `S-1, S-3, S-3ASR, F-1, F-3, F-3ASR, 424B1, 424B2, 424B3, 424B4, 424B5, 424B7`
+  (ilk başvurular; `/A` hariç), ihraççının CIK'iyle. Sinyal günü t için [t−30 takvim günü, t]
+  aralığında D'den başvuru varsa sinyal elenir.
+- **H0D** = H0 − elenen sinyaller (bilanço kapısı gibi seçimden önce). **H6D** = H6 adaylarına aynı.
+
+## H10 — Yoğun açığa satış filtresi
+Ekonomik gerekçe: açığa satanlar ortalamada bilgili yatırımcılardır; yoğun açığa satılan hisseler
+sonraki günlerde zayıf kalır (Boehmer, Jones & Zhang 2008).
+- Oran_t = ShortVolume / TotalVolume (FINRA CNMS, t günü kapanıştan sonra yayımlanır → t kararında
+  kullanılabilir). SVR5 = son 5 seansın (t dahil) ortalaması. Sinyal, t günü havuz üyeleri
+  (FINRA verisi olanlar) arasında SVR5'in **en üst %20'sindeyse** elenir.
+- **H0Q** = H0 − elenen sinyaller; **H6Q** = H6 adaylarına aynı.
+- Bilinen sınırlılık: FINRA TotalVolume konsolide hacim değildir; piyasa yapıcı açığa satışı oranı
+  şişirir (gürültülü ölçü).
+
+## Filtre karar kuralı (H8 ve H10 için ayrı ayrı)
+Bir filtre production'a (canlı tarama kapısı olarak) yalnız ikisi birlikte sağlanırsa girer:
+- (a) H0'ya uygulanınca 50 bps net/işlem VE %10/işlem portföy toplamı ikisi de H0'dan iyi;
+- (b) filtrenin H0 ∪ H6 aday sinyallerinden (tekilleştirilmiş) elediklerinin 8 seans havuz farkı
+  ortalaması < 0 VE gün-kümeli %95 CI üst sınırı < 0 (elenenler istatistiksel olarak kötü).
+H6'nın kuralları Ek F'de dondurulmuştur; filtre H6 gölge koşusuna EKLENMEZ (H6D/H6Q yalnız rapor).
+Üç hipotez birlikte test ediliyor; tek bir sınırda geçiş, production'da canlı izlemeyle doğrulanır.

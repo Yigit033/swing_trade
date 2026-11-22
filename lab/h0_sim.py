@@ -59,8 +59,12 @@ def main():
     ap.add_argument("--universe", default="emulated")
     # Ek D1: live = veri yok → geç (canlı fail-open), closed = veri yok → ret, off = kapı kapalı
     ap.add_argument("--earnings", default="live", choices=["live", "closed", "off"])
+    # Ek H: (date, ticker) parquet — bu sinyaller seçimden önce elenir (filtre hipotezleri)
+    ap.add_argument("--exclude", default=None)
     a = ap.parse_args()
     tag = a.universe + ("" if a.earnings == "live" else f"_earn{a.earnings}")
+    if a.exclude:
+        tag += "_ex" + Path(a.exclude).stem
     import logging
     logging.disable(logging.CRITICAL)
     from swing_trader.small_cap import settings_config as sc
@@ -77,6 +81,12 @@ def main():
     cal = panels()["Close"].index
     nxt = {cal[i]: cal[i + 1] for i in range(len(cal) - 1)}
     sig = pd.read_parquet(OUT / f"signals_{a.universe}.parquet")
+    if a.exclude:
+        ex = pd.read_parquet(a.exclude)
+        drop = set(zip(pd.DatetimeIndex(ex.date), ex.ticker))
+        mask = [(pd.Timestamp(d), t) not in drop for d, t in zip(sig.date, sig.ticker)]
+        print(f"[exclude {Path(a.exclude).stem}] dropped {len(sig) - sum(mask)} of {len(sig)} signals")
+        sig = sig[mask].copy()
 
     # Earnings gate (pass-A ran with no earnings; reject-only filter → exact to apply here)
     keep, missing = [], 0

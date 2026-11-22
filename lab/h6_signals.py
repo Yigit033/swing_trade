@@ -49,6 +49,7 @@ def main():
             continue
         rows.append(dict(date=r.date, ticker=r.ticker, key=float(dv.at[r.date, r.ticker]), atr=0.0))
     cands = pd.DataFrame(rows).sort_values(["date", "key"], ascending=[True, False])
+    cands.to_parquet(OUT / "h6_candidates.parquet", index=False)      # Ek H filtreleri için
     P = panels()
     T = simulate(cands, P, lambda ie, arr, row: walk(ie, arr, None, HOLD), "H6")
     T.to_parquet(OUT / "trades_H6.parquet", index=False)

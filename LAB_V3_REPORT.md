@@ -391,3 +391,29 @@ eleniyor: önceden süzülmemiş isimler neredeyse hiç kırılım vermiyor.
 2 işlem. Davranışı değiştirmeyen temizlik: statik listedeki **28 ölü hisse** (üç bağımsız yfinance
 denemesinde veri yok: satın alınan/birleşen/iflas eden) çıkarıldı; sinyal üretemiyorlardı, her
 taramada boşa istek ve hata üretiyorlardı. Liste 234 → 206.
+
+---
+
+## Ek H — Az işlenen kamu verisi: SEC başvuruları + FINRA açığa satış (22 Kasım 2026)
+
+"Başkasının görmediği bilgi" yasal olarak ancak herkese açık ama az işlenen veridir. Ön kayıt Ek H
+(veri indirilmeden önce). Veri: SEC EDGAR çeyreklik indeks 2020Q3–2026Q4 (~964 bin ilgili başvuru),
+SEC CIK→ticker, FINRA günlük konsolide açığa satış (1.501 gün, 0 hata). 13D hedef şirket eşlemesi
+başvuru başlıklarıyla doğrulandı (12/12).
+
+| Hipotez | Ölçüm | Sonuç | Karar |
+|---|---|---|---|
+| **H7** ilk 13D (aktivist giriş) | 449 işlem, 71 ay | brüt −0.89%, net −1.39%/işlem, havuz farkı −0.95 [−2.78, +0.94], kazanma %40, portföy −47.9% (DD −51.8%) | ❌ P2–P6 |
+| **H8** seyreltme filtresi (son 30 gün S-1/S-3/F-x/424B) | H0'da 539 sinyalin 70'i elendi | H0: net −0.24 → **+0.26%**, portföy −11.8 → **+2.9%**, DD −22.3 → −15.9 (a ✔) · elenenlerin 8 seans farkı +0.52 [−1.97, +3.74] vs kalanlar +0.64 (b ✘) · H6: net +0.10 → +0.11, portföy −34 → −44 | ❌ (b) |
+| **H10** yoğun açığa satış filtresi (SVR5 üst %20) | H0'da 102 sinyal elendi | H0: net −0.24 → −0.47%, portföy −12.5% · elenenler +0.63 vs kalanlar +0.63 | ❌ (a, b) |
+
+**Yorum.** Küçük hisselerde 13D sonrası fiyat düşüyor: hareketin büyüğü başvurudan önce yaşanıyor ve
+küçük şirketlerde 13D'lerin çoğu aktivist değil finansman/kurtarma yatırımcısı. Açığa satış oranı
+(FINRA TotalVolume konsolide hacim değil) bilgi taşımıyor. **H8 tek umut verici iz:** canlı üründe
+belirgin iyileşme, ama elenen sinyaller tek başına kötü değil ve H6'da etkisi yok — iyileşme
+büyük olasılıkla stop/seçim etkileşimi ve az sayıda işlemden (≈38) geliyor. Ön kayıtlı ikinci şart
+bunu ayıklamak için konmuştu; production'a alınmadı. Geçerli test: ileri veri (yeni ön kayıt).
+
+Tekrar üretim: `python lab/fetch_altdata.py` → `python lab/info_edgar.py build` →
+`python lab/h0_sim.py --exclude output/lab/altdata/ex_{dilution,shortvol}.parquet` →
+`python lab/info_edgar.py evaluate`.
