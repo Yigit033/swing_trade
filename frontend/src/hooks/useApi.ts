@@ -3,6 +3,7 @@
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
     getPerformance,
+    type StrategyView,
     getPending,
     getCurrentRegime,
     getTrades,
@@ -27,10 +28,10 @@ export const queryKeys = {
 };
 
 // Performance: shared by Dashboard & Performance pages
-export function usePerformance() {
+export function usePerformance(strategy: StrategyView = "H6S") {
     return useQuery<PerformanceData>({
-        queryKey: queryKeys.performance,
-        queryFn: () => getPerformance() as Promise<PerformanceData>,
+        queryKey: [...queryKeys.performance, strategy],
+        queryFn: () => getPerformance(strategy) as Promise<PerformanceData>,
         staleTime: 60 * 1000,   // 1 min fresh
         gcTime: 5 * 60 * 1000, // 5 min cache
     });

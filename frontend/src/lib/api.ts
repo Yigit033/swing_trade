@@ -111,6 +111,7 @@ export interface Trade {
     realized_pnl_pct?: number;
     net_pnl?: number;       // maliyet sonrası (yalnız /api/performance)
     net_pnl_pct?: number;
+    strategy?: string | null;   // 'H6S' | 'LEGACY' (boş = eski kurallar)
     notes?: string;
     trailing_stop?: number;
     initial_stop?: number;
@@ -274,8 +275,10 @@ export const confirmTrade = (id: number) =>
     api.post(`/api/pending/${id}/confirm`).then((r) => r.data);
 
 // Performance
-export const getPerformance = () =>
-    api.get("/api/performance").then((r) => r.data);
+// strategy: "H6S" (ana strateji) | "LEGACY" (eski kurallar, kontrol grubu) | "ALL"
+export type StrategyView = "H6S" | "LEGACY" | "ALL";
+export const getPerformance = (strategy: StrategyView = "ALL") =>
+    api.get("/api/performance", { params: strategy === "ALL" ? {} : { strategy } }).then((r) => r.data);
 
 // Scanner — background job (sayfa değiştirsen de scan sürer)
 export const startSmallcapScanJob = (params: {

@@ -415,6 +415,10 @@ class PaperTradeTracker:
         except ValueError:
             pass  # tarih parse edilemezse eski davranış (bugün varsay)
 
+        strategy = str(signal.get('strategy') or 'LEGACY').upper()
+        if strategy == 'H6S':
+            return self._add_h6s_trade(signal, signal_price, signal_date_str, user_id)
+
         # Calculate ATR for trailing stop
         atr = 0
         try:
@@ -461,12 +465,13 @@ class PaperTradeTracker:
             'initial_stop': signal['stop_loss'],
             'atr': round(atr, 4) if atr else 0,
             'signal_price': signal_price,
-            'status': 'PENDING'
+            'status': 'PENDING',
+            'strategy': 'LEGACY',
         }
 
         # Block if ticker already has an active PENDING or OPEN trade.
         # NOTE: old check used date-only string vs stored datetime — always missed. Fixed in storage.
-        if self.storage.check_duplicate(trade['ticker'], user_id=user_id):
+        if self.storage.check_duplicate(trade['ticker'], user_id=user_id, strategy='LEGACY'):
             logger.warning(
                 f"Duplicate blocked: {trade['ticker']} already has an active PENDING/OPEN trade"
             )
@@ -481,7 +486,7 @@ class PaperTradeTracker:
         except Exception:
             cooldown_days = 5
         if cooldown_days > 0 and self.storage.check_cooldown_active(
-            trade['ticker'], cooldown_days, user_id
+            trade['ticker'], cooldown_days, user_id, strategy='LEGACY'
         ):
             logger.warning(
                 f"Cooldown active for {trade['ticker']}: closed within last {cooldown_days} days"
@@ -490,6 +495,34 @@ class PaperTradeTracker:
 
         return self.storage.add_trade(trade, user_id)
     
+    def _add_h6s_trade(self, signal: Dict, signal_price: float, signal_date_str: str,
+                       user_id: Optional[str]) -> int:
+        """H6S (Lab v3 Ek J2) PENDING kaydı: ATR sinyal günü ATR14'ü (gölge/lab tanımı), hedef yok,
+        8 seans, cooldown yok (lab: yalnız hisse başına tek pozisyon), tekrar kontrolü H6S içinde."""
+        from ..shadow.rules import PARAMS_H6S
+        atr = float(signal.get('atr14') or 0)
+        if atr <= 0:
+            logger.warning("%s: H6S signal without ATR14 — not created", signal['ticker'])
+            return 0
+        if self.storage.check_duplicate(signal['ticker'], user_id=user_id, strategy='H6S'):
+            return -1
+        stop = round(signal_price - PARAMS_H6S['stop_atr'] * atr, 2)
+        trade = {
+            'ticker': signal['ticker'],
+            'entry_date': signal_date_str[:10] + ' ' + datetime.now(tz=_NYSE_TZ).strftime('%H:%M'),
+            'entry_price': signal_price, 'signal_price': signal_price,
+            'stop_loss': stop, 'initial_stop': stop, 'trailing_stop': stop,
+            'target': 0.0, 'target_2': 0.0,                  # H6S: hedef yok
+            'swing_type': 'A', 'quality_score': 0,
+            'position_size': int(signal.get('position_size') or 0),
+            'max_hold_days': int(PARAMS_H6S['hold_sessions']),
+            'atr': round(atr, 4), 'status': 'PENDING', 'strategy': 'H6S',
+            'notes': (f"H6S PENDING — ertesi açılışta girilir (gap filtresi yok). Stop açılış − "
+                      f"{PARAMS_H6S['stop_atr']}×ATR, {PARAMS_H6S['hold_sessions']}. seans kapanışında çıkış, "
+                      f"hedef/trail yok. Küçük hisse rejimi: {signal.get('regime', '?')}"),
+        }
+        return self.storage.add_trade(trade, user_id)
+
     def confirm_pending_trades(self, user_id: Optional[str] = None) -> List[Dict]:
         """
         Confirm PENDING trades at next-day Open price.
@@ -586,9 +619,26 @@ class PaperTradeTracker:
                 from datetime import timezone as _utctz
                 entry_date = _nyse_open.astimezone(_utctz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
                 
+                gap_pct = gap_percent(open_price, signal_price)
+                if str(trade.get('strategy') or '').upper() == 'H6S':
+                    from ..shadow.rules import PARAMS_H6S
+                    atr_v = float(trade.get('atr') or 0)
+                    stop_loss = round(open_price - PARAMS_H6S['stop_atr'] * atr_v, 2)
+                    ok = self.storage.update_trade(trade_id, {
+                        'status': 'OPEN', 'entry_price': round(open_price, 2), 'entry_date': entry_date,
+                        'stop_loss': stop_loss, 'initial_stop': stop_loss, 'trailing_stop': stop_loss,
+                        'initial_risk': round((round(open_price, 2) - stop_loss) * trade['position_size'], 8),
+                        'notes': (f"H6S: açılış ${open_price:.2f} (gap {gap_pct:+.1f}%, filtre yok), stop "
+                                  f"${stop_loss:.2f} ({PARAMS_H6S['stop_atr']}×ATR), "
+                                  f"{PARAMS_H6S['hold_sessions']}. seans kapanışında çıkış"),
+                    }, user_id)
+                    trade['confirm_status'] = 'confirmed' if ok else 'concurrent_update'
+                    trade['entry_price'], trade['gap_pct'] = open_price, gap_pct
+                    results.append(trade)
+                    continue
+
                 # Gap filter — limitler her kontrolde ayardan okunur
                 max_gap_up, max_gap_down = _gap_limits()
-                gap_pct = gap_percent(open_price, signal_price)
 
                 if gap_pct > max_gap_up:
                     # Gap-up too big — momentum exhausted, reject

@@ -120,6 +120,8 @@ def evaluate(trade, history, fraction):
 
     state = copy.deepcopy(state)
     entry, size, initial, atr = expected[1:]
+    # H6S (Lab v3 Ek J2): yalnız felaket stop'u + zaman çıkışı — hedef/kısmi satış/iz süren stop YOK.
+    fixed_hold = str(trade.get('strategy') or '').upper() == 'H6S'
     status, exit_price, exit_date, reason = 'OPEN', 0., '', ''
     policy_at = trade.get('policy_effective_at')
     for _, row in frame.iterrows():
@@ -149,6 +151,11 @@ def evaluate(trade, history, fraction):
             exit_price = round(min(o, stop), 2)
             exit_date = event_time(day, o <= stop)
             reason = ('Trailing stop; ' if status == 'TRAILED' else 'Stop; ') + 'stop-first daily OHLC convention; gap filled at Open'
+        elif fixed_hold:
+            if state['bars'] >= state['hold']:
+                status, exit_price = 'TIMEOUT', close
+                exit_date = event_time(day)
+                reason = 'H6S: fixed hold — close of the last session (no targets, no trailing)'
         else:
             if not state['partial'] and high >= state['target']:
                 if state['target_2'] > state['target'] * 1.01:

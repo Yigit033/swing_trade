@@ -161,7 +161,8 @@ def test_additive_sqlite_migration_twice_never_backfills_legacy(tmp_path):
 
 def test_postgres_migration_is_additive_and_fails_closed():
     cursor=Mock();_migrate_execution_columns(cursor,True)
-    assert len(cursor.execute.call_args_list)==5
+    from swing_trader.paper_trading.storage import EXECUTION_COLUMNS
+    assert len(cursor.execute.call_args_list)==len(EXECUTION_COLUMNS)==6   # +strategy (2026-11-22)
     assert all(c.args[0].startswith('ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS') for c in cursor.execute.call_args_list)
     cursor.execute.side_effect=RuntimeError('migration failure')
     with pytest.raises(RuntimeError):_migrate_execution_columns(cursor,True)
@@ -338,3 +339,59 @@ def test_backtest_respects_cash_account_like_live(monkeypatch):
     bt._scan_and_track(pd.Timestamp('2026-10-02'),{'regime':'BULL','confidence':'CONFIRMED'},60,10)
     assert [p['signal']['ticker'] for p in bt.pending_signals]==['AAA','CCC']
     assert bt._diag['skip_cash']==1
+
+
+# ── H6S "Profesyonel VCE" canlı paper stratejisi (2026-11-22) ────────────────
+
+def _h6s_days(n, start="2026-10-01"):
+    from swing_trader.utils.market_calendar import next_trading_day
+    d, out = date.fromisoformat(start), []
+    while len(out) < n:
+        out.append(d.isoformat())
+        d = next_trading_day(d)
+    return out
+
+
+def test_h6s_exit_is_fixed_hold_without_targets_or_trailing():
+    days = _h6s_days(10)
+    tape = bars([(d, 100 + 5 * i, 106 + 5 * i, 99 + 5 * i, 105 + 5 * i) for i, d in enumerate(days)])
+    t = trade(strategy='H6S', target=0., target_2=0., max_hold_days=8, atr=4.)
+    upd, (status, xp, xd, reason, stop) = evaluate(t, tape, .33)
+    assert status == 'TIMEOUT' and xp == 140. and xd.startswith(days[7])          # 8. seans kapanışı
+    assert stop == 90. and 'partial_exit_price' not in upd                        # trail/kısmi yok
+    legacy = evaluate(trade(atr=4.), tape, .33)[1]
+    assert legacy[0] != 'TIMEOUT'                                                  # eski kurallar değişmedi
+
+
+def test_h6s_stop_first_with_gap_fill():
+    days = _h6s_days(3)
+    tape = bars([(days[0], 100, 101, 95, 96), (days[1], 85, 88, 84, 86), (days[2], 90, 91, 89, 90)])
+    _, (status, xp, *_r) = evaluate(trade(strategy='H6S', target=0., target_2=0., max_hold_days=8, atr=4.), tape, .33)
+    assert (status, xp) == ('STOPPED', 85.)                                        # gap'te Open'dan
+
+
+def test_h6s_confirm_has_no_gap_filter_and_atr_stop(tmp_path):
+    store = PaperTradeStorage(str(tmp_path / 'h6s.db'))
+    tracker = PaperTradeTracker(store)
+    with patch('swing_trader.utils.market_calendar.entry_window_open', return_value=True):
+        tid = tracker.add_trade_from_signal(dict(ticker='HHH', entry_price=50., date='2026-10-01',
+                                                 position_size=20, atr14=2., strategy='H6S', regime='BULL'))
+    row = store.get_trade_by_id(tid)
+    assert (row['status'], row['strategy'], row['max_hold_days'], row['target']) == ('PENDING', 'H6S', 8, 0.)
+    tape = bars([('2026-10-01', 50, 51, 49, 50), ('2026-10-02', 55, 56, 54, 55)])   # +%10 gap
+    with patch.object(tracker, 'fetch_price_history', return_value=tape):
+        tracker.confirm_pending_trades()
+    row = store.get_trade_by_id(tid)
+    assert row['status'] == 'OPEN' and row['entry_price'] == 55. and row['stop_loss'] == 50.   # 55 − 2.5×2
+
+
+def test_strategies_have_separate_duplicates_and_cash(tmp_path):
+    store = PaperTradeStorage(str(tmp_path / 's.db'))
+    base = dict(entry_date='2026-10-01', stop_loss=9., target=12., swing_type='A', status='OPEN',
+                entry_price=10., position_size=100)
+    store.add_trade(dict(base, ticker='AAA', strategy='H6S'))
+    store.add_trade(dict(base, ticker='BBB'))                                       # eski satır (NULL)
+    assert store.check_duplicate('AAA', strategy='H6S') and not store.check_duplicate('AAA', strategy='LEGACY')
+    assert store.check_duplicate('BBB', strategy='LEGACY') and not store.check_duplicate('BBB', strategy='H6S')
+    assert store.active_notional_for_owner(None, strategy='H6S') == 1000.
+    assert store.count_active_trades_for_owner(None, strategy='LEGACY') == 1

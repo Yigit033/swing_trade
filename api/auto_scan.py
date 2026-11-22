@@ -233,13 +233,79 @@ def _run_auto_scan_once() -> str:
     signals = result.get("signals", [])
     logger.info("Auto-scan complete: %d signal(s) at/above min_quality=%s", len(signals), us.min_quality)
 
-    if not signals:
-        return "ran"
-
     tracker = get_paper_tracker()
+    if us.strategy == "H6S":
+        try:
+            _auto_track_h6s(tracker, us)
+        except Exception:
+            logger.exception("Auto-scan H6S failed")       # eski kurallar yine çalışsın
+    if us.strategy == "LEGACY" or us.legacy_control:
+        _auto_track_legacy(tracker, settings, us, result, signals)
+    return "ran"
+
+
+def _auto_track_h6s(tracker, us) -> dict:
+    """H6S "Profesyonel VCE" otomatik girişi (Lab v3 Ek J2; gölge H6S ile aynı fonksiyonlar).
+
+    Canlı evren + sert filtreler + bilanço + VCE (``live_vce_hits``) → küçük hisse (IWM) rejimi:
+    BEAR giriş yok, CAUTION en çok 1 açık H6S pozisyonu → dolar hacim sırasıyla, pozisyon başına
+    hesabın ``h6s_position_pct``'si, nakit sınırı (kaldıraç yok). Kendi sanal hesabı ('H6S').
+    """
+    from swing_trader.shadow import sources as src
+    from swing_trader.shadow.rules import PARAMS_H6S
+    from swing_trader.shadow.runner import _small_cap_regime
+
+    asof = last_completed_session()
+    res = src.live_vce_hits(asof)
+    hits = sorted(res.get("hits") or [], key=lambda h: -float(h["dv20"]))
+    out = dict(asof=asof.isoformat(), hits=len(hits), universe_source=(res.get("stats") or {}).get("universe_source"))
+    if not hits:
+        logger.info("Auto-scan H6S: no VCE hits (%s)", out)
+        return out
+    reg = _small_cap_regime(src, asof)
+    if reg is None:
+        logger.warning("Auto-scan H6S: IWM bar for %s not available yet — deferred to next run", asof)
+        return dict(out, deferred="IWM_BAR_MISSING")
+    regime = str(reg.get("regime", "UNKNOWN")).upper()
+    out["regime"] = regime
+    if regime == "BEAR" and PARAMS_H6S["bear_block"]:
+        logger.info("Auto-scan H6S: small-cap regime BEAR — %d hit(s), no entries", len(hits))
+        return out
+    account = float(us.portfolio_value)
+    active = tracker.storage.count_active_trades_for_owner(None, strategy="H6S")
+    held = tracker.storage.active_notional_for_owner(None, strategy="H6S")
+    added, skipped = [], []
+    for h in hits:
+        if regime == "CAUTION" and active >= PARAMS_H6S["caution_max_concurrent"]:
+            skipped.append((h["ticker"], "CAUTION_CAPACITY"))
+            continue
+        price = float(h["close"])
+        size = int(float(us.h6s_position_pct) * account / price) if price > 0 else 0
+        need = size * price
+        if size < 1 or held + need > account:
+            skipped.append((h["ticker"], "NO_CASH"))
+            continue
+        tid = tracker.add_trade_from_signal(dict(
+            ticker=h["ticker"], entry_price=price, date=asof.isoformat(), position_size=size,
+            atr14=h.get("atr14"), strategy="H6S", regime=regime), None)
+        if tid > 0:
+            added.append(h["ticker"])
+            active += 1
+            held += need
+        else:
+            skipped.append((h["ticker"], {-1: "DUPLICATE", -3: "ENTRY_WINDOW"}.get(tid, "NOT_CREATED")))
+    logger.info("Auto-scan H6S (%s): %d added %s, skipped %s, held $%.0f of $%.0f",
+                regime, len(added), added, skipped, held, account)
+    return dict(out, added=added, skipped=skipped)
+
+
+def _auto_track_legacy(tracker, settings, us, result, signals) -> None:
+    """Eski kurallar — H6S ana stratejiyken ayrı sanal hesapla KONTROL GRUBU ('LEGACY')."""
+    if not signals:
+        return
     regime = str(result.get("market_regime") or "UNKNOWN").upper()
     loop_policy = settings.backtest_loop
-    active = tracker.storage.count_active_trades_for_owner(None) if regime == "CAUTION" else 0
+    active = tracker.storage.count_active_trades_for_owner(None, strategy="LEGACY") if regime == "CAUTION" else 0
     capacity = auto_entry_capacity(regime, loop_policy, active)
     if capacity == 0 and regime == "BEAR":
         logger.warning(
@@ -247,21 +313,21 @@ def _run_auto_scan_once() -> str:
             "(live policy matches backtest_loop.bear_block_new_entries)",
             len(signals),
         )
-        return "ran"
+        return
     if capacity is not None:
         if capacity == 0:
             logger.info(
                 "Auto-scan: CAUTION slot full (%d active, max %d); %d signal(s) research-only",
                 active, loop_policy.caution_max_concurrent, len(signals),
             )
-            return "ran"
+            return
         signals = signals[:capacity]
 
     # Nakit hesabı (kaldıraç yok — Midas'ta gerçekte açılabilecek olan): açık + bekleyen pozisyon
     # tutarı + yeni pozisyon ≤ hesap. 2026-11-22: sınır yokken paper portföy zirvede hesabın 2.8
     # katını taşıyordu (Lab v3: 19 eşzamanlı pozisyon, 28.4K$ / 10K$) — gerçekte açılamaz işlemler.
     account = float(us.portfolio_value)
-    held = tracker.storage.active_notional_for_owner(None)
+    held = tracker.storage.active_notional_for_owner(None, strategy="LEGACY")
     added, skipped, no_cash = [], [], []
     for signal in signals:
         need = float(signal.get("entry_price") or 0) * int(signal.get("position_size") or 0)
@@ -285,7 +351,7 @@ def _run_auto_scan_once() -> str:
         "%d no cash (held $%.0f of $%.0f): %s / %s / %s",
         len(added), len(skipped), len(no_cash), held, account, added, skipped, no_cash,
     )
-    return "ran"
+    return
 
 
 async def auto_scan_loop() -> None:

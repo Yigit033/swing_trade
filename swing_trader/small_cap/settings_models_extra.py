@@ -6,7 +6,7 @@ Defaults match pre-migration hardcoded values in engine / risk / signals / filte
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -255,6 +255,14 @@ class AutoScanSettings(BaseModel):
     min_quality: int = Field(default=60, ge=0, le=100)
     top_n: int = Field(default=15, ge=1, le=100)
     portfolio_value: float = Field(default=10_000.0, gt=0)
+    # 2026-11-22 (kullanıcı kararı, Lab v3 Ek J2): otomatik girişin ana stratejisi H6S "Profesyonel
+    # VCE" — canlı evren + sert filtreler + bilanço + VCE, küçük hisse (IWM) piyasa freni, pozisyon
+    # başına hesabın %10'u, 2.5×ATR felaket stop'u, 8. seans kapanışında çıkış. "LEGACY" eski kurallara
+    # tek adımda döner.
+    strategy: Literal["H6S", "LEGACY"] = "H6S"
+    # Eski kurallar ayrı bir sanal hesapla KONTROL GRUBU olarak açmaya devam eder (kıyas için).
+    legacy_control: bool = True
+    h6s_position_pct: float = Field(default=0.10, gt=0, le=0.5)
 
 
 class UniverseFilterSettings(BaseModel):

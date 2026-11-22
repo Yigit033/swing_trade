@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { usePerformance, useInvalidateQueries } from "@/hooks/useApi";
 import { deleteTrade } from "@/lib/api";
-import type { PerformanceSummary, Trade } from "@/lib/api";
+import type { PerformanceSummary, StrategyView, Trade } from "@/lib/api";
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
     LineChart, Line, CartesianGrid, Cell, ReferenceLine,
@@ -67,7 +67,8 @@ const CumTooltip = ({ active, payload, label }: any) => {
 const fmtSigned = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
 
 export default function PerformancePage() {
-    const { data, isLoading, isError, refetch } = usePerformance();
+    const [view, setView] = useState<StrategyView>("H6S");
+    const { data, isLoading, isError, refetch } = usePerformance(view);
     const { invalidatePerformance } = useInvalidateQueries();
     const [deletingId, setDeletingId] = useState<number | null>(null);
     const [msg, setMsg] = useState("");
@@ -126,6 +127,13 @@ export default function PerformancePage() {
         <div>
             <h1 className="page-title gradient-text">Performance Analytics</h1>
             <p className="page-subtitle">Grafikler ve en iyi/kötü işlem, API’nin son 30 kapanış kaydı içindeki gerçekleşmiş işlemlerle sınırlıdır.</p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
+                {([["H6S", "H6S · Profesyonel VCE (ana strateji)"], ["LEGACY", "Eski kurallar (kontrol grubu)"], ["ALL", "Tümü"]] as const).map(([k, label]) => (
+                    <button key={k} className={view === k ? "btn-primary" : "btn-secondary"}
+                        style={{ padding: "4px 12px", fontSize: 12 }} onClick={() => setView(k)}>{label}</button>
+                ))}
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Her strateji ayrı sanal hesapta işler; kıyas aynı dönem, aynı maliyetle.</span>
+            </div>
 
             {msg && (
                 <div style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 10, padding: "10px 16px", marginBottom: 16, fontSize: "0.875rem", color: "var(--accent)" }}>
@@ -248,7 +256,7 @@ export default function PerformancePage() {
                                                                 win ? "badge-green" : "badge-red";
                                         return (
                                             <tr key={t.id}>
-                                                <td><strong>{t.ticker}</strong></td>
+                                                <td><strong>{t.ticker}</strong>{String(t.strategy || "").toUpperCase() === "H6S" ? <span className="badge badge-green" style={{ marginLeft: 6, fontSize: "0.65rem" }} title="H6S Profesyonel VCE (ana strateji)">H6S</span> : <span className="badge badge-yellow" style={{ marginLeft: 6, fontSize: "0.65rem" }} title="Eski kurallar (kontrol grubu / manuel)">Eski</span>}</td>
                                                 <td><TypeBadge type={t.swing_type} /></td>
                                                 <td style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{fmtDate(t.entry_date)}</td>
                                                 <td style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{fmtDate(t.exit_date)}</td>

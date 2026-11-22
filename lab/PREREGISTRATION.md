@@ -368,3 +368,12 @@ iyimser sayılır, karar ileri veride.
   kapanışlarına (1 yıl) + aynı VIX ile uygulanır.
 - **Karar:** Ek J kuralıyla aynı. Ayrıca aynı değişiklik (IWM rejimi) canlı replikaya (H0) uygulanıp
   raporlanır; canlı ürüne geçiş ancak ileri veride doğrulanırsa.
+
+### Ek J3 — Kullanıcı kararı: canlı paper ürün H6S'ye geçirildi (2026-11-22)
+
+Ek J2'deki "canlı ürüne geçiş ancak ileri veride doğrulanırsa" kuralının **bilinçli istisnası**,
+kullanıcının açık kararıyla (paper trading; gerçek para yok). Ölçüm bütünlüğü korunur:
+otomatik girişin ana stratejisi H6S (aynı kurallar, aynı kod: `live_vce_hits`, IWM rejimi,
+2.5×ATR stop, 8 seans, pozisyon başına hesabın %10'u, nakit sınırı); eski kurallar ayrı sanal
+hesapla kontrol grubu olarak açmaya devam eder (`paper_trades.strategy`). Gölge H6S kaydı ve F1–F4
+kapısı değişmez; nihai değerlendirme ileri veride.

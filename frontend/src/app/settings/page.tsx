@@ -87,6 +87,29 @@ function getNestedBool(draft: Record<string, unknown> | null, path: string[], fa
     return typeof cur === "boolean" ? cur : fallback;
 }
 
+function getNestedStr(draft: Record<string, unknown> | null, path: string[], fallback: string): string {
+    if (!draft) return fallback;
+    let cur: unknown = draft;
+    for (const k of path) {
+        if (!cur || typeof cur !== "object" || cur === null) return fallback;
+        cur = (cur as Record<string, unknown>)[k];
+    }
+    return typeof cur === "string" ? cur : fallback;
+}
+
+function setNestedStr(prev: Record<string, unknown> | null, path: string[], value: string): Record<string, unknown> | null {
+    if (!prev) return prev;
+    const next = clone(prev);
+    let cur: Record<string, unknown> = next;
+    for (const k of path.slice(0, -1)) {
+        const ex = cur[k];
+        if (!ex || typeof ex !== "object" || ex === null || Array.isArray(ex)) cur[k] = {};
+        cur = cur[k] as Record<string, unknown>;
+    }
+    cur[path[path.length - 1]] = value;
+    return next;
+}
+
 function setNestedBool(prev: Record<string, unknown> | null, path: string[], value: boolean): Record<string, unknown> | null {
     if (!prev) return prev;
     const next = clone(prev);
@@ -770,6 +793,8 @@ export default function SettingsPage() {
     const sn = (path: string[], v: number) => setDraft((p) => setNestedNum(p as Record<string, unknown> | null, path, v));
     const nb = (path: string[], fb: boolean) => getNestedBool(draftRec, path, fb);
     const sb = (path: string[], v: boolean) => setDraft((p) => setNestedBool(p as Record<string, unknown> | null, path, v));
+    const nstr = (path: string[], fb: string) => getNestedStr(draftRec, path, fb);
+    const sstr = (path: string[], v: string) => setDraft((p) => setNestedStr(p as Record<string, unknown> | null, path, v));
     const nt = (path: string[], i: 0 | 1, fb: number) => getTuple1(draftRec, path, i, fb);
     const st = (path: string[], i: 0 | 1, v: number) =>
         setDraft((p) => setTuple1(p as Record<string, unknown> | null, path, i, v));
@@ -1525,6 +1550,27 @@ export default function SettingsPage() {
                     onChange={(v) => sn(["auto_scan", "portfolio_value"], v)}
                     step={100}
                     min={1}
+                />
+                <FieldBool
+                    label="Ana strateji: H6S Profesyonel VCE"
+                    hint="Açık: otomatik girişler H6S kurallarıyla (VCE + küçük hisse piyasa freni + %10 pozisyon + 2.5×ATR stop + 8. seans çıkışı). Kapalı: eski kurallara tek adımda dönüş."
+                    value={nstr(["auto_scan", "strategy"], "H6S") === "H6S"}
+                    onChange={(v) => sstr(["auto_scan", "strategy"], v ? "H6S" : "LEGACY")}
+                />
+                <FieldBool
+                    label="Eski kurallar kontrol grubu olarak devam etsin"
+                    hint="Eski kurallar ayrı sanal hesapla açmaya devam eder; Performans sayfasında H6S ile yan yana kıyaslanır."
+                    value={nb(["auto_scan", "legacy_control"], true)}
+                    onChange={(v) => sb(["auto_scan", "legacy_control"], v)}
+                />
+                <FieldNum
+                    label="H6S pozisyon büyüklüğü (hesabın oranı)"
+                    hint="Ölçülen kural: 0.10 = her işleme hesabın %10'u (en çok 10 eşzamanlı pozisyon, kaldıraçsız)."
+                    value={nn(["auto_scan", "h6s_position_pct"], 0.1)}
+                    onChange={(v) => sn(["auto_scan", "h6s_position_pct"], v)}
+                    step={0.01}
+                    min={0.01}
+                    max={0.5}
                 />
             </Section>
 

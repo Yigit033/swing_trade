@@ -152,6 +152,7 @@ def test_auto_scan_never_exceeds_cash_account(monkeypatch):
     import api.scanner_jobs as jobs
     import api.deps as deps
     s = SmallCapSettings()
+    s.auto_scan.strategy = "LEGACY"                 # bu test eski kuralların nakit sınırını ölçer
     monkeypatch.setattr("swing_trader.small_cap.settings_config.load_settings", lambda *a, **k: s)
     monkeypatch.setattr(jobs, "create_exclusive_scan_job", lambda: "job")
     monkeypatch.setattr(jobs, "release_scan_slot", lambda j: None)
@@ -167,3 +168,40 @@ def test_auto_scan_never_exceeds_cash_account(monkeypatch):
     assert auto_scan._run_auto_scan_once() == "ran"
     opened = [c.args[0]["ticker"] for c in tracker.add_trade_from_signal.call_args_list]
     assert opened == ["BIG", "FIT"]                                      # 3.5K + 5K + 1K ≤ 10K
+
+
+
+@pytest.mark.parametrize("regime,expected", [("BULL", ["BIG", "MID"]), ("CAUTION", ["BIG"]), ("BEAR", [])])
+def test_auto_scan_h6s_entries(monkeypatch, regime, expected):
+    """H6S ana strateji: VCE isabetleri → IWM rejimi → %10 pozisyon, nakit sınırı; eski kurallar ayrıca açar."""
+    from unittest.mock import Mock
+    from swing_trader.small_cap.settings_config import SmallCapSettings
+    from swing_trader.shadow import runner as shadow_runner, sources as shadow_src
+    import api.routers.scanner as scanner
+    import api.scanner_jobs as jobs
+    import api.deps as deps
+    s = SmallCapSettings()
+    monkeypatch.setattr("swing_trader.small_cap.settings_config.load_settings", lambda *a, **k: s)
+    monkeypatch.setattr(jobs, "create_exclusive_scan_job", lambda: "job")
+    monkeypatch.setattr(jobs, "release_scan_slot", lambda j: None)
+    legacy = [dict(ticker="OLD", entry_price=10.0, position_size=10)]
+    monkeypatch.setattr(scanner, "_execute_smallcap_scan",
+                        lambda *a, **k: dict(signals=legacy, market_regime="BULL", stats={}))
+    hits = [dict(ticker="MID", dv20=5e7, close=20.0, atr14=1.0),
+            dict(ticker="BIG", dv20=9e7, close=50.0, atr14=2.0),
+            dict(ticker="TOO", dv20=1e7, close=40.0, atr14=1.0)]
+    monkeypatch.setattr(shadow_src, "live_vce_hits", lambda asof: dict(hits=hits, stats={}))
+    monkeypatch.setattr(shadow_runner, "_small_cap_regime", lambda src, asof: {"regime": regime})
+    tracker = Mock()
+    tracker.storage.count_active_trades_for_owner.return_value = 0
+    held = {"H6S": 8000.0, "LEGACY": 0.0}                    # H6S hesabında 8.000$ zaten bağlı
+    tracker.storage.active_notional_for_owner.side_effect = lambda owner, strategy=None: held[strategy]
+    tracker.add_trade_from_signal.side_effect = lambda sig, owner: 1
+    monkeypatch.setattr(deps, "get_paper_tracker", lambda: tracker)
+    assert auto_scan._run_auto_scan_once() == "ran"
+    calls = [c.args[0] for c in tracker.add_trade_from_signal.call_args_list]
+    h6s = [c for c in calls if c.get("strategy") == "H6S"]
+    assert [c["ticker"] for c in h6s] == expected             # dolar hacim sırası; TOO nakde sığmaz
+    for c in h6s:
+        assert c["position_size"] == int(1000 / c["entry_price"]) and c["atr14"] > 0
+    assert [c["ticker"] for c in calls if c.get("strategy") != "H6S"] == ["OLD"]   # kontrol grubu

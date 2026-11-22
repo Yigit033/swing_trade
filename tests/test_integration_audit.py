@@ -130,3 +130,20 @@ def test_production_modules_do_not_import_discovery_research():
                 names = [n.name for n in node.names] if isinstance(node, ast.Import) else (
                     [node.module or ''] if isinstance(node, ast.ImportFrom) else [])
                 assert not any('discovery' in name.split('.') for name in names), source
+
+
+def test_performance_filters_by_strategy(monkeypatch):
+    """H6S ana strateji ve eski kurallar (NULL dahil) ayrı hesaplar olarak raporlanır."""
+    rows = [dict(id=1, ticker='NEW', status='TIMEOUT', strategy='H6S', entry_price=10, position_size=100,
+                 realized_pnl=50.0, realized_pnl_pct=5.0, exit_date='2026-10-02'),
+            dict(id=2, ticker='OLD', status='STOPPED', strategy=None, entry_price=10, position_size=100,
+                 realized_pnl=-30.0, realized_pnl_pct=-3.0, exit_date='2026-10-03')]
+    storage = Mock()
+    storage.get_all_trades.return_value = rows
+    storage.get_closed_trades.return_value = rows
+    monkeypatch.setattr(performance, 'get_paper_storage', lambda: storage)
+    c = client_for(performance.router, '/api/performance')
+    assert c.get('/api/performance', params={'strategy': 'H6S'}).json()['summary']['closed_trades'] == 1
+    legacy = c.get('/api/performance', params={'strategy': 'LEGACY'}).json()
+    assert [t['ticker'] for t in legacy['recent_closed']] == ['OLD']
+    assert c.get('/api/performance').json()['summary']['closed_trades'] == 2

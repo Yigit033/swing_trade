@@ -213,7 +213,7 @@ export default function DashboardPage() {
                   const hasLive = cp != null;
                   return (
                     <tr key={t.id}>
-                      <td><strong style={{ color: "var(--accent)" }}>{t.ticker}</strong></td>
+                      <td><strong style={{ color: "var(--accent)" }}>{t.ticker}</strong>{String(t.strategy || "").toUpperCase() === "H6S" ? <span className="badge badge-green" style={{ marginLeft: 6, fontSize: "0.65rem" }} title="H6S Profesyonel VCE (ana strateji)">H6S</span> : <span className="badge badge-yellow" style={{ marginLeft: 6, fontSize: "0.65rem" }} title="Eski kurallar (kontrol grubu / manuel)">Eski</span>}</td>
                       <td><TypeBadge type={t.swing_type} /></td>
                       <td style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{fmtDate(t.entry_date)}</td>
                       <td>${t.entry_price?.toFixed(2)}</td>
@@ -225,7 +225,7 @@ export default function DashboardPage() {
                         ) : <span style={{ color: "var(--text-muted)" }}>—</span>}
                       </td>
                       <td style={{ color: "var(--red)" }}>${t.stop_loss?.toFixed(2)}</td>
-                      <td style={{ color: "var(--green)" }}>${t.target?.toFixed(2)}</td>
+                      <td style={{ color: "var(--green)" }}>{(t.target ?? 0) > 0 ? `$${t.target!.toFixed(2)}` : <span style={{ color: "var(--text-muted)" }} title="H6S: hedef yok — 8. seans kapanışında çıkış">8 gün</span>}</td>
                       <td>
                         <span className={`badge ${(t.quality_score || 0) >= 80 ? "badge-green" : (t.quality_score || 0) >= 65 ? "badge-blue" : "badge-yellow"}`}>
                           {t.quality_score?.toFixed(0)}

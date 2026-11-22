@@ -17,7 +17,15 @@ EXECUTION_COLUMNS = (
     ('initial_risk', 'REAL'), ('r_multiple', 'REAL'),
     ('partial_exit_date', 'TEXT'), ('execution_state', 'TEXT'),
     ('policy_effective_at', 'TEXT'),
+    # 2026-11-22: işlemi açan strateji ('H6S' | 'LEGACY'); NULL = eski kurallar (geriye dönük yazılmaz)
+    ('strategy', 'TEXT'),
 )
+
+LEGACY = "LEGACY"
+
+
+def strategy_of(trade) -> str:
+    return str((trade or {}).get("strategy") or LEGACY).upper()
 
 
 def _migrate_execution_columns(cursor, postgres: bool):
@@ -354,8 +362,8 @@ class PaperTradeStorage:
             if user_id:
                 _cols = """(user_id, ticker, entry_date, entry_price, stop_loss, target,
                          swing_type, quality_score, position_size, max_hold_days, notes,
-                         trailing_stop, initial_stop, atr, signal_price, status, target_2)"""
-                _vals = ",".join([ph] * 17)
+                         trailing_stop, initial_stop, atr, signal_price, status, target_2, strategy)"""
+                _vals = ",".join([ph] * 18)
                 _params = (
                     user_id,
                     trade['ticker'], trade['entry_date'], trade['entry_price'],
@@ -369,12 +377,13 @@ class PaperTradeStorage:
                     trade.get('signal_price', trade['entry_price']),
                     trade.get('status', 'OPEN'),
                     trade.get('target_2', trade['target']),
+                    trade.get('strategy'),
                 )
             else:
                 _cols = """(ticker, entry_date, entry_price, stop_loss, target,
                          swing_type, quality_score, position_size, max_hold_days, notes,
-                         trailing_stop, initial_stop, atr, signal_price, status, target_2)"""
-                _vals = ",".join([ph] * 16)
+                         trailing_stop, initial_stop, atr, signal_price, status, target_2, strategy)"""
+                _vals = ",".join([ph] * 17)
                 _params = (
                     trade['ticker'], trade['entry_date'], trade['entry_price'],
                     trade['stop_loss'], trade['target'],
@@ -387,6 +396,7 @@ class PaperTradeStorage:
                     trade.get('signal_price', trade['entry_price']),
                     trade.get('status', 'OPEN'),
                     trade.get('target_2', trade['target']),
+                    trade.get('strategy'),
                 )
 
             if _MODE == "pg" and not self._override_path:
@@ -497,7 +507,7 @@ class PaperTradeStorage:
             if conn:
                 conn.close()
 
-    def active_notional_for_owner(self, user_id: Optional[str] = None) -> float:
+    def active_notional_for_owner(self, user_id: Optional[str] = None, strategy: Optional[str] = None) -> float:
         """OPEN + PENDING pozisyonların bağladığı tutar ($) — nakit hesabı sınırı için.
 
         Tutar = kalan lot × (giriş fiyatı, yoksa sinyal fiyatı); T1 kısmi satıştan sonra kalan lot.
@@ -512,12 +522,14 @@ class PaperTradeStorage:
                 continue
             if user_id and t.get("user_id") != user_id:
                 continue
+            if strategy and strategy_of(t) != strategy.upper():
+                continue                                   # her stratejinin kendi nakit hesabı
             px = t.get("entry_price") or t.get("signal_price") or 0.0
             left = 1.0 - float(t.get("partial_exit_pct") or 0.0) / 100.0 if t.get("partial_exit_price") else 1.0
             total += float(px) * float(t.get("position_size") or 0) * left
         return total
 
-    def count_active_trades_for_owner(self, user_id: Optional[str] = None) -> int:
+    def count_active_trades_for_owner(self, user_id: Optional[str] = None, strategy: Optional[str] = None) -> int:
         """Count OPEN + PENDING trades for one execution owner.
 
         Auto-scan uses ``user_id=None`` and must not consume a logged-in user's
@@ -532,13 +544,16 @@ class PaperTradeStorage:
             if user_id:
                 cursor.execute(
                     f"SELECT COUNT(*) FROM paper_trades "
-                    f"WHERE user_id = {ph} AND status IN ('OPEN', 'PENDING')",
-                    (user_id,),
+                    f"WHERE user_id = {ph} AND status IN ('OPEN', 'PENDING')"
+                    + (f" AND COALESCE(strategy, 'LEGACY') = {ph}" if strategy else ""),
+                    (user_id,) + ((strategy.upper(),) if strategy else ()),
                 )
             else:
                 cursor.execute(
                     "SELECT COUNT(*) FROM paper_trades "
                     "WHERE user_id IS NULL AND status IN ('OPEN', 'PENDING')"
+                    + (f" AND COALESCE(strategy, 'LEGACY') = {ph}" if strategy else ""),
+                    ((strategy.upper(),) if strategy else ()),
                 )
             row = cursor.fetchone()
             return int(row[0]) if row else 0
@@ -771,7 +786,8 @@ class PaperTradeStorage:
             if conn:
                 conn.close()
 
-    def check_duplicate(self, ticker: str, entry_date: str = None, user_id: Optional[str] = None) -> bool:
+    def check_duplicate(self, ticker: str, entry_date: str = None, user_id: Optional[str] = None,
+                        strategy: Optional[str] = None) -> bool:
         """
         Return True if this ticker already has an active PENDING or OPEN trade.
 
@@ -793,13 +809,15 @@ class PaperTradeStorage:
                     WHERE ticker = {ph}
                     AND status IN ('OPEN', 'PENDING')
                     AND (user_id IS NULL OR user_id = {ph})
-                """, (ticker, user_id))
+                """ + (f" AND COALESCE(strategy, 'LEGACY') = {ph}" if strategy else ""),
+                    (ticker, user_id) + ((strategy.upper(),) if strategy else ()))
             else:
                 cursor.execute(f"""
                     SELECT COUNT(*) FROM paper_trades
                     WHERE ticker = {ph}
                     AND status IN ('OPEN', 'PENDING')
-                """, (ticker,))
+                """ + (f" AND COALESCE(strategy, 'LEGACY') = {ph}" if strategy else ""),
+                    (ticker,) + ((strategy.upper(),) if strategy else ()))
             count = cursor.fetchone()[0]
             return count > 0
         except Exception as e:
@@ -810,7 +828,8 @@ class PaperTradeStorage:
                 conn.close()
 
     def check_cooldown_active(
-        self, ticker: str, cooldown_days: int, user_id: Optional[str] = None
+        self, ticker: str, cooldown_days: int, user_id: Optional[str] = None,
+        strategy: Optional[str] = None,
     ) -> bool:
         """
         Return True if ticker has a recently CLOSED trade within the cooldown window.
@@ -834,7 +853,8 @@ class PaperTradeStorage:
                     AND exit_date >= {ph}
                     AND status NOT IN ('OPEN', 'PENDING')
                     AND (user_id IS NULL OR user_id = {ph})
-                """, (ticker, cutoff, user_id))
+                """ + (f" AND COALESCE(strategy, 'LEGACY') = {ph}" if strategy else ""),
+                    (ticker, cutoff, user_id) + ((strategy.upper(),) if strategy else ()))
             else:
                 cursor.execute(f"""
                     SELECT COUNT(*) FROM paper_trades
@@ -842,7 +862,8 @@ class PaperTradeStorage:
                     AND exit_date IS NOT NULL
                     AND exit_date >= {ph}
                     AND status NOT IN ('OPEN', 'PENDING')
-                """, (ticker, cutoff))
+                """ + (f" AND COALESCE(strategy, 'LEGACY') = {ph}" if strategy else ""),
+                    (ticker, cutoff) + ((strategy.upper(),) if strategy else ()))
             count = cursor.fetchone()[0]
             return count > 0
         except Exception as e:

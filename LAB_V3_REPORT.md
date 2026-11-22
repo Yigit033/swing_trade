@@ -491,3 +491,21 @@ Canlı ürüne geçiş ön kayıt gereği ileri veride doğrulanırsa.
 **Dürüst sınırlar:** VCE + 8 seans Ek E tanısından, IWM freni H6R sonucundan geldi → in-sample sayılar
 iyimser. Kazanç büyük kazananlara bağımlı (P4). Survivorship. Karar F1–F4 ile ileri veride (~6 ay,
 ≥100 işlem).
+
+---
+
+## Ek K — Canlı paper ürün H6S'ye geçti (22 Kasım 2026, kullanıcı kararı)
+
+| Katman | Eski kurallar (artık kontrol grubu) | **H6S (ana strateji)** |
+|---|---|---|
+| Sinyal | VCE + RVOL, RSI/Weinstein/swing kapıları, kalite eşiği, rejim tabanı, top N | Canlı evren + sert filtreler + bilanço kapısı + **yalnız VCE** |
+| Piyasa freni | SPY rejimi: BEAR 0, CAUTION 1 | **IWM (küçük hisse) rejimi**: BEAR 0, CAUTION 1 |
+| Boyut | %1.5 risk, tip tavanı | **Hesabın %10'u**, nakit sınırı (kaldıraç yok) |
+| Giriş | Ertesi açılış, gap filtresi +5/−7, cooldown 5 gün | Ertesi açılış, **gap filtresi ve cooldown yok** (ölçülen kural) |
+| Çıkış | 2.5×ATR stop, T1'de 1/3, T2, iz süren stop, tip süresi | **2.5×ATR felaket stop'u** veya **8. seans kapanışı** |
+
+Uygulama: `paper_trades.strategy` ('H6S' / 'LEGACY'; eski satırlar boş = LEGACY), her stratejinin kendi
+sanal hesabı (tekrar, cooldown, nakit, kapasite strateji bazında), `execution.evaluate` H6S'de hedef
+ve trail atlar, onay H6S'de gap filtresi uygulamaz. Ayarlar → Otomatik tarama: "Ana strateji: H6S"
+(kapatınca tek adımda eski kurallara dönüş), "Eski kurallar kontrol grubu". Performans sayfası
+H6S / Eski kurallar / Tümü seçicisiyle ayrı gösterir; işlemlerde "H6S" / "Eski" rozeti.

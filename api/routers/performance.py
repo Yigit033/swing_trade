@@ -8,7 +8,7 @@ Closed trades definition: status NOT IN ('OPEN', 'PENDING')
 
 import logging
 import math
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from typing import Optional
 from api.deps import get_paper_storage
 from api.auth import get_current_user_id
@@ -79,11 +79,17 @@ def _enrich_open_trades(open_trades: list) -> list:
 
 
 @router.get("")
-def get_performance(user_id: Optional[str] = Depends(get_current_user_id)):
+def get_performance(user_id: Optional[str] = Depends(get_current_user_id),
+                    strategy: Optional[str] = Query(None, description="H6S | LEGACY | ALL (varsayılan: tümü)")):
+    from swing_trader.paper_trading.storage import strategy_of
     storage = get_paper_storage()
     all_trades   = storage.get_all_trades(user_id)  or []
 
     closed_trades  = storage.get_closed_trades(limit=1000, user_id=user_id)
+    want = (strategy or "ALL").upper()
+    if want != "ALL":   # 2026-11-22: H6S ana strateji, LEGACY kontrol grubu — ayrı hesaplar
+        all_trades = [t for t in all_trades if strategy_of(t) == want]
+        closed_trades = [t for t in (closed_trades or []) if strategy_of(t) == want]
     open_trades    = [t for t in all_trades if t.get("status") == "OPEN"]
     pending_trades = [t for t in all_trades if t.get("status") == "PENDING"]
 

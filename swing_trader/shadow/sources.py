@@ -289,8 +289,11 @@ def live_vce_hits(asof: date) -> Dict:
             stats["filter_rejects"][failed] = stats["filter_rejects"].get(failed, 0) + 1
             continue
         tail = df.tail(20)
+        from .rules import atr14
+        a14 = atr14(df.reset_index(drop=True)).iloc[-1]
         hits.append(dict(ticker=t, dv20=float((tail["Close"] * tail["Volume"]).mean()),
-                         close=float(df["Close"].iloc[-1])))
+                         close=float(df["Close"].iloc[-1]),
+                         atr14=float(a14) if pd.notna(a14) else None))   # canlı H6S girişinin stop'u
     return dict(hits=hits, stats=stats)
 
 
