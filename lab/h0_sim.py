@@ -63,12 +63,16 @@ def main():
     ap.add_argument("--exclude", default=None)
     # Nakit hesabı: açık + bekleyen pozisyon tutarı + yeni pozisyon ≤ hesap (kaldıraçsız, Midas)
     ap.add_argument("--cash-limit", action="store_true")
+    # Ek J2: seçim/kapasite rejimini başka endeksten al (yaklaşık: motor içi rejim SPY kalır)
+    ap.add_argument("--regime-index", default=None)
     a = ap.parse_args()
     tag = a.universe + ("" if a.earnings == "live" else f"_earn{a.earnings}")
     if a.exclude:
         tag += "_ex" + Path(a.exclude).stem
     if a.cash_limit:
         tag += "_cash"
+    if a.regime_index:
+        tag += f"_reg{a.regime_index}"
     import logging
     logging.disable(logging.CRITICAL)
     from swing_trader.small_cap import settings_config as sc
@@ -110,6 +114,10 @@ def main():
 
     us = S.auto_scan
     cash_skips = 0
+    reg_over = {}
+    if a.regime_index:
+        rr = pd.read_parquet(ROOT / f"output/lab/challengers/regimes_{a.regime_index}.parquet")
+        reg_over = rr["regime"].to_dict()
     trades, closed = [], []          # closed: (ticker, exit_day) for cooldown
     active = []                      # dicts with exit_day (None = still open)
     by_day = {d: g for d, g in sig.groupby("date")}
@@ -117,6 +125,8 @@ def main():
     for d in sorted(by_day):
         g = by_day[d]
         regime, conf = g.regime.iloc[0], g.regime_conf.iloc[0]
+        if a.regime_index:
+            regime = reg_over.get(d, regime)
         eff_min, eff_top = effective_scan_thresholds(regime, conf, us.min_quality, us.top_n,
                                                      regime_caps=S.regime_thresholds)
         g = g.sort_values(["rank", "quality"], ascending=False)

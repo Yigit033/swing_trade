@@ -333,3 +333,38 @@ Bir filtre production'a (canlı tarama kapısı olarak) yalnız ikisi birlikte s
   ortalaması < 0 VE gün-kümeli %95 CI üst sınırı < 0 (elenenler istatistiksel olarak kötü).
 H6'nın kuralları Ek F'de dondurulmuştur; filtre H6 gölge koşusuna EKLENMEZ (H6D/H6Q yalnız rapor).
 Üç hipotez birlikte test ediliyor; tek bir sınırda geçiş, production'da canlı izlemeyle doğrulanır.
+
+---
+
+# Ek J — H6R "Profesyonel VCE": H6 + standart risk kuralları
+
+**Yazıldığı an: 2026-11-22, H6R'nin hiçbir sonucu görülmeden.** H6 (Ek F) işlem başına canlı üründen
+iyi, portföyde yıkıcıydı (max DD −76%): piyasa freni ve stop yoktu. Eklenen iki kural veriden
+türetilmedi; her profesyonel kırılım stratejisinin standart risk katmanı ve canlı üründe zaten var.
+
+- **Sinyal:** H6 ile birebir (canlı evren + sert filtreler + bilanço kapısı + canlı VCE).
+- **Piyasa freni (canlıyla aynı, `auto_entry_capacity`):** sinyal günü rejim BEAR → yeni giriş yok;
+  CAUTION → aynı anda en çok `caution_max_concurrent` (1) açık pozisyon; BULL → sınır yok. Rejim =
+  canlı `regime_from_spy_close` (1 yıllık SPY + VIX), replika rejim serisi.
+- **Çıkış:** giriş − 2.5×ATR14 (sinyal günü) felaket stop'u (stop önce, gap'te Open) VEYA giriş günü
+  1. seans sayılarak 8. seans kapanışı. Hedef/trail yok.
+- **Sıralama / tek pozisyon:** H6 ile aynı (20 seans dolar hacim; hisse başına tek pozisyon).
+- **Değerlendirme:** Bölüm 1 P1–P6, 50 bps; portföy %10/işlem nakit sınırlı (kaldıraç yok).
+  20 bps ayrıca raporlanır. Kıyas: H0 (−0.24%/işlem, −11.8%) ve H6.
+- **Karar:** (1) P1–P6 hepsi geçerse → gölgeye girer VE canlı paper ürünün H6R kurallarına
+  geçirilmesi önerilir (eski kurallar kıyas olarak izlenir). (2) Geçmez ama H0'dan hem net/işlem hem
+  portföyde iyiyse → yalnız gölge ileri test. (3) Aksi → reddedilir.
+- Etiket: VCE ve 8 seans tutuş Ek E tanısından geliyor → in-sample sonuç iyimser kabul edilir;
+  nihai karar ileri veride.
+
+### Ek J2 — H6S: piyasa freni küçük hisse endeksinden (SONUÇ GÖRÜLDÜKTEN SONRA, etiketli)
+
+H6R'nin max düşüşü (−51%) 2021-01 → 2023-05 aralığında: aynı dönemde SPY +13.6%, IWM −15.2%;
+410 işlemin 402'si SPY tabanlı rejimin "BULL" dediği günlerde açıldı. Kural a priori doğru (küçük
+hisse alıyorsan kendi piyasana bak) ama fikir bu sonuç görüldükten sonra geldi → in-sample sonuç
+iyimser sayılır, karar ileri veride.
+
+- **H6S:** H6R ile birebir; tek fark rejim = canlı `regime_from_spy_close` fonksiyonu **IWM**
+  kapanışlarına (1 yıl) + aynı VIX ile uygulanır.
+- **Karar:** Ek J kuralıyla aynı. Ayrıca aynı değişiklik (IWM rejimi) canlı replikaya (H0) uygulanıp
+  raporlanır; canlı ürüne geçiş ancak ileri veride doğrulanırsa.

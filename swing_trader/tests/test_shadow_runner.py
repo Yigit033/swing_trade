@@ -252,3 +252,32 @@ def test_sec_missing_file_403_is_treated_as_missing(monkeypatch):
     with pytest.raises(HTTPError) as e:
         S._sec_get("https://www.sec.gov/x", retries=2)
     assert e.value.code == 403                                   # gerçek engel sessizce yutulmaz
+
+
+@pytest.mark.parametrize("regime,expect", [("BULL", ["PENDING", "PENDING"]),
+                                           ("BEAR", ["SKIPPED", "SKIPPED"]),
+                                           ("CAUTION", ["PENDING", "SKIPPED"])])
+def test_h6s_small_cap_regime_brake(tmp_path, monkeypatch, regime, expect):
+    """Ek J2: H6 isabetleri IWM rejimine göre: BEAR giriş yok, CAUTION en çok 1 açık pozisyon."""
+    L, src = ShadowLedger(str(tmp_path / "s.db")), FakeSrc()
+    src.vce = {date(2025, 6, 13): [("XYZ", 9e7), ("ABC", 5e7)]}
+    monkeypatch.setattr(runner, "_small_cap_regime", lambda s, asof: {"regime": regime})
+    out = runner.run_shadow_daily(now=datetime(2025, 6, 16, 7, 0, tzinfo=NY), ledger=L, src=src)
+    rows = sorted(L.trades("H6S"), key=lambda t: -t["key"])           # dolar hacim sırası
+    assert [r["status"] for r in rows] == expect and out["H6S"]["regime"] == regime
+    assert L.get_meta("params_h6s_sha256") == rules.PARAMS_H6S_SHA256
+    assert len(L.trades("H6")) == 2                                   # H6 frenden etkilenmez
+    if regime == "BULL":
+        runner.run_shadow_daily(now=datetime(2025, 6, 17, 7, 0, tzinfo=NY), ledger=L, src=src)
+        t = L.trades("H6S")[0]
+        assert t["status"] == "OPEN" and t["stop"] == pytest.approx(t["entry_price"] - 2.5 * t["atr"], rel=1e-6)
+        assert "H6S" in L.get_meta("report")["strategies"]
+
+
+def test_h6s_defers_when_iwm_bar_missing(tmp_path):
+    L, src = ShadowLedger(str(tmp_path / "s.db")), FakeSrc()
+    src.vce = {date(2025, 6, 13): [("XYZ", 9e7)]}
+    b = src.bars["IWM"]
+    src.bars["IWM"] = b[b.Date < pd.Timestamp("2025-06-13")]          # son seansın IWM barı gecikti
+    out = runner.run_shadow_daily(now=datetime(2025, 6, 16, 7, 0, tzinfo=NY), ledger=L, src=src)
+    assert out["H6S"]["deferred"] == "IWM_BAR_MISSING" and L.trades("H6S") == []

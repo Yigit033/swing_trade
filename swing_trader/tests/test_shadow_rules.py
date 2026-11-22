@@ -38,7 +38,15 @@ def test_h6_params_frozen_separately():
     assert p["hold_sessions"] == 8 and p["stop"] is None and p["cost_pct"] == 0.5 and p["min_closed"] == 100
     assert {"rvol_thrust", "weinstein", "quality_threshold", "gap_filter", "stop"} <= set(p["removed"])
     assert rules.PARAMS_H6_SHA256 == "86a8947e80a6f25154735ef3d4186506e0021c627f748c635c6ea7a9773269c7"
-    assert rules.EXITS == {"H4": (2.5, 20), "H5": (2.5, 20), "H6": (None, 8)}
+    assert rules.EXITS == {"H4": (2.5, 20), "H5": (2.5, 20), "H6": (None, 8), "H6S": (2.5, 8)}
+
+
+def test_h6s_params_frozen_separately():
+    """Ek J/J2: küçük hisse (IWM) piyasa freni + 2.5×ATR felaket stop'u + 8 seans; ayrı kilit."""
+    p = rules.PARAMS_H6S
+    assert (p["regime_index"], p["bear_block"], p["caution_max_concurrent"]) == ("IWM", True, 1)
+    assert (p["stop_atr"], p["hold_sessions"], p["cost_pct"], p["min_closed"]) == (2.5, 8, 0.5, 100)
+    assert rules.PARAMS_H6S_SHA256 == "47dfd9d07856b6667b02b20d512f0c2c1747490982cc948ebd0cc171aefea0bc"
 
 
 def test_h6_plan_has_no_stop_and_exits_on_8th_session():
@@ -219,7 +227,7 @@ def _sessions():
 
 
 @needs_lab
-@pytest.mark.parametrize("strategy,n", [("H5", 400), ("H4", 250), ("H6", 300)])
+@pytest.mark.parametrize("strategy,n", [("H5", 400), ("H4", 250), ("H6", 300), ("H6S", 300)])
 def test_trades_match_lab(strategy, n):
     T = pd.read_parquet(LAB / f"challengers/trades_{strategy}.parquet")
     T = T.sample(min(n, len(T)), random_state=11)

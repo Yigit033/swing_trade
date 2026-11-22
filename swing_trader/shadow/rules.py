@@ -51,11 +51,21 @@ PARAMS_H6: Dict = dict(
 )
 PARAMS_H6_SHA256 = hashlib.sha256(json.dumps(PARAMS_H6, sort_keys=True, default=list).encode()).hexdigest()
 
+# Ek J/J2 — H6S "Profesyonel VCE": H6 isabetleri + KÜÇÜK HİSSE (IWM) piyasa freni + felaket stop'u.
+# Ayrı kilit; H4/H5/H6 kilitleri değişmez.
+PARAMS_H6S: Dict = dict(
+    base="H6", regime_index="IWM", regime_fn="regime_from_spy_close(IWM 1y close, VIX)",
+    bear_block=True, caution_max_concurrent=1, stop_atr=2.5, hold_sessions=8,
+    rank_key="dollar_volume_20", cost_pct=0.50, min_closed=100,
+)
+PARAMS_H6S_SHA256 = hashlib.sha256(json.dumps(PARAMS_H6S, sort_keys=True, default=list).encode()).hexdigest()
+
 # Strateji → (ATR stop katı, en çok seans). None stop = stop yok.
 EXITS: Dict[str, Tuple[Optional[float], int]] = {
     "H4": (C["stop_atr"], C["max_bars"]),
     "H5": (C["stop_atr"], C["max_bars"]),
     "H6": (None, PARAMS_H6["hold_sessions"]),
+    "H6S": (PARAMS_H6S["stop_atr"], PARAMS_H6S["hold_sessions"]),
 }
 
 

@@ -458,3 +458,36 @@ Gerçek veri denemesi: ASTS (424B5, 17–18 Kas), IONQ (424B7, 13 Kas) yakaland�
 Day — NYSE açık) 404 yerine gzip'li S3 `AccessDenied` 403 döndürüyor. Gölge H4 günleri sırayla
 işlediği için ilk SEC tatilinde kilitlenirdi; artık bu yanıt "dosya yok" sayılıyor, gerçek engeller
 (hız sınırı) hâlâ hata olarak yükseliyor.
+
+---
+
+## Ek J — H6S "Profesyonel VCE": en güçlü aday (22 Kasım 2026)
+
+Ön kayıt Ek J (H6R, sonuçtan önce) ve Ek J2 (H6S, H6R sonucu görüldükten SONRA, etiketli).
+H6'nın tek eksiği profesyonel risk katmanıydı: piyasa freni ve stop.
+
+| 2021–2026 (in-sample) | H0 canlı | H6 | H6R (SPY freni) | **H6S (IWM freni)** |
+|---|---:|---:|---:|---:|
+| İşlem | 331 | 2.066 | 1.522 | 1.145 |
+| Net/işlem 50 bps | −0.24% | +0.10% | +0.39% | **+0.64%** |
+| Havuz farkı (95% CI) | +0.00 | +0.46 [−0.26, +1.23] | +0.78 [−0.02, +1.65] | **+0.96 [+0.02, +1.97]** |
+| %10/işlem portföy 50 bps | −11.8% | −34.1% | +13.6% | **+64.5%** (CAGR 8.9%) |
+| … 20 bps | — | −7.4% | +48.9% | **+101.9%** (CAGR 12.7%) |
+| Max DD | −22.3% | −75.6% | −51.2% | **−31.5%** |
+| Kriter (P1–P6) | — | — | P2 P4 P5 P6 ✘ | **P3 P4 ✘** (yıl 3/6; en iyi %5 çıkarılınca negatif) |
+
+Aynı dönem IWM al-tut +42%, SPY +102%.
+
+**H6R → H6S neden?** H6R'nin −51% düşüşü 2021-01 → 2023-05'te: SPY +13.6% iken IWM −15.2%; işlemlerin
+402/410'u SPY tabanlı rejimin "BULL" dediği günlerde açıldı. Küçük hisse alan sistemin freni küçük
+hisse endeksine bakmalı. H6S'de 2022'de yalnız 4 işlem açıldı.
+
+**Karar (ön kayıtlı):** tüm kriterleri geçmedi ama H0'dan açıkça iyi → **gölgede ileri test**
+(`H6S`, kilit `47dfd9d0…`; H4/H5/H6 kilitleri değişmedi). Production çıkış kuralı lab'daki 300
+H6S işlemini birebir üretiyor. Aynı IWM freni canlı replikaya (seçim/kapasite katmanında, yaklaşık)
+uygulandığında da iyileşme var: net −0.26 → −0.18%, portföy −8.4 → −5.3%, DD −19.9 → −16.5%.
+Canlı ürüne geçiş ön kayıt gereği ileri veride doğrulanırsa.
+
+**Dürüst sınırlar:** VCE + 8 seans Ek E tanısından, IWM freni H6R sonucundan geldi → in-sample sayılar
+iyimser. Kazanç büyük kazananlara bağımlı (P4). Survivorship. Karar F1–F4 ile ileri veride (~6 ay,
+≥100 işlem).

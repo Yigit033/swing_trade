@@ -23,6 +23,10 @@ const NAMES: Record<string, { title: string; desc: string }> = {
         title: "H4 · İçeriden alım kümesi",
         desc: "30 günde ≥2 yönetici/direktör, ≥100K$ açık piyasa alımı (SEC Form 4) → ertesi açılış, 2.5×ATR stop, 20 seans.",
     },
+    H6S: {
+        title: "H6S · Profesyonel VCE (Midas adayı)",
+        desc: "H6 sinyalleri + küçük hisse (IWM) piyasa freni (ayı piyasasında giriş yok, temkinli piyasada en çok 1) + 2.5×ATR felaket stop'u → ertesi açılış, 8. seans kapanışı. Geçmiş testte en güçlü aday (iyimser: fikir sonuçtan sonra geldi).",
+    },
     H6: {
         title: "H6 · Sade VCE (canlı ürünün rakibi)",
         desc: "Canlı evren + sert filtreler + bilanço kapısı + VCE tetiği; RVOL, RSI, Weinstein, skor, rejim, top N, gap, stop yok → ertesi açılış, 8. seans kapanışı.",
@@ -52,7 +56,9 @@ const REASON_LABEL: Record<string, string> = {
     NO_PRICE_DATA: "Fiyat verisi yok",
     NO_SIGNAL_BAR: "Sinyal günü bar yok",
     STOP: "Stop",
-    TIME: "Süre doldu (H4/H5 20, H6 8 seans)",
+    TIME: "Süre doldu (H4/H5 20, H6/H6S 8 seans)",
+    BEAR_REGIME: "Küçük hisse piyasası ayıda (giriş yok)",
+    CAUTION_CAPACITY: "Temkinli piyasa: açık pozisyon sınırı dolu",
 };
 
 function Check({ ok, label }: { ok: boolean; label: string }) {
@@ -139,7 +145,7 @@ export default function ShadowPage() {
     const [data, setData] = useState<ShadowData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
-    const [strategy, setStrategy] = useState<"all" | "H5" | "H4" | "H6">("all");
+    const [strategy, setStrategy] = useState<"all" | "H5" | "H4" | "H6" | "H6S">("all");
     const [hideSkipped, setHideSkipped] = useState(true);
 
     const load = async () => {
@@ -167,7 +173,10 @@ export default function ShadowPage() {
     if (error) return <div className="card" style={{ color: "var(--danger)" }}>{error}</div>;
     if (!data) return null;
 
-    const strategies = data.report ? Object.values(data.report.strategies) : [];
+    const ORDER = ["H6S", "H6", "H5", "H4"];
+    const strategies = data.report
+        ? Object.values(data.report.strategies).sort((a, b) => ORDER.indexOf(a.strategy) - ORDER.indexOf(b.strategy))
+        : [];
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -225,7 +234,7 @@ export default function ShadowPage() {
             <div className="card">
                 <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
                     <strong>İşlemler</strong>
-                    {(["all", "H5", "H4", "H6"] as const).map(s => (
+                    {(["all", "H6S", "H6", "H5", "H4"] as const).map(s => (
                         <button key={s} className={strategy === s ? "btn-primary" : "btn-secondary"}
                             style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setStrategy(s)}>
                             {s === "all" ? "Tümü" : s}

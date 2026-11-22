@@ -206,14 +206,14 @@ def _record_h4(ledger, src, universe, evs, F: date, today_et: date, now: datetim
 
 # ── H6 "Sade VCE" (Ek F) ─────────────────────────────────────────────────────
 
-def run_h6(ledger: ShadowLedger, src, asof: date, now: datetime) -> Dict:
+def run_h6(ledger: ShadowLedger, src, asof: date, now: datetime, res: Optional[Dict] = None) -> Dict:
     """Canlı evren + canlı parçalarla VCE (tetikten sonraki katmanlar yok). Ayrı kural kilidi."""
     if ledger.get_meta("params_h6_sha256") is None:
         ledger.set_meta("params_h6_sha256", rules.PARAMS_H6_SHA256)
         ledger.set_meta("h6_live_start", asof.isoformat())
     if ledger.get_meta("params_h6_sha256") != rules.PARAMS_H6_SHA256:
         return dict(error="H6_PARAMS_CHANGED_WITHOUT_PREREGISTRATION")
-    res = src.live_vce_hits(asof)
+    res = res if res is not None else src.live_vce_hits(asof)
     added = 0
     for h in res["hits"]:
         added += ledger.add_trade(dict(
@@ -223,6 +223,61 @@ def run_h6(ledger: ShadowLedger, src, asof: date, now: datetime) -> Dict:
             details=dict(dv20=float(h["dv20"]), close=float(h["close"])),
         ))
     return dict(hits=len(res["hits"]), added=added, **res.get("stats", {}))
+
+
+def _small_cap_regime(src, asof: date) -> Optional[Dict]:
+    """Canlı ``regime_from_spy_close`` kuralları, IWM 1 yıllık kapanış + VIX ile. Son bar asof değilse None."""
+    from ..small_cap.regime_logic import regime_from_spy_close
+    bars = src.fetch_bars({"IWM", "^VIX"}, asof - timedelta(days=400), asof)
+    iwm = bars.get("IWM")
+    if iwm is None or len(iwm) == 0:
+        return None
+    iwm = iwm.dropna(subset=["Close"]).sort_values("Date")
+    if pd.Timestamp(iwm["Date"].iloc[-1]).date() != asof:
+        return None                                    # veri gecikmesi → karar sonraki koşuya
+    vix = bars.get("^VIX")
+    v = float(vix.dropna(subset=["Close"])["Close"].iloc[-1]) if vix is not None and len(vix) else None
+    return regime_from_spy_close(iwm["Close"].tail(252).reset_index(drop=True), v)
+
+
+def run_h6s(ledger: ShadowLedger, src, asof: date, now: datetime, res: Dict) -> Dict:
+    """Ek J2: H6 isabetleri + küçük hisse piyasa freni (BEAR giriş yok, CAUTION en çok 1 açık)."""
+    p = rules.PARAMS_H6S
+    if ledger.get_meta("params_h6s_sha256") is None:
+        ledger.set_meta("params_h6s_sha256", rules.PARAMS_H6S_SHA256)
+        ledger.set_meta("h6s_live_start", asof.isoformat())
+    if ledger.get_meta("params_h6s_sha256") != rules.PARAMS_H6S_SHA256:
+        return dict(error="H6S_PARAMS_CHANGED_WITHOUT_PREREGISTRATION")
+    hits = sorted(res.get("hits") or [], key=lambda h: -float(h["dv20"]))
+    if not hits:
+        return dict(hits=0, added=0)
+    reg = _small_cap_regime(src, asof)
+    if reg is None:
+        return dict(hits=len(hits), deferred="IWM_BAR_MISSING")
+    regime = str(reg.get("regime", "UNKNOWN")).upper()
+    active = ledger.trades("H6S", statuses=("PENDING", "OPEN"))
+    busy = {t["ticker"] for t in active}
+    n_active, added, counts = len(active), 0, {}
+    for h in hits:
+        why = None
+        if regime == "BEAR" and p["bear_block"]:
+            why = "BEAR_REGIME"
+        elif regime == "CAUTION" and n_active >= p["caution_max_concurrent"]:
+            why = "CAUTION_CAPACITY"
+        elif h["ticker"] in busy:
+            why = "TICKER_BUSY"
+        n = ledger.add_trade(dict(
+            strategy="H6S", ticker=h["ticker"], event_date=asof.isoformat(), signal_date=asof.isoformat(),
+            decided_at=_utc_iso(now), key=float(h["dv20"]), status="SKIPPED" if why else "PENDING",
+            reason=why, late_decision=_late(now, asof), warmup=0,
+            details=dict(dv20=float(h["dv20"]), regime=regime, regime_index="IWM"),
+        ))
+        added += n
+        if n and not why:
+            n_active += 1
+            busy.add(h["ticker"])
+        counts[why or "PENDING"] = counts.get(why or "PENDING", 0) + 1
+    return dict(hits=len(hits), regime=regime, added=added, **counts)
 
 
 # ── Açık işlemlerin güncellenmesi ────────────────────────────────────────────
@@ -322,6 +377,11 @@ def build_report(ledger: ShadowLedger, src, asof: date) -> Dict:
     trades = ledger.trades()
     strategies = {s: strategy_report(s, trades, sessions, live_start, asof, iwm_bh) for s in ("H5", "H4")}
     h6_start = ledger.get_meta("h6_live_start")
+    h6s_start = ledger.get_meta("h6s_live_start")
+    if h6s_start:
+        d6s = date.fromisoformat(h6s_start)
+        strategies["H6S"] = strategy_report("H6S", trades, rules.sessions_between(d6s, asof), d6s, asof,
+                                            iwm_bh if d6s == live_start else _buy_hold(src, "IWM", d6s, asof))
     champion = None
     if h6_start:
         h6_d = date.fromisoformat(h6_start)
@@ -383,11 +443,19 @@ def run_shadow_daily(now: Optional[datetime] = None, ledger: Optional[ShadowLedg
             logger.exception("Shadow: universe fetch failed")
             out["universe_error"] = str(e)
             universe = None
+    vce = None
     try:                                  # H6 kendi kilidiyle; aday evrenine (CANDIDATE) muhtaç değil
-        out["H6"] = run_h6(ledger, src, asof, now)
+        vce = src.live_vce_hits(asof)
+        out["H6"] = run_h6(ledger, src, asof, now, vce)
     except Exception as e:
         logger.exception("Shadow H6 failed")
         out["H6"] = dict(error=str(e))
+    if vce is not None:
+        try:                              # aynı isabetler + küçük hisse piyasa freni (Ek J2)
+            out["H6S"] = run_h6s(ledger, src, asof, now, vce)
+        except Exception as e:
+            logger.exception("Shadow H6S failed")
+            out["H6S"] = dict(error=str(e))
     if universe:
         for name, fn in (("H5", lambda: run_h5(ledger, src, universe, asof, now)),
                          ("H4", lambda: run_h4(ledger, src, universe, today_et, now, deadline=deadline))):
