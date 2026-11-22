@@ -310,3 +310,59 @@ kararsız.
 
 **Ürün ölçüm sorunu:** paper trading işlem maliyeti düşmüyor (yalnız stop gap kayması); ekrandaki
 kâr/zarar brüt, gerçek paradan işlem başına ~0.5 puan iyimser.
+
+---
+
+## Ek F — H6 "Sade VCE" ve bu turun production düzeltmeleri (22 Kasım 2026)
+
+### F1. Canlı evren bozuktu: ürün Finviz yerine bayat statik listeyi tarıyordu
+
+| Dönem | Production'daki finvizfinance | Sonuç |
+|---|---|---|
+| 11 Eki deploy'u → bugün | 1.5.0 | Finviz sitesini değiştirince (Kasım başı; kütüphane 10 Kasım'da uyum sağladı) sorgular **hata vermeden boş** döndü → evren sessizce 234 hisselik statik liste |
+| 22 Kas deploy'ları | 1.7.1 (sürüm sabit değildi) | Kütüphane yeni siteyi okuyor ama bizim Temmuz yamamız tablo okuyucusunu ezip **her sorguyu** düşürdü → yine statik liste |
+
+Statik liste ölçülmüş canlı evren değil; delist olmuş hisseler (GATO, JNPR, SLCA…) bile içinde.
+Kasım'daki canlı paper işlemleri büyük olasılıkla bu listeden geldi. Kesin başlangıç tarihi Fly
+loglarında ("Finviz returned only 0 tickers") görülebilir; burada doğrulanmadı.
+
+**Düzeltme:** yama sürüme duyarlı (yeni kütüphanede kütüphanenin kendi okuyucusu; ticker'lar doğrulanıyor),
+`finvizfinance==1.7.1` sabitlendi, Finviz'den hiç hisse gelmezse tarama **durur**
+(`universe_unavailable`, arayüzde kırmızı uyarı; otomatik tarama tekrar dener). Gerçek veriyle
+doğrulandı: 20 Kasım evreni Finviz'den hatasız geldi.
+
+**Açık konu (değiştirilmedi):** Finviz 30'dan az hisse döndürdüğünde (20 Kasım: 18) evren statik
+listeyle birleştiriliyor (`min_finviz_tickers_skip_static_merge`). Durgun günlerde taranan evrenin
+çoğu ölçülmemiş statik liste oluyor. Lab replikası bu birleşimi içermiyor; ölçülmeden değiştirilmedi.
+
+### F2. Ekrandaki kâr/zarar maliyetsizdi
+
+Paper fiyatları maliyet içermiyor. Performans ve ana sayfa artık **net** (maliyet sonrası) sonucu
+ana rakam olarak gösteriyor; brüt alt bilgi. Maliyet tek ayardan: `slippage_bps_per_side`
+(backtest de aynısını düşer). Varsayılan 5 → **10 bps/kenar** (önceki proxy ölçümü gidiş-dönüş
+~0.19 puan; 5 ölçümsüzdü). Canlıdaki kayıtlı ayar yaması 5'i sabitliyorsa Ayarlar'dan değişir.
+
+### F3. H6 — sade VCE rakibi (ön kayıt Ek F, sonuçtan önce)
+
+Canlı ürünün en küçük çekirdeği: canlı evren + sert filtreler + bilanço kapısı + VCE tetiği, giriş
+ertesi açılış, 8. seans kapanışında çıkış. RVOL, RSI, Weinstein, skor, rejim, top N, gap, stop yok.
+
+**Lab sağlık kontrolü (etiketli in-sample — fikir bu veriden çıktı, karar DEĞİL):**
+
+| 2021–2026 | H0 canlı ürün | H6 sade VCE |
+|---|---:|---:|
+| İşlem (ay) | 331 | 2.066 (70) |
+| Net/işlem 50 bps / 20 bps | −0.24% / — | **+0.10% / +0.40%** |
+| Havuz farkı (95% CI) | +0.00 [−0.97, +0.97] | +0.46 [−0.26, +1.23] |
+| Pozitif fark yılı | — | 4/6 |
+| Portföy %10/işlem (50 bps) | −11.8% | **−34.1%** |
+| Max DD | −22.3% | **−75.6%** |
+
+İşlem başına H6 daha iyi, portföy olarak çok daha kötü: stop ve rejim freni olmadan aynı anda çok
+sayıda korelasyonlu işleme giriyor; 2022'de birlikte kaybediyor (yıl −3.18%/işlem). Ön kayıttaki
+sağlık kuralı (brüt fark > 0) sağlandı → gölgeye alındı. Beklenti: F4 (DD < %35) büyük engel.
+
+**Gölge:** `swing_trader/shadow` H6 adımı canlı ürünün kendi fonksiyonlarını çağırıyor; H4/H5
+kilidi (`178c293e…`) değişmedi, H6 ayrı kilitli (`86a8947e…`). Production çıkış kuralı lab'daki
+300 H6 işlemini birebir üretiyor. Gölge sayfası aynı dönemde canlı ürünün paper işlemlerini aynı
+50 bps maliyetle yan yana gösteriyor. Kapı: ≥6 ay, ≥100 işlem, net > 0 (CI), portföy > IWM, DD < %35.

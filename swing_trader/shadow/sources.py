@@ -228,3 +228,66 @@ def candidate_universe() -> Set[str]:
     snap, _ = fetch_snapshot()
     return {r["yfinance_symbol_candidate"] for r in snap["records"]
             if r.get("discovery_status") == "CANDIDATE" and r.get("yfinance_symbol_candidate")}
+
+
+# ── H6 "Sade VCE" (Ek F): canlı ürünün KENDİ parçaları, aynı sıra ────────────
+
+def live_vce_hits(asof: date) -> Dict:
+    """Canlı evren + canlı barlar → (sert filtreler + bilanço kapısı) VE VCE tetiği.
+
+    Canlı taramayla aynı girdiler: ``get_small_cap_universe`` (Finviz, canlı ayarlar) ve
+    ``fetch_multiple_stocks_batch(period="6mo")``. ``scan_stock`` ile aynı bileşenler:
+    ``filters.apply_all_filters`` (bilanço iki kaynak, bilinmiyorsa ret) ve
+    ``signals.check_all_triggers``. Tetikten sonraki katmanlar (RSI, Weinstein, skor, rejim,
+    top N) BİLEREK yok. Sonuç mantıksal VE olduğundan sıra yalnız maliyeti etkiler: önce tetik
+    (ucuz), sonra filtreler (bilanço isteği yalnız VCE'den geçenlere).
+    """
+    from datetime import datetime as _dt
+    from ..data.fetcher import DataFetcher
+    from ..small_cap.engine import SmallCapEngine
+
+    eng = SmallCapEngine()
+    tickers = eng.get_small_cap_universe()
+    source = getattr(eng.universe_provider, "last_universe_source", None)
+    if source == "static_fallback":       # canlı tarama da bu durumda durur (universe_unavailable)
+        return dict(hits=[], stats=dict(universe=len(tickers), universe_source=source,
+                                        error="UNIVERSE_UNAVAILABLE"))
+    data = DataFetcher().fetch_multiple_stocks_batch(tickers, period="6mo")
+    stats = dict(universe=len(tickers), universe_source=source, fetched=len(data), current_bar=0,
+                 vce=0, filter_rejects={})
+    hits = []
+    for t, df in data.items():
+        if df is None or len(df) < 20:
+            continue
+        dcol = df["Date"] if "Date" in df.columns else pd.Series(df.index)
+        last = pd.Timestamp(dcol.iloc[-1]).date()
+        if last != asof:                       # bayat/eksik son bar → bu koşuda karar yok
+            continue
+        stats["current_bar"] += 1
+        _, td = eng.signals.check_all_triggers(df)
+        if not ((td.get("triggers") or {}).get("vce_breakout") or {}).get("passed"):
+            continue
+        stats["vce"] += 1
+        info = eng.universe_provider.get_ticker_metadata(t) or eng.get_stock_info(t)
+        ok, res = eng.filters.apply_all_filters(t, df, info, _dt(asof.year, asof.month, asof.day))
+        if not ok:
+            failed = next((k for k, v in (res.get("filters") or {}).items() if not v.get("passed")), "?")
+            stats["filter_rejects"][failed] = stats["filter_rejects"].get(failed, 0) + 1
+            continue
+        tail = df.tail(20)
+        hits.append(dict(ticker=t, dv20=float((tail["Close"] * tail["Volume"]).mean()),
+                         close=float(df["Close"].iloc[-1])))
+    return dict(hits=hits, stats=stats)
+
+
+def champion_trades(since: date) -> List[Dict]:
+    """Canlı ürünün paper işlemleri (kapanmış, REJECTED hariç, girişi ``since`` ve sonrası).
+
+    Salt okuma; kaynak ayrımı tutulmadığından manuel eklenen işlemler de dahildir.
+    """
+    from ..paper_trading.storage import PaperTradeStorage
+
+    rows = PaperTradeStorage().get_closed_trades(limit=5000) or []
+    s = since.isoformat()
+    return [r for r in rows if r.get("status") != "REJECTED" and str(r.get("entry_date") or "")[:10] >= s
+            and r.get("realized_pnl_pct") is not None]

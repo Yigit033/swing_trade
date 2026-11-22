@@ -233,3 +233,36 @@ earnings dates found"); aynı hisselerin hepsi `earnings_full`'da aynı fonksiyo
 - **Birincil D1 değerlendirmesi onarılmış veriyle** yapılır; onarımsız sonuçlar da raporlanır.
 - **Karar kuralı aynen geçerli.** H0 taban çizgisi (Ek B/Lab v3'teki −0.46%) onarılmış veriyle
   yeniden raporlanır; fark olursa açıkça yazılır.
+
+---
+
+# Ek F — H6 "Sade VCE": canlı ürünün sadeleştirilmiş rakibi (gölge ileri test)
+
+**Yazıldığı an: 2026-11-22, H6'nın hiçbir sonucu görülmeden.** Gerekçe Ek E tanısıdır (sonuç
+görüldükten SONRA yapılmış bir tanı): canlı ürünün edge'i evren + tetikte; sonraki kapılar,
+kalite skoru, rejim eşiği ve çıkış mekanizması ölçülebilir değer katmıyor; RVOL yolu sıfır.
+Bu yüzden H6 geçmiş veriyle KANITLANAMAZ (aynı veriden türetildi); tek geçerli test görülmemiş
+gelecektir.
+
+**Tasarım ilkesi (işarete göre seçim değil):** canlı ürünün en küçük çalışan çekirdeği —
+evren + sert filtreler + bilanço kapısı + VCE tetiği + sabit tutuş. Tetikten sonraki HER katman
+çıkarılır (doğru yönü gösterenler dahil: swing onayı, gap filtresi), RVOL yolu çıkarılır.
+
+- **Sinyal (karar t+1 açılışından önce):** t = son tamamlanmış seans. Evren = canlı ürünün
+  evreni (`SmallCapEngine.get_small_cap_universe`, canlı ayarlar). Barlar = canlı tarama ile aynı
+  (`DataFetcher.fetch_multiple_stocks_batch(period="6mo")`). Son barı t olan her hisse için:
+  canlı sert filtreler (fiyat / cap / dolar hacim) VE canlı bilanço kapısı (iki kaynak,
+  bilinmiyorsa ret) VE canlı VCE tetiği (`check_all_triggers` → `vce_breakout.passed`).
+- **Yok:** RVOL thrust, swing onayı, RSI kapısı, Weinstein, kalite skoru/eşiği, rejim eşiği,
+  top N, kapasite, gap filtresi, stop, hedef, trail.
+- **Giriş:** t'den sonraki ilk seansın Open'ı. **Çıkış:** giriş günü 1. seans sayılarak
+  **8. seansın Close'u** (canlı ortanca tutuş). Eksik barda bekle. Hisse başına tek pozisyon.
+- **Aynı gün sıralama (portföy):** 20-seans ortalama dolar hacim büyükten küçüğe.
+- **Maliyet:** 50 bps gidiş-dönüş (birincil, H0 ile kıyaslanabilir). 20 bps de raporlanır.
+- **Lab sağlık kontrolü (karar DEĞİL, etiketli in-sample):** H6 aynı replika verisinde koşulur.
+  Brüt havuz farkı ≤ 0 ise gölgeye alınmaz (zaten geçmişte bile değer yoksa ileri test anlamsız).
+- **Gölge terfi kapısı (Ek C düzeni):** F1 ≥ 6 ay VE ≥ 100 kapanmış (geç karar hariç) işlem;
+  F2 50 bps net ortalama > 0 VE CI alt sınırı > 0; F3 %10/işlem portföy > IWM al-tut; F4 max
+  DD < %35. Ayrıca aynı dönemde canlı ürünün kendi paper işlemleri (aynı 50 bps maliyetle)
+  yan yana raporlanır. Otomatik terfi yok.
+- **Parametreler** H4/H5'ten ayrı bir hash ile kilitlenir; H4/H5 kuralları ve hash'i değişmez.

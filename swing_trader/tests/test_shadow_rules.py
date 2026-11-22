@@ -32,6 +32,25 @@ def test_params_frozen_to_preregistration():
     assert rules.PARAMS_SHA256 == "178c293e6718" + rules.PARAMS_SHA256[12:]
 
 
+def test_h6_params_frozen_separately():
+    """Ek F: H6 ayrı kilitli; H6 eklemek H4/H5 kilidini değiştirmez (yukarıdaki test)."""
+    p = rules.PARAMS_H6
+    assert p["hold_sessions"] == 8 and p["stop"] is None and p["cost_pct"] == 0.5 and p["min_closed"] == 100
+    assert {"rvol_thrust", "weinstein", "quality_threshold", "gap_filter", "stop"} <= set(p["removed"])
+    assert rules.PARAMS_H6_SHA256 == "86a8947e80a6f25154735ef3d4186506e0021c627f748c635c6ea7a9773269c7"
+    assert rules.EXITS == {"H4": (2.5, 20), "H5": (2.5, 20), "H6": (None, 8)}
+
+
+def test_h6_plan_has_no_stop_and_exits_on_8th_session():
+    days = rules.sessions_between(date(2025, 3, 3), date(2025, 4, 30))
+    c = np.linspace(20, 10, len(days))                       # sürekli düşüş: stop olsaydı tetiklenirdi
+    f = pd.DataFrame(dict(Open=c, High=c * 1.01, Low=c * 0.9, Close=c * 0.99),
+                     index=pd.to_datetime(days))
+    plan = rules.plan_trade(f, days[2], "H6")
+    assert plan["status"] == "CLOSED" and plan["exit_reason"] == "TIME" and plan["stop"] is None
+    assert plan["entry_day"] == days[3] and plan["exit_day"] == days[10] and plan["bars"] == 8
+
+
 # ── Çıkış ───────────────────────────────────────────────────────────────────
 
 def _frame(rows, start="2025-03-03"):
@@ -200,7 +219,7 @@ def _sessions():
 
 
 @needs_lab
-@pytest.mark.parametrize("strategy,n", [("H5", 400), ("H4", 250)])
+@pytest.mark.parametrize("strategy,n", [("H5", 400), ("H4", 250), ("H6", 300)])
 def test_trades_match_lab(strategy, n):
     T = pd.read_parquet(LAB / f"challengers/trades_{strategy}.parquet")
     T = T.sample(min(n, len(T)), random_state=11)
@@ -208,7 +227,7 @@ def test_trades_match_lab(strategy, n):
     bad = []
     for r in T.itertuples():
         frame = rules.align(bars[r.ticker], _sessions())
-        plan = rules.plan_trade(frame, pd.Timestamp(r.signal_date).date())
+        plan = rules.plan_trade(frame, pd.Timestamp(r.signal_date).date(), strategy)
         exp_reason = {"END_OF_DATA": "OPEN"}.get(r.reason, r.reason)
         got_day = plan.get("exit_day") or plan.get("mark_day")
         if not (plan.get("entry_day") == pd.Timestamp(r.entry_day).date()

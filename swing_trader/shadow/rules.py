@@ -38,6 +38,26 @@ PARAMS_SHA256 = hashlib.sha256(json.dumps(PARAMS, sort_keys=True, default=list).
 
 C = PARAMS["common"]
 
+# Ek F — H6 "Sade VCE": canlı ürünün en küçük çekirdeği. H4/H5'ten AYRI hash: H6 eklemek H4/H5'in
+# ön kayıt kilidini (PARAMS_SHA256) değiştirmez. Sinyal canlı ürünün kendi fonksiyonlarıyla
+# üretilir (sources.live_vce_hits); burada yalnız çıkış ve kimlik parametreleri dondurulur.
+PARAMS_H6: Dict = dict(
+    universe="live_product_universe", bars="DataFetcher.fetch_multiple_stocks_batch(6mo)",
+    filters="live_hard_filters+live_earnings_gate", trigger="check_all_triggers.vce_breakout",
+    removed=("rvol_thrust", "swing_confirmation", "rsi_gate", "weinstein", "quality_threshold",
+             "regime_threshold", "top_n", "capacity", "gap_filter", "stop", "target", "trail"),
+    entry="next_session_open", hold_sessions=8, stop=None, rank_key="dollar_volume_20",
+    cost_pct=0.50, min_closed=100,
+)
+PARAMS_H6_SHA256 = hashlib.sha256(json.dumps(PARAMS_H6, sort_keys=True, default=list).encode()).hexdigest()
+
+# Strateji → (ATR stop katı, en çok seans). None stop = stop yok.
+EXITS: Dict[str, Tuple[Optional[float], int]] = {
+    "H4": (C["stop_atr"], C["max_bars"]),
+    "H5": (C["stop_atr"], C["max_bars"]),
+    "H6": (None, PARAMS_H6["hold_sessions"]),
+}
+
 
 # ── Takvim ──────────────────────────────────────────────────────────────────
 
@@ -106,7 +126,7 @@ def walk(frame: pd.DataFrame, ie: int, stop: float, max_bars: int = None) -> Tup
     for k in range(ie, min(n, ie + max_bars)):
         if not np.isfinite(Cl[k]):
             continue
-        if L[k] <= stop:
+        if stop is not None and L[k] <= stop:
             return k, float(min(O[k], stop)), "STOP"
     last = min(n, ie + max_bars) - 1
     while last > ie and not np.isfinite(Cl[last]):
@@ -114,27 +134,31 @@ def walk(frame: pd.DataFrame, ie: int, stop: float, max_bars: int = None) -> Tup
     return last, float(Cl[last]), ("TIME" if ie + max_bars <= n else "OPEN")
 
 
-def plan_trade(frame: pd.DataFrame, signal_day: date) -> Dict:
+def plan_trade(frame: pd.DataFrame, signal_day: date, strategy: str = "H5") -> Dict:
     """Sinyal barı ``signal_day`` → giriş/stop/çıkış (hizalanmış çerçeve üzerinde).
 
     Çerçeve sinyal günü ve sonrasındaki seansları içermeli. Sonuç alanları:
-    status PENDING (giriş barı yok) | SKIPPED | OPEN | CLOSED.
+    status PENDING (giriş barı yok) | SKIPPED | OPEN | CLOSED. Çıkış kuralı ``EXITS[strategy]``.
     """
+    stop_atr, max_bars = EXITS[strategy]
     idx = list(frame.index.date)
     if signal_day not in idx:
         return dict(status="SKIPPED", reason="NO_SIGNAL_BAR")
     i = idx.index(signal_day)
     a = atr14(frame).iloc[i]
-    if not np.isfinite(a) or a <= 0:
+    if stop_atr is None:
+        a = float(a) if np.isfinite(a) and a > 0 else None   # stopsuz strateji ATR'ye muhtaç değil
+    elif not np.isfinite(a) or a <= 0:
         return dict(status="SKIPPED", reason="ATR_UNAVAILABLE")
+    a = None if a is None else float(a)
     if i + 1 >= len(idx):
-        return dict(status="PENDING", atr=float(a))
+        return dict(status="PENDING", atr=a)
     o = frame["Open"].iloc[i + 1]
     if not np.isfinite(o) or o <= 0:
-        return dict(status="SKIPPED", reason="NO_ENTRY_BAR", atr=float(a))
-    stop = float(o - C["stop_atr"] * a)
-    xi, xp, why = walk(frame, i + 1, stop)
-    out = dict(atr=float(a), entry_day=idx[i + 1], entry_price=float(o), stop=stop,
+        return dict(status="SKIPPED", reason="NO_ENTRY_BAR", atr=a)
+    stop = None if stop_atr is None else float(o - stop_atr * a)
+    xi, xp, why = walk(frame, i + 1, stop, max_bars)
+    out = dict(atr=a, entry_day=idx[i + 1], entry_price=float(o), stop=stop,
                bars=xi - i, exit_reason=why, mark_price=xp, mark_day=idx[xi],
                ret_pct=100.0 * (xp / o - 1))
     out["status"] = "OPEN" if why == "OPEN" else "CLOSED"

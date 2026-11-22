@@ -1,12 +1,12 @@
 "use client";
 /**
- * GÖLGE SİNYALLER — H4 (içeriden alım kümesi) ve H5 (bilanço sürprizi) ileri testi.
+ * GÖLGE SİNYALLER — H4 (içeriden alım), H5 (bilanço sürprizi), H6 (sade VCE) ileri testi.
  *
  * Gerçek para YOK; ana ürünün paper işlemlerinden ayrı defter. Kurallar ve terfi kapısı
- * sonuç görülmeden yazıldı (lab/PREREGISTRATION.md Ek A + Ek C). Terfi otomatik değildir.
+ * sonuç görülmeden yazıldı (lab/PREREGISTRATION.md Ek A + Ek C, H6: Ek F). Terfi otomatik değildir.
  */
 import { useEffect, useMemo, useState } from "react";
-import { getShadow, type ShadowData, type ShadowStrategyReport, type ShadowTrade } from "@/lib/api";
+import { getShadow, type ShadowChampion, type ShadowData, type ShadowStrategyReport, type ShadowTrade } from "@/lib/api";
 import { Ghost, Info, RefreshCw } from "lucide-react";
 
 const pct = (v: number | null | undefined, d = 2) =>
@@ -22,6 +22,10 @@ const NAMES: Record<string, { title: string; desc: string }> = {
     H4: {
         title: "H4 · İçeriden alım kümesi",
         desc: "30 günde ≥2 yönetici/direktör, ≥100K$ açık piyasa alımı (SEC Form 4) → ertesi açılış, 2.5×ATR stop, 20 seans.",
+    },
+    H6: {
+        title: "H6 · Sade VCE (canlı ürünün rakibi)",
+        desc: "Canlı evren + sert filtreler + bilanço kapısı + VCE tetiği; RVOL, RSI, Weinstein, skor, rejim, top N, gap, stop yok → ertesi açılış, 8. seans kapanışı.",
     },
 };
 
@@ -48,7 +52,7 @@ const REASON_LABEL: Record<string, string> = {
     NO_PRICE_DATA: "Fiyat verisi yok",
     NO_SIGNAL_BAR: "Sinyal günü bar yok",
     STOP: "Stop",
-    TIME: "20 seans doldu",
+    TIME: "Süre doldu (H4/H5 20, H6 8 seans)",
 };
 
 function Check({ ok, label }: { ok: boolean; label: string }) {
@@ -56,6 +60,27 @@ function Check({ ok, label }: { ok: boolean; label: string }) {
         <div style={{ display: "flex", gap: 6, fontSize: 12, color: ok ? "var(--success)" : "var(--text-muted)" }}>
             <span>{ok ? "✔" : "○"}</span>
             <span>{label}</span>
+        </div>
+    );
+}
+
+function ChampionCard({ c, h6 }: { c: ShadowChampion; h6?: ShadowStrategyReport }) {
+    return (
+        <div className="card" style={{ borderLeft: "3px solid var(--accent)" }}>
+            <strong>Canlı ürün vs H6 — aynı dönem, aynı maliyet ({c.cost_pct.toFixed(2)}% / işlem)</strong>
+            <div style={{ color: "var(--text-muted)", fontSize: 12, margin: "6px 0 12px" }}>
+                {c.label}, girişi {c.since} ve sonrası. Hangisi gerçek parayı daha iyi büyütüyor, burada görünür.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+                <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>Canlı ürün net ort.</div>
+                    <div style={{ fontWeight: 700, color: tone(c.net_mean) }}>{pct(c.net_mean)} <span style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: 12 }}>({c.closed} işlem)</span></div></div>
+                <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>H6 net ort.</div>
+                    <div style={{ fontWeight: 700, color: tone(h6?.net_mean) }}>{pct(h6?.net_mean)} <span style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: 12 }}>({h6?.eligible_closed ?? 0} işlem)</span></div></div>
+                <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>Canlı ürün kazanma (net)</div>
+                    <div style={{ fontWeight: 600 }}>{c.win_rate === undefined ? "—" : `%${c.win_rate.toFixed(0)}`}</div></div>
+                <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>H6 kazanma (net)</div>
+                    <div style={{ fontWeight: 600 }}>{h6?.win_rate === undefined ? "—" : `%${h6.win_rate.toFixed(0)}`}</div></div>
+            </div>
         </div>
     );
 }
@@ -105,7 +130,7 @@ export default function ShadowPage() {
     const [data, setData] = useState<ShadowData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
-    const [strategy, setStrategy] = useState<"all" | "H5" | "H4">("all");
+    const [strategy, setStrategy] = useState<"all" | "H5" | "H4" | "H6">("all");
     const [hideSkipped, setHideSkipped] = useState(true);
 
     const load = async () => {
@@ -143,9 +168,9 @@ export default function ShadowPage() {
                         <Ghost size={22} /> Gölge Sinyaller
                     </h1>
                     <p style={{ color: "var(--text-muted)", margin: "6px 0 0", fontSize: 13, maxWidth: 820 }}>
-                        Geçmiş testte havuzu brüt olarak yenen ama maliyet sonrası kanıtlanamayan iki bilgi tabanlı sinyal,
-                        burada <strong>gerçek para olmadan</strong> ileriye doğru izleniyor. Kurallar ve geçme ölçütleri
-                        sonuç görülmeden yazıldı; değişmez. Ana ürünün işlemlerine dokunmaz.
+                        Geçmiş testte havuzu brüt olarak yenen ama maliyet sonrası kanıtlanamayan iki bilgi tabanlı sinyal (H4, H5)
+                        ve canlı ürünün sadeleştirilmiş rakibi (H6), burada <strong>gerçek para olmadan</strong> ileriye doğru izleniyor.
+                        Kurallar ve geçme ölçütleri sonuç görülmeden yazıldı; değişmez. Ana ürünün işlemlerine dokunmaz.
                     </p>
                 </div>
                 <button className="btn-secondary" onClick={() => void load()}>
@@ -159,6 +184,19 @@ export default function ShadowPage() {
                     {data.report
                         ? <>Canlı başlangıç <strong>{data.report.live_start}</strong> · son veri {data.report.asof}
                             {data.h4_observation_start && <> · H4 gözlem başlangıcı {data.h4_observation_start} (ilk 30 gün ısınma)</>}
+                            {(() => {
+                                const h6 = (data.last_run?.H6 ?? null) as Record<string, unknown> | null;
+                                if (!h6) return null;
+                                const src = String(h6.universe_source ?? "?");
+                                const bad = src === "static_fallback" || "error" in h6;
+                                return (
+                                    <div style={{ fontSize: 12, marginTop: 4, color: bad ? "var(--danger)" : "var(--text-muted)" }}>
+                                        H6 son koşu: evren {String(h6.universe ?? "—")} hisse (kaynak: {src}) · güncel bar {String(h6.current_bar ?? "—")} ·
+                                        VCE {String(h6.vce ?? "—")} · eklenen {String(h6.added ?? 0)}
+                                        {"error" in h6 && ` · hata: ${String(h6.error)}`}
+                                    </div>
+                                );
+                            })()}
                             <div style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 4 }}>
                                 Terfi otomatik değildir. “TERFİ ADAYI” yalnız gerçek para tartışmasını açar.
                                 “KALDI” durumunda gölge kapatılır. Geç verilen kararlar (açılıştan sonra) ve ısınma dönemi değerlendirmeye girmez.
@@ -173,10 +211,12 @@ export default function ShadowPage() {
                 </div>
             )}
 
+            {data.report?.champion && <ChampionCard c={data.report.champion} h6={data.report.strategies["H6"]} />}
+
             <div className="card">
                 <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
                     <strong>İşlemler</strong>
-                    {(["all", "H5", "H4"] as const).map(s => (
+                    {(["all", "H5", "H4", "H6"] as const).map(s => (
                         <button key={s} className={strategy === s ? "btn-primary" : "btn-secondary"}
                             style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setStrategy(s)}>
                             {s === "all" ? "Tümü" : s}

@@ -1,4 +1,4 @@
-"""Gölge ileri test raporu + ön kayıtlı terfi kapısı (PREREGISTRATION Ek C). SAF fonksiyonlar."""
+"""Gölge ileri test raporu + ön kayıtlı terfi kapısı (PREREGISTRATION Ek C, H6: Ek F). SAF fonksiyonlar."""
 from __future__ import annotations
 
 from datetime import date
@@ -7,12 +7,13 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from .rules import PARAMS
+from .rules import PARAMS, PARAMS_H6
 
 COST = PARAMS["common"]["cost_pct"]
 GATE = {
     "H5": dict(min_closed=150, min_months=6, max_months=12),
     "H4": dict(min_closed=50, min_months=6, max_months=12),
+    "H6": dict(min_closed=PARAMS_H6["min_closed"], min_months=6, max_months=12),
 }
 
 
@@ -105,6 +106,18 @@ def strategy_report(name: str, trades: List[Dict], sessions: List[date], live_st
     out["portfolio_10pct"] = port
     out["iwm_buy_hold_pct"] = None if iwm_bh_pct is None else round(iwm_bh_pct, 2)
     out["gate"] = gate(name, out)
+    return out
+
+
+def champion_report(rows: List[Dict], since: str, cost: float = COST) -> Dict:
+    """Aynı dönemde canlı ürünün paper işlemleri, H6 ile aynı maliyetle (Ek F kıyası)."""
+    pct = pd.Series([float(r["realized_pnl_pct"]) for r in rows], dtype=float)
+    out = dict(since=since, closed=int(len(pct)), cost_pct=cost,
+               label="Canlı ürün (paper işlemleri, manuel eklenenler dahil)")
+    if len(pct):
+        net = pct - cost
+        out.update(gross_mean=round(float(pct.mean()), 3), net_mean=round(float(net.mean()), 3),
+                   win_rate=round(float((net > 0).mean() * 100), 1))
     return out
 
 

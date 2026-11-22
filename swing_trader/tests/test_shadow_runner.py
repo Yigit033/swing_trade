@@ -26,6 +26,15 @@ class FakeSrc:
             self.bars[t] = pd.DataFrame(dict(Date=pd.to_datetime(days), Open=c * 0.999, High=c * 1.01,
                                              Low=c * 0.99, Close=c, Volume=1e6))
         self.filings = {}
+        self.vce = {}                                    # asof → [(ticker, dv20)]
+        self.champion = []
+
+    def live_vce_hits(self, asof):
+        return dict(hits=[dict(ticker=t, dv20=v, close=1.0) for t, v in self.vce.get(asof, [])],
+                    stats=dict(universe=2, fetched=2, current_bar=2, vce=len(self.vce.get(asof, []))))
+
+    def champion_trades(self, since):
+        return self.champion
 
     def candidate_universe(self):
         return {"ABC", "XYZ"}
@@ -148,3 +157,35 @@ def test_lagging_latest_bar_keeps_trade_pending(tmp_path):
     src.bars["ABC"] = b                                                # bar geldi
     runner.run_shadow_daily(now=datetime(2025, 6, 18, 7, 0, tzinfo=NY), ledger=L, src=src)
     assert L.trades("H5")[0]["status"] == "OPEN"
+
+
+def test_h6_lifecycle_fixed_hold_and_champion(tmp_path):
+    """Ek F: canlı VCE isabeti → PENDING → t+1 açılışta OPEN → 8. seans kapanışında CLOSED (stop yok)."""
+    L, src = ShadowLedger(str(tmp_path / "s.db")), FakeSrc()
+    src.vce = {date(2025, 6, 13): [("XYZ", 9e7), ("ABC", 5e7)]}
+    src.champion = [dict(realized_pnl_pct=2.0), dict(realized_pnl_pct=-1.0)]
+    out = runner.run_shadow_daily(now=datetime(2025, 6, 16, 7, 0, tzinfo=NY), ledger=L, src=src)
+    assert out["H6"]["added"] == 2 and L.get_meta("h6_live_start") == "2025-06-13"
+    assert L.get_meta("params_h6_sha256") == rules.PARAMS_H6_SHA256
+    t = {r["ticker"]: r for r in L.trades("H6")}
+    assert t["XYZ"]["status"] == "PENDING" and t["XYZ"]["late_decision"] == 0 and t["XYZ"]["key"] == 9e7
+    runner.run_shadow_daily(now=datetime(2025, 6, 17, 7, 0, tzinfo=NY), ledger=L, src=src)
+    t = L.trades("H6")[0]
+    assert t["status"] == "OPEN" and t["entry_date"] == "2025-06-16" and t["stop"] is None
+    runner.run_shadow_daily(now=datetime(2025, 6, 30, 7, 0, tzinfo=NY), ledger=L, src=src)
+    t = {r["ticker"]: r for r in L.trades("H6")}["XYZ"]
+    assert t["status"] == "CLOSED" and t["exit_reason"] == "TIME" and t["bars"] == 8
+    assert t["exit_date"] == "2025-06-26"     # 16,17,18,20,23,24,25,26 Haz = 8 seans (19 Haz tatil)
+    rep = L.get_meta("report")
+    assert rep["strategies"]["H6"]["closed"] == 2 and rep["strategies"]["H6"]["gate"]["need_closed"] == 100
+    assert rep["champion"]["closed"] == 2 and rep["champion"]["net_mean"] == pytest.approx(0.0)
+    assert rep["params_sha256"] == rules.PARAMS_SHA256          # H4/H5 kilidi etkilenmedi
+
+
+def test_h6_params_change_blocks_only_h6(tmp_path):
+    L, src = ShadowLedger(str(tmp_path / "s.db")), FakeSrc()
+    L.set_meta("params_h6_sha256", "eski-h6")
+    src.vce = {date(2025, 6, 13): [("XYZ", 9e7)]}
+    out = runner.run_shadow_daily(now=datetime(2025, 6, 16, 7, 0, tzinfo=NY), ledger=L, src=src)
+    assert out["H6"]["error"] == "H6_PARAMS_CHANGED_WITHOUT_PREREGISTRATION"
+    assert L.trades("H6") == [] and out["H5"]["added"] == 1     # H5 normal çalışmaya devam

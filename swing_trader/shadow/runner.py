@@ -1,7 +1,7 @@
-"""Gölge sinyallerin günlük koşusu (H4, H5). Ana ürünün işlemlerine DOKUNMAZ.
+"""Gölge sinyallerin günlük koşusu (H4, H5, H6). Ana ürünün işlemlerine DOKUNMAZ.
 
-Sıra: yeni H5 olayları → yeni H4 olayları → bekleyen/açık gölge işlemlerin güncellenmesi →
-rapor + terfi kapısı. Her adım ayrı try/except: biri düşerse diğerleri çalışır.
+Sıra: yeni H6 sinyalleri → yeni H5 olayları → yeni H4 olayları → bekleyen/açık gölge işlemlerin
+güncellenmesi → rapor + terfi kapısı. Her adım ayrı try/except: biri düşerse diğerleri çalışır.
 
 Karar zamanı: sinyal ``decided_at`` ile yazılır. Bu zaman girişin açılışından (09:30 ET)
 sonraysa ``late_decision=1`` — bu işlemler terfi değerlendirmesine girmez (Ek C).
@@ -26,7 +26,7 @@ from ..utils.market_calendar import (
 )
 from . import rules
 from .ledger import ShadowLedger
-from .report import strategy_report
+from .report import champion_report, strategy_report
 
 logger = logging.getLogger(__name__)
 NY = ZoneInfo("America/New_York")
@@ -204,6 +204,27 @@ def _record_h4(ledger, src, universe, evs, F: date, today_et: date, now: datetim
     return added
 
 
+# ── H6 "Sade VCE" (Ek F) ─────────────────────────────────────────────────────
+
+def run_h6(ledger: ShadowLedger, src, asof: date, now: datetime) -> Dict:
+    """Canlı evren + canlı parçalarla VCE (tetikten sonraki katmanlar yok). Ayrı kural kilidi."""
+    if ledger.get_meta("params_h6_sha256") is None:
+        ledger.set_meta("params_h6_sha256", rules.PARAMS_H6_SHA256)
+        ledger.set_meta("h6_live_start", asof.isoformat())
+    if ledger.get_meta("params_h6_sha256") != rules.PARAMS_H6_SHA256:
+        return dict(error="H6_PARAMS_CHANGED_WITHOUT_PREREGISTRATION")
+    res = src.live_vce_hits(asof)
+    added = 0
+    for h in res["hits"]:
+        added += ledger.add_trade(dict(
+            strategy="H6", ticker=h["ticker"], event_date=asof.isoformat(), signal_date=asof.isoformat(),
+            decided_at=_utc_iso(now), key=float(h["dv20"]), status="PENDING",
+            late_decision=_late(now, asof), warmup=0,
+            details=dict(dv20=float(h["dv20"]), close=float(h["close"])),
+        ))
+    return dict(hits=len(res["hits"]), added=added, **res.get("stats", {}))
+
+
 # ── Açık işlemlerin güncellenmesi ────────────────────────────────────────────
 
 def update_trades(ledger: ShadowLedger, src, asof: date) -> Dict:
@@ -226,7 +247,7 @@ def update_trades(ledger: ShadowLedger, src, asof: date) -> Dict:
         if frame is None:
             counts["pending"] += 1
             continue
-        plan = rules.plan_trade(frame, date.fromisoformat(t["signal_date"]))
+        plan = rules.plan_trade(frame, date.fromisoformat(t["signal_date"]), t["strategy"])
         if plan["status"] == "PENDING":
             counts["pending"] += 1
             continue
@@ -245,8 +266,10 @@ def update_trades(ledger: ShadowLedger, src, asof: date) -> Dict:
                 continue
             counts["opened"] += 1
         path = _path(frame, plan)
-        upd = dict(entry_date=entry, entry_price=round(plan["entry_price"], 4), atr=round(plan["atr"], 4),
-                   stop=round(plan["stop"], 4), bars=plan["bars"], mark_price=round(plan["mark_price"], 4),
+        upd = dict(entry_date=entry, entry_price=round(plan["entry_price"], 4),
+                   atr=None if plan["atr"] is None else round(plan["atr"], 4),
+                   stop=None if plan["stop"] is None else round(plan["stop"], 4),       # H6: stop yok
+                   bars=plan["bars"], mark_price=round(plan["mark_price"], 4),
                    mark_date=plan["mark_day"].isoformat(), ret_pct=round(plan["ret_pct"], 4),
                    details=dict(t.get("details") or {}, path=path))
         if plan["status"] == "CLOSED":
@@ -297,10 +320,31 @@ def build_report(ledger: ShadowLedger, src, asof: date) -> Dict:
     except Exception:
         logger.exception("IWM buy-hold failed")
     trades = ledger.trades()
+    strategies = {s: strategy_report(s, trades, sessions, live_start, asof, iwm_bh) for s in ("H5", "H4")}
+    h6_start = ledger.get_meta("h6_live_start")
+    champion = None
+    if h6_start:
+        h6_d = date.fromisoformat(h6_start)
+        h6_bh = _buy_hold(src, "IWM", h6_d, asof) if h6_d != live_start else iwm_bh
+        strategies["H6"] = strategy_report("H6", trades, rules.sessions_between(h6_d, asof), h6_d, asof, h6_bh)
+        try:   # aynı dönemde canlı ürünün kendi paper işlemleri, aynı 50 bps maliyetle
+            champion = champion_report(src.champion_trades(h6_d), since=h6_start)
+        except Exception:
+            logger.exception("Champion report failed")
     return dict(asof=asof.isoformat(), live_start=live_start.isoformat(),
-                params_sha256=rules.PARAMS_SHA256,
-                strategies={s: strategy_report(s, trades, sessions, live_start, asof, iwm_bh)
-                            for s in ("H5", "H4")})
+                params_sha256=rules.PARAMS_SHA256, params_h6_sha256=rules.PARAMS_H6_SHA256,
+                strategies=strategies, champion=champion)
+
+
+def _buy_hold(src, ticker: str, start: date, asof: date) -> Optional[float]:
+    try:
+        bars = src.fetch_bars({ticker}, start - timedelta(days=7), asof)
+        f = _frame(bars, ticker, start, asof)
+        if f is not None and f["Open"].notna().any():
+            return 100 * (float(f["Close"].dropna().iloc[-1]) / float(f["Open"].dropna().iloc[0]) - 1)
+    except Exception:
+        logger.exception("%s buy-hold failed", ticker)
+    return None
 
 
 # ── Giriş noktası ───────────────────────────────────────────────────────────
@@ -329,6 +373,11 @@ def run_shadow_daily(now: Optional[datetime] = None, ledger: Optional[ShadowLedg
             logger.exception("Shadow: universe fetch failed")
             out["universe_error"] = str(e)
             universe = None
+    try:                                  # H6 kendi kilidiyle; aday evrenine (CANDIDATE) muhtaç değil
+        out["H6"] = run_h6(ledger, src, asof, now)
+    except Exception as e:
+        logger.exception("Shadow H6 failed")
+        out["H6"] = dict(error=str(e))
     if universe:
         for name, fn in (("H5", lambda: run_h5(ledger, src, universe, asof, now)),
                          ("H4", lambda: run_h4(ledger, src, universe, today_et, now, deadline=deadline))):
