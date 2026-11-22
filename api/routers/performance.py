@@ -111,6 +111,27 @@ def get_performance(user_id: Optional[str] = Depends(get_current_user_id)):
     total_pnl_pct = round(sum(pnl_pcts), 2)
     avg_pnl_pct = round(sum(pnl_pcts) / len(pnl_pcts), 2) if pnl_pcts else 0
 
+    # Maliyet sonrası (gerçek para) — paper fiyatları maliyetsiz; tek kaynak slippage_bps_per_side.
+    from swing_trader.paper_trading.costs import net_of_cost, round_trip_cost_pct
+    cost_pct = round_trip_cost_pct()
+    net_rows = []
+    for t in valid_closed:
+        n_usd, n_pct = net_of_cost(t, cost_pct)
+        if n_pct is not None:
+            t["net_pnl"], t["net_pnl_pct"] = n_usd, n_pct
+            net_rows.append((n_usd, n_pct))
+    net_wins = sum(1 for _, p in net_rows if p > 0)
+    net_losses = sum(1 for _, p in net_rows if p < 0)
+    net_summary = {
+        "cost_round_trip_pct": round(cost_pct, 3),
+        "net_total_pnl": round(sum(u for u, _ in net_rows), 2),
+        "net_total_pnl_pct": round(sum(p for _, p in net_rows), 2),
+        "net_avg_pnl_pct": round(sum(p for _, p in net_rows) / len(net_rows), 2) if net_rows else 0,
+        "net_wins": net_wins,
+        "net_losses": net_losses,
+        "net_win_rate": round(net_wins / (net_wins + net_losses) * 100, 1) if (net_wins + net_losses) else 0,
+    }
+
     # 30 most-recent closed, sorted newest first
     recent = sorted(
         closed_trades,
@@ -138,6 +159,7 @@ def get_performance(user_id: Optional[str] = Depends(get_current_user_id)):
             "avg_pnl_pct":  avg_pnl_pct,
             "avg_win":      round(avg_win, 2),
             "avg_loss":     round(avg_loss, 2),
+            **net_summary,
         },
         "recent_closed": recent,
         "open_trades":   enriched_open,

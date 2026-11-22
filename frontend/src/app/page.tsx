@@ -78,6 +78,8 @@ export default function DashboardPage() {
   );
 
   const s = perf?.summary;
+  // Gerçek para = maliyet sonrası (backend net alanı yoksa brüte düşer).
+  const netTotal = s ? (s.net_total_pnl_pct ?? s.total_pnl_pct) : 0;
   const openTrades = perf?.open_trades || [];
   const recentClosed = perf?.recent_closed || [];
 
@@ -173,14 +175,14 @@ export default function DashboardPage() {
       {/* Metrics */}
       <div className="metrics-grid">
         <MetricCard
-          label="Total P&L %"
-          value={s ? `${s.total_pnl_pct >= 0 ? "+" : ""}${s.total_pnl_pct.toFixed(2)}%` : "—"}
-          sub={s ? `Avg: ${s.avg_pnl_pct.toFixed(2)}% per trade` : undefined}
-          positive={s ? s.total_pnl_pct >= 0 : undefined}
-          icon={s && s.total_pnl_pct >= 0 ? TrendingUp : TrendingDown}
-          color={s && s.total_pnl_pct >= 0 ? "green" : "red"}
+          label="NET P&L % (maliyet sonrası)"
+          value={s ? `${netTotal >= 0 ? "+" : ""}${netTotal.toFixed(2)}%` : "—"}
+          sub={s ? `Ort. net ${(s.net_avg_pnl_pct ?? s.avg_pnl_pct).toFixed(2)}% / işlem · brüt ${s.total_pnl_pct.toFixed(2)}%` : undefined}
+          positive={s ? netTotal >= 0 : undefined}
+          icon={s && netTotal >= 0 ? TrendingUp : TrendingDown}
+          color={s && netTotal >= 0 ? "green" : "red"}
         />
-        <MetricCard label="Win Rate" value={s ? `${s.win_rate}%` : "—"} sub={s ? `${s.wins}W / ${s.losses}L` : "—"} icon={Target} color="blue" />
+        <MetricCard label="Net Win Rate" value={s ? `${s.net_win_rate ?? s.win_rate}%` : "—"} sub={s ? `${s.net_wins ?? s.wins}W / ${s.net_losses ?? s.losses}L · brüt %${s.win_rate}` : "—"} icon={Target} color="blue" />
         <MetricCard label="Open Trades" value={s ? `${s.open_trades}` : "—"} icon={Activity} color="purple" />
         <MetricCard label="Pending" value={`${pendingCount}`} sub="awaiting confirmation" icon={Clock} color="yellow" />
         <MetricCard label="Avg Win" value={s ? `$${s.avg_win.toFixed(2)}` : "—"} positive={true} icon={TrendingUp} color="green" />

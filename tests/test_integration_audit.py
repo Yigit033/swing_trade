@@ -59,6 +59,32 @@ def test_trades_and_performance_share_partial_marked_pnl(monkeypatch):
     trades._PRICE_CACHE.clear()
 
 
+def test_performance_reports_net_of_trading_cost(monkeypatch):
+    """Paper fiyatları maliyetsiz; ekrandaki para maliyet sonrası olmalı (tek kaynak: ayar)."""
+    from swing_trader.small_cap.settings_config import SmallCapSettings
+    settings = SmallCapSettings().model_copy(update={'slippage_bps_per_side': 25})   # 0.50 gidiş-dönüş
+    monkeypatch.setattr('swing_trader.small_cap.settings_config.load_settings', lambda *a, **k: settings)
+    closed = [dict(id=1, ticker='WIN', status='TIMEOUT', entry_price=100, position_size=10,
+                   realized_pnl=3.0, realized_pnl_pct=0.30, exit_date='2026-10-02'),
+              dict(id=2, ticker='BIG', status='TARGET', entry_price=50, position_size=20,
+                   realized_pnl=100.0, realized_pnl_pct=10.0, exit_date='2026-10-03'),
+              dict(id=3, ticker='REJ', status='REJECTED', entry_price=10, position_size=1,
+                   realized_pnl=0.0, realized_pnl_pct=0.0, exit_date='2026-10-04')]
+    storage = Mock()
+    storage.get_all_trades.return_value = closed
+    storage.get_closed_trades.return_value = closed
+    monkeypatch.setattr(performance, 'get_paper_storage', lambda: storage)
+    body = client_for(performance.router, '/api/performance').get('/api/performance').json()
+    s = body['summary']
+    assert s['cost_round_trip_pct'] == 0.5
+    assert s['win_rate'] == 100.0 and s['total_pnl_pct'] == 10.3          # brüt değişmedi
+    assert s['net_total_pnl_pct'] == pytest.approx(9.3)                    # 0.30−0.50 + 10.0−0.50
+    assert (s['net_wins'], s['net_losses'], s['net_win_rate']) == (1, 1, 50.0)
+    assert s['net_total_pnl'] == pytest.approx(3.0 - 5.0 + 100.0 - 5.0)    # tutar × %0.50
+    rows = {t['ticker']: t for t in body['recent_closed']}
+    assert rows['WIN']['net_pnl_pct'] == pytest.approx(-0.2) and 'net_pnl' not in rows['REJ']
+
+
 def test_execution_warning_survives_update_and_patch_contract(monkeypatch):
     row = dict(id=1, ticker='AAA', status='OPEN', execution_warning='REVIEW_REQUIRED: INTRADAY_ENTRY')
     tracker, storage = Mock(), Mock()

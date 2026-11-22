@@ -1209,9 +1209,9 @@ export default function SettingsPage() {
                     max={30}
                 />
                 <FieldNum
-                    label="Slippage (bps / taraf)"
-                    hint="Backtest / yürütmede alış-satış için baz puan kayması (taraf başına)."
-                    value={num("slippage_bps_per_side", 5)}
+                    label="İşlem maliyeti (bps / taraf)"
+                    hint="Spread + kayma, alış ve satışta ayrı ayrı. Backtest bunu her bacakta düşer; Performans ekranındaki NET kâr/zarar da bunu kullanır. Ölçülmüş proxy ~10 bps/taraf; muhafazakâr küçük-hisse varsayımı 25."
+                    value={num("slippage_bps_per_side", 10)}
                     onChange={(v) => setNum("slippage_bps_per_side", Math.round(v))}
                     step={1}
                     min={0}

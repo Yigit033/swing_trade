@@ -64,6 +64,8 @@ const CumTooltip = ({ active, payload, label }: any) => {
     return null;
 };
 
+const fmtSigned = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
+
 export default function PerformancePage() {
     const { data, isLoading, isError, refetch } = usePerformance();
     const { invalidatePerformance } = useInvalidateQueries();
@@ -93,16 +95,21 @@ export default function PerformancePage() {
     const closed = (data?.recent_closed || []).filter(t =>
         t.status !== "REJECTED" && t.realized_pnl != null && t.realized_pnl_pct != null);
 
+    // Gerçek para = maliyet sonrası. Eski backend net alan göndermezse brüte düşülür.
+    const netPct = (t: Trade) => t.net_pnl_pct ?? t.realized_pnl_pct ?? 0;
+    const netUsd = (t: Trade) => t.net_pnl ?? t.realized_pnl ?? 0;
+    const costPct = s?.cost_round_trip_pct;
+
     const sortedClosed = [...closed].sort((a, b) => (a.exit_date || "").localeCompare(b.exit_date || ""));
     let cumPnl = 0;
     const pnlCurve = sortedClosed.map(t => {
-        cumPnl += t.realized_pnl || 0;
+        cumPnl += netUsd(t);
         return { date: t.exit_date?.slice(5) || "", pnl: cumPnl, trade: t.ticker };
     });
 
     const tradeBars: { ticker: string; pnlPct: number }[] = closed.slice(0, 20).map((t: Trade) => ({
         ticker: t.ticker,
-        pnlPct: t.realized_pnl_pct || 0,
+        pnlPct: netPct(t),
     }));
 
     const profitFactor = s && s.avg_loss < 0
@@ -111,9 +118,9 @@ export default function PerformancePage() {
 
     // Best / worst trade
     const bestTrade = closed.reduce((best: Trade | undefined, t: Trade) =>
-        (t.realized_pnl_pct ?? -Infinity) > (best?.realized_pnl_pct ?? -Infinity) ? t : best, closed[0]);
+        netPct(t) > (best ? netPct(best) : -Infinity) ? t : best, closed[0]);
     const worstTrade = closed.reduce((worst: Trade | undefined, t: Trade) =>
-        (t.realized_pnl_pct ?? Infinity) < (worst?.realized_pnl_pct ?? Infinity) ? t : worst, closed[0]);
+        netPct(t) < (worst ? netPct(worst) : Infinity) ? t : worst, closed[0]);
 
     return (
         <div>
@@ -129,18 +136,20 @@ export default function PerformancePage() {
             {/* KPI grid */}
             <div className="metrics-grid" style={{ marginBottom: 28 }}>
                 <MetricCard
-                    label="İşlem getirileri toplamı % (portföy getirisi değil)"
-                    value={s ? `${(s.total_pnl_pct >= 0 ? "+" : "")}${s.total_pnl_pct.toFixed(2)}%` : "—"}
-                    sub={s ? `Avg: ${s.avg_pnl_pct.toFixed(2)}% / trade` : undefined}
-                    color={s && s.total_pnl_pct >= 0 ? "#22c55e" : "#ef4444"}
+                    label="NET işlem getirileri toplamı % (maliyet sonrası; portföy getirisi değil)"
+                    value={s ? fmtSigned(s.net_total_pnl_pct ?? s.total_pnl_pct) + "%" : "—"}
+                    sub={s ? `Ort. net ${(s.net_avg_pnl_pct ?? s.avg_pnl_pct).toFixed(2)}% / işlem · brüt toplam ${fmtSigned(s.total_pnl_pct)}%${costPct != null ? ` · maliyet ${costPct.toFixed(2)}% / işlem` : ""}` : undefined}
+                    color={s && (s.net_total_pnl_pct ?? s.total_pnl_pct) >= 0 ? "#22c55e" : "#ef4444"}
                     icon={Percent}
                 />
-                <MetricCard label="Win Rate" value={s ? `${s.win_rate}%` : "—"} sub={s ? `${s.wins}W / ${s.losses}L / ${s.breakeven}BE` : undefined} color="#3b82f6" icon={Target} />
-                <MetricCard label="Total P&L $" value={s ? `$${s.total_pnl.toFixed(2)}` : "—"}
-                    color={s && s.total_pnl >= 0 ? "#22c55e" : "#ef4444"} icon={s && s.total_pnl >= 0 ? TrendingUp : TrendingDown} />
-                <MetricCard label="Avg Win" value={s ? `$${s.avg_win.toFixed(2)}` : "—"} color="#22c55e" icon={TrendingUp} />
+                <MetricCard label="Net Win Rate" value={s ? `${s.net_win_rate ?? s.win_rate}%` : "—"}
+                    sub={s ? `${s.net_wins ?? s.wins}W / ${s.net_losses ?? s.losses}L net · brüt %${s.win_rate}` : undefined} color="#3b82f6" icon={Target} />
+                <MetricCard label="NET P&L $ (maliyet sonrası)" value={s ? `$${(s.net_total_pnl ?? s.total_pnl).toFixed(2)}` : "—"}
+                    sub={s ? `Brüt $${s.total_pnl.toFixed(2)}` : undefined}
+                    color={s && (s.net_total_pnl ?? s.total_pnl) >= 0 ? "#22c55e" : "#ef4444"} icon={s && (s.net_total_pnl ?? s.total_pnl) >= 0 ? TrendingUp : TrendingDown} />
+                <MetricCard label="Avg Win (brüt)" value={s ? `$${s.avg_win.toFixed(2)}` : "—"} color="#22c55e" icon={TrendingUp} />
                 <MetricCard label="Closed Trades" value={s ? String(s.closed_trades) : "—"} color="#a855f7" icon={Award} />
-                <MetricCard label="Profit Factor" value={String(profitFactor)} color="#f59e0b" />
+                <MetricCard label="Profit Factor (brüt)" value={String(profitFactor)} color="#f59e0b" />
             </div>
 
             {closed.length === 0 ? (
@@ -156,7 +165,7 @@ export default function PerformancePage() {
                                 <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>🏆 Best Trade</div>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                                     <span style={{ fontWeight: 700, color: "var(--accent)" }}>{bestTrade.ticker}</span>
-                                    <span style={{ color: (bestTrade.realized_pnl_pct ?? 0) >= 0 ? "var(--green)" : "var(--red)", fontWeight: 700 }}>{(bestTrade.realized_pnl_pct ?? 0) >= 0 ? "+" : ""}{bestTrade.realized_pnl_pct?.toFixed(2)}%</span>
+                                    <span style={{ color: netPct(bestTrade) >= 0 ? "var(--green)" : "var(--red)", fontWeight: 700 }}>{fmtSigned(netPct(bestTrade))}% net</span>
                                 </div>
                                 <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 4 }}>{fmtDate(bestTrade.exit_date)}</div>
                             </div>
@@ -166,7 +175,7 @@ export default function PerformancePage() {
                                 <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>💀 Worst Trade</div>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                                     <span style={{ fontWeight: 700, color: "var(--accent)" }}>{worstTrade.ticker}</span>
-                                    <span style={{ color: (worstTrade.realized_pnl_pct ?? 0) >= 0 ? "var(--green)" : "var(--red)", fontWeight: 700 }}>{(worstTrade.realized_pnl_pct ?? 0) >= 0 ? "+" : ""}{worstTrade.realized_pnl_pct?.toFixed(2)}%</span>
+                                    <span style={{ color: netPct(worstTrade) >= 0 ? "var(--green)" : "var(--red)", fontWeight: 700 }}>{fmtSigned(netPct(worstTrade))}% net</span>
                                 </div>
                                 <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 4 }}>{fmtDate(worstTrade.exit_date)}</div>
                             </div>
@@ -175,7 +184,7 @@ export default function PerformancePage() {
 
                     {/* Cumulative PnL curve */}
                     <div className="glass-card chart-card">
-                        <h3 style={{ margin: "0 0 20px", fontSize: "0.95rem", fontWeight: 700 }}>📈 Gösterilen işlemlerin kümülatif P&amp;L’i ($)</h3>
+                        <h3 style={{ margin: "0 0 20px", fontSize: "0.95rem", fontWeight: 700 }}>📈 Gösterilen işlemlerin kümülatif NET P&amp;L’i ($, maliyet sonrası)</h3>
                         <div className="chart-container">
                         <ResponsiveContainer width="100%" height={220} minHeight={180}>
                             <LineChart data={pnlCurve}>
@@ -192,7 +201,7 @@ export default function PerformancePage() {
 
                     {/* Per-trade P&L % bars */}
                     <div className="glass-card chart-card">
-                        <h3 style={{ margin: "0 0 20px", fontSize: "0.95rem", fontWeight: 700 }}>📊 Per-Trade P&L % (Last 20)</h3>
+                        <h3 style={{ margin: "0 0 20px", fontSize: "0.95rem", fontWeight: 700 }}>📊 İşlem başı NET P&L % (son 20)</h3>
                         <div className="chart-container">
                         <ResponsiveContainer width="100%" height={200} minHeight={160}>
                             <BarChart data={tradeBars}>
@@ -222,13 +231,13 @@ export default function PerformancePage() {
                                 <thead>
                                     <tr>
                                         <th>Ticker</th><th>Type</th><th>Entry Date</th><th>Close Date</th>
-                                        <th>Entry $</th><th>Exit $</th><th>P&amp;L $</th><th>P&amp;L %</th>
+                                        <th>Entry $</th><th>Exit $</th><th>Net P&amp;L $</th><th>Net P&amp;L %</th>
                                         <th>Result</th><th>Delete</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {closed.map(t => {
-                                        const pnl = t.realized_pnl || 0;
+                                        const pnl = netUsd(t);
                                         const win = pnl > 0;
                                         const statusColor =
                                             t.status === "TARGET" ? "badge-green" :
@@ -248,8 +257,9 @@ export default function PerformancePage() {
                                                 <td style={{ color: pnl >= 0 ? "var(--green)" : "var(--red)", fontWeight: 600 }}>
                                                     {pnl >= 0 ? "+$" : "-$"}{Math.abs(pnl).toFixed(2)}
                                                 </td>
-                                                <td style={{ color: pnl >= 0 ? "var(--green)" : "var(--red)" }}>
-                                                    {pnl >= 0 ? "+" : ""}{t.realized_pnl_pct?.toFixed(2) ?? "—"}%
+                                                <td style={{ color: pnl >= 0 ? "var(--green)" : "var(--red)" }}
+                                                    title={`Brüt ${fmtSigned(t.realized_pnl_pct ?? 0)}% · $${(t.realized_pnl ?? 0).toFixed(2)}`}>
+                                                    {fmtSigned(netPct(t))}%
                                                 </td>
                                                 <td><span className={`badge ${statusColor}`}>{t.status}</span></td>
                                                 <td>

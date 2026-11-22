@@ -181,7 +181,10 @@ class SmallCapSettings(BaseModel):
     max_gap_up_pct: float = Field(default=5.0, ge=0.0, le=30.0)
     max_gap_down_pct: float = Field(default=7.0, ge=0.0, le=30.0)
     cooldown_days: int = Field(default=5, ge=0, le=30)
-    slippage_bps_per_side: int = Field(default=5, ge=0, le=100)
+    # İşlem maliyeti (spread + kayma), kenar başına. Backtest her bacakta düşer; paper ekranındaki
+    # NET P/L de bunu kullanır (paper_trading/costs.py). 2026-11-22: 5 → 10 — ölçülmüş proxy
+    # (taban 8 bps + likidite/ATR eki) gidiş-dönüş ~0.19 puan verdi; 5 ölçümsüz bir varsayımdı.
+    slippage_bps_per_side: int = Field(default=10, ge=0, le=100)
 
     # --- Regime-driven scan floors (scanner / backtest) ---
     regime_thresholds: RegimeThresholds = Field(default_factory=RegimeThresholds)

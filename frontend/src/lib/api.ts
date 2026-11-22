@@ -109,6 +109,8 @@ export interface Trade {
     exit_price?: number;
     realized_pnl?: number;
     realized_pnl_pct?: number;
+    net_pnl?: number;       // maliyet sonrası (yalnız /api/performance)
+    net_pnl_pct?: number;
     notes?: string;
     trailing_stop?: number;
     initial_stop?: number;
@@ -225,6 +227,14 @@ export interface PerformanceSummary {
     avg_pnl_pct: number;
     avg_win: number;
     avg_loss: number;
+    // Maliyet sonrası (gerçek para): gidiş-dönüş maliyet = 2 × slippage_bps_per_side
+    cost_round_trip_pct?: number;
+    net_total_pnl?: number;
+    net_total_pnl_pct?: number;
+    net_avg_pnl_pct?: number;
+    net_wins?: number;
+    net_losses?: number;
+    net_win_rate?: number;
 }
 
 // ---- API calls ----
@@ -718,9 +728,16 @@ export type ShadowTrade = {
     warmup: number | null;
 };
 
+// Aynı dönemde canlı ürünün paper işlemleri (H6 ile aynı 50 bps maliyet) — Ek F kıyası
+export type ShadowChampion = {
+    since: string; closed: number; cost_pct: number; label: string;
+    gross_mean?: number; net_mean?: number; win_rate?: number;
+};
+
 export type ShadowData = {
-    report: { asof: string; live_start: string; params_sha256: string;
-              strategies: Record<string, ShadowStrategyReport> } | null;
+    report: { asof: string; live_start: string; params_sha256: string; params_h6_sha256?: string;
+              strategies: Record<string, ShadowStrategyReport>;
+              champion?: ShadowChampion | null } | null;
     last_run: Record<string, unknown> | null;
     live_start: string | null;
     h4_observation_start: string | null;
