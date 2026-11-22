@@ -35,3 +35,7 @@ data/*.csv
 *.md
 !README.md
 *.bat
+
+# Araştırma verisi ve lab kodu production imajına girmez (GB'larca parquet/zip)
+output/
+lab/
