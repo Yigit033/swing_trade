@@ -7,7 +7,8 @@ import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter
+from api.auth import require_user
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from api.utils import sanitize_for_json
@@ -28,7 +29,7 @@ class BacktestRequest(BaseModel):
     tickers: Optional[List[str]] = None   # None = auto Finviz; [] invalid — rejected below
 
 
-@router.post("/smallcap")
+@router.post("/smallcap", dependencies=[Depends(require_user)])
 def run_smallcap_backtest(body: BacktestRequest):
     """
     Run SmallCap walk-forward backtest.

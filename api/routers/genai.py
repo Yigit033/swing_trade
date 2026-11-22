@@ -6,7 +6,8 @@ GET  /api/genai/weekly-report - weekly performance report (text)
 """
 
 import logging
-from fastapi import APIRouter
+from api.auth import require_user
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
 from api.deps import get_paper_storage
@@ -26,7 +27,7 @@ class SignalBriefRequest(BaseModel):
     signal: dict
 
 
-@router.post("/chat")
+@router.post("/chat", dependencies=[Depends(require_user)])
 async def strategy_chat(body: ChatRequest):
     """Free-form strategy chat using trade history as context."""
     storage = get_paper_storage()
@@ -76,7 +77,7 @@ async def strategy_chat(body: ChatRequest):
         }
 
 
-@router.post("/signal-brief")
+@router.post("/signal-brief", dependencies=[Depends(require_user)])
 async def signal_brief(body: SignalBriefRequest):
     """Generate AI commentary for a specific signal."""
     try:
@@ -147,7 +148,7 @@ async def model_status():
     }
 
 
-@router.post("/train")
+@router.post("/train", dependencies=[Depends(require_user)])
 async def train_model():
     """Train/update the ML signal quality predictor model."""
     try:
@@ -170,7 +171,7 @@ class PredictRequest(BaseModel):
     max_hold_days: int = 7
 
 
-@router.post("/predict")
+@router.post("/predict", dependencies=[Depends(require_user)])
 async def predict_signal(body: PredictRequest):
     """Predict signal quality using the trained ML model."""
     try:

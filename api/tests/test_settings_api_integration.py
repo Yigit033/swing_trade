@@ -25,13 +25,17 @@ def isolated_settings_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> P
 
 
 @pytest.fixture()
-def api_client(isolated_settings_file: Path) -> TestClient:
+def api_client(isolated_settings_file: Path):
     from api.deps import invalidate_smallcap_engine_cache
 
     invalidate_smallcap_engine_cache()
+    from api.auth import verify_token
     from api.main import app
 
-    return TestClient(app)
+    # 2026-11-22: ayar yazma giriş istiyor (require_user) — testte giriş yapmış kullanıcı
+    app.dependency_overrides[verify_token] = lambda: {"sub": "test-owner", "email": "owner@example.com"}
+    yield TestClient(app)
+    app.dependency_overrides.pop(verify_token, None)
 
 
 def test_api_settings_get_returns_schema(api_client: TestClient) -> None:

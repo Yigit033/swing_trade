@@ -8,7 +8,8 @@ with the exact rejection stage reported for each ticker.
 
 import logging
 from datetime import datetime
-from fastapi import APIRouter
+from api.auth import require_user
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import List
 
@@ -180,7 +181,7 @@ def _safe_5d(df) -> float:
     return 0.0
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_user)])
 def lookup_tickers(body: LookupRequest):
     """Analyze tickers with full stage-by-stage diagnostic breakdown.
 

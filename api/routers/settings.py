@@ -8,7 +8,9 @@ POST /api/settings/reset and /api/settings/reset/ — reset to defaults.
 import logging
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from api.auth import require_user
 from pydantic import ValidationError
 
 from api.deps import invalidate_smallcap_engine_cache
@@ -61,8 +63,8 @@ def _put_smallcap_settings(body: Dict[str, Any]):
     )
 
 
-router.add_api_route("", _put_smallcap_settings, methods=["PUT"], summary="Update small-cap settings (merge)")
-router.add_api_route("/", _put_smallcap_settings, methods=["PUT"], include_in_schema=False)
+router.add_api_route("", _put_smallcap_settings, methods=["PUT"], summary="Update small-cap settings (merge)", dependencies=[Depends(require_user)])
+router.add_api_route("/", _put_smallcap_settings, methods=["PUT"], include_in_schema=False, dependencies=[Depends(require_user)])
 
 
 def _reset_smallcap_settings():
@@ -85,5 +87,5 @@ def _reset_smallcap_settings():
     return sanitize_for_json({"ok": True, "settings": s.model_dump(mode="json")})
 
 
-router.add_api_route("/reset", _reset_smallcap_settings, methods=["POST"], summary="Reset small-cap settings to defaults")
-router.add_api_route("/reset/", _reset_smallcap_settings, methods=["POST"], include_in_schema=False)
+router.add_api_route("/reset", _reset_smallcap_settings, methods=["POST"], summary="Reset small-cap settings to defaults", dependencies=[Depends(require_user)])
+router.add_api_route("/reset/", _reset_smallcap_settings, methods=["POST"], include_in_schema=False, dependencies=[Depends(require_user)])

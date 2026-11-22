@@ -164,3 +164,21 @@ def get_current_user_id(
     if payload is None:
         return None
     return payload.get("sub")
+
+
+# ── Yazma / maliyetli uçlar (2026-11-22 güvenlik açığı) ───────────────────────
+# Ayarlar (kaydet/sıfırla), GenAI (LLM kredisi + model eğitimi), backtest ve hisse sorgulama girişsiz
+# çağrılabiliyordu: adresi bilen herkes canlı ürünü değiştirebilir, otomatik taramayı kapatabilir,
+# LLM kredisini harcayabilirdi. Artık giriş zorunlu (auth yapılandırılmışsa). ADMIN_EMAILS (virgüllü)
+# tanımlanırsa yalnız o hesaplar — Supabase'de kayıt herkese açıksa önerilir.
+ADMIN_EMAILS = {e.strip().lower() for e in (os.environ.get("ADMIN_EMAILS") or "").split(",") if e.strip()}
+
+
+def require_user(payload: Optional[dict] = Depends(verify_token)) -> Optional[dict]:
+    """Giriş zorunlu (verify_token başlıksız/geçersiz tokende 401 verir). Yerel/test: auth kapalı → None."""
+    if payload is None:
+        return None
+    if ADMIN_EMAILS and str(payload.get("email") or "").lower() not in ADMIN_EMAILS:
+        logger.warning("Auth 403: %s is not in ADMIN_EMAILS", payload.get("sub"))
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+    return payload

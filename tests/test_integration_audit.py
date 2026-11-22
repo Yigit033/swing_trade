@@ -147,3 +147,56 @@ def test_performance_filters_by_strategy(monkeypatch):
     legacy = c.get('/api/performance', params={'strategy': 'LEGACY'}).json()
     assert [t['ticker'] for t in legacy['recent_closed']] == ['OLD']
     assert c.get('/api/performance').json()['summary']['closed_trades'] == 2
+
+
+@pytest.mark.parametrize('method,path', [('put', '/api/settings'), ('post', '/api/settings/reset'),
+                                         ('post', '/api/genai/chat'), ('post', '/api/genai/train'),
+                                         ('post', '/api/backtest/smallcap'), ('post', '/api/lookup')])
+def test_write_and_costly_endpoints_require_login(monkeypatch, method, path):
+    """2026-11-22: bu uçlar girişsiz çağrılabiliyordu (canlı ayarları değiştirme / LLM kredisi)."""
+    import api.auth as auth
+    from api.routers import settings as settings_router, genai, backtest, lookup
+    monkeypatch.setattr(auth, 'SUPABASE_JWT_SECRET', 'configured')       # production: auth açık
+    app = FastAPI()                                                          # api/main.py ile aynı önekler
+    app.include_router(settings_router.router)
+    app.include_router(genai.router, prefix='/api/genai')
+    app.include_router(backtest.router, prefix='/api/backtest')
+    app.include_router(lookup.router, prefix='/api/lookup')
+    c = TestClient(app)
+    assert getattr(c, method)(path, json={}).status_code == 401
+    assert c.get('/api/settings').status_code == 200                       # okuma açık kalır
+
+
+def test_admin_allowlist_blocks_other_accounts(monkeypatch):
+    import api.auth as auth
+    from api.routers import settings as settings_router
+    monkeypatch.setattr(auth, 'ADMIN_EMAILS', {'owner@example.com'})
+    app = FastAPI()
+    app.include_router(settings_router.router)
+    app.dependency_overrides[auth.verify_token] = lambda: {'sub': 'u2', 'email': 'stranger@example.com'}
+    assert TestClient(app).put('/api/settings', json={}).status_code == 403
+
+
+def test_midas_orders_buy_sell_hold():
+    from datetime import date as _d
+    from api.routers.orders import build_orders
+    rows = [dict(id=1, ticker='NEW', status='PENDING', strategy='H6S', entry_date='2026-11-20 16:40',
+                 signal_price=20.0, entry_price=20.0, position_size=50, atr=1.0),
+            dict(id=2, ticker='EXIT', status='OPEN', strategy='H6S', entry_date='2026-11-13T14:30:00Z',
+                 entry_price=30.0, position_size=33, stop_loss=27.0, atr=1.2),
+            dict(id=3, ticker='KEEP', status='OPEN', strategy='H6S', entry_date='2026-11-20T14:30:00Z',
+                 entry_price=10.0, position_size=100, stop_loss=9.0, atr=0.4),
+            dict(id=4, ticker='OLD', status='OPEN', strategy=None, entry_date='2026-11-20T14:30:00Z',
+                 entry_price=5.0, position_size=10, stop_loss=4.0),
+            dict(id=5, ticker='TODAY', status='OPEN', strategy='H6S', entry_date='2026-11-12T14:30:00Z',
+                 entry_price=40.0, position_size=25, stop_loss=36.0, atr=1.6)]
+    o = build_orders(rows, _d(2026, 11, 23), 10000.0)                     # Pazartesi
+    assert o['session'] == '2026-11-23'
+    assert o['buy'] == [dict(ticker='NEW', shares=50, est_price=20.0, est_cost=1000.0, stop_distance=2.5,
+                             est_stop=17.5, buy_day='2026-11-23', sell_day='2026-12-03', overdue=False, trade_id=1)]
+    # 12 Kas girişi: 12,13,16,17,18,19,20,23 → 8. seans bugün → kapanışta SAT
+    assert [(r['ticker'], r['sell_day']) for r in o['sell']] == [('TODAY', '2026-11-23')]
+    # 13 Kas girişi → 8. seans 24 Kas (TUT); 20 Kas girişi → 2 Ara (TUT; 26 Kas Şükran Günü tatil)
+    assert [(r['ticker'], r['sell_day']) for r in o['hold']] == [('EXIT', '2026-11-24'), ('KEEP', '2026-12-02')]
+    assert 'OLD' not in {r['ticker'] for k in ('buy', 'sell', 'hold') for r in o[k]}
+    assert o['held'] == 1000 + 990 + 1000 + 1000 and o['free'] == 10000 - 3990
