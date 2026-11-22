@@ -1,0 +1,236 @@
+"use client";
+/**
+ * GÖLGE SİNYALLER — H4 (içeriden alım kümesi) ve H5 (bilanço sürprizi) ileri testi.
+ *
+ * Gerçek para YOK; ana ürünün paper işlemlerinden ayrı defter. Kurallar ve terfi kapısı
+ * sonuç görülmeden yazıldı (lab/PREREGISTRATION.md Ek A + Ek C). Terfi otomatik değildir.
+ */
+import { useEffect, useMemo, useState } from "react";
+import { getShadow, type ShadowData, type ShadowStrategyReport, type ShadowTrade } from "@/lib/api";
+import { Ghost, Info, RefreshCw } from "lucide-react";
+
+const pct = (v: number | null | undefined, d = 2) =>
+    v === null || v === undefined ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(d)}%`;
+const tone = (v: number | null | undefined) =>
+    v === null || v === undefined ? "var(--text-muted)" : v > 0 ? "var(--success)" : v < 0 ? "var(--danger)" : "var(--text-muted)";
+
+const NAMES: Record<string, { title: string; desc: string }> = {
+    H5: {
+        title: "H5 · Bilanço sürprizi",
+        desc: "EPS sürprizi ≥ %10 ve tepki günü yükselen kapanış → ertesi açılış, 2.5×ATR stop, 20 seans.",
+    },
+    H4: {
+        title: "H4 · İçeriden alım kümesi",
+        desc: "30 günde ≥2 yönetici/direktör, ≥100K$ açık piyasa alımı (SEC Form 4) → ertesi açılış, 2.5×ATR stop, 20 seans.",
+    },
+};
+
+const GATE_COLOR: Record<string, string> = {
+    "TOPLANIYOR": "var(--text-muted)",
+    "BELİRSİZ": "var(--warning, #f59e0b)",
+    "TERFİ ADAYI": "var(--success)",
+    "KALDI": "var(--danger)",
+};
+
+const STATUS_LABEL: Record<string, string> = {
+    PENDING: "⏳ Girişi bekliyor",
+    OPEN: "🟢 Açık",
+    CLOSED: "✅ Kapandı",
+    SKIPPED: "⏭️ Atlandı",
+};
+
+const REASON_LABEL: Record<string, string> = {
+    NOT_IN_POOL: "Havuz dışı (fiyat/hacim/cap)",
+    NOT_IN_UNIVERSE: "NASDAQ/NYSE hisse senedi değil",
+    TICKER_BUSY: "Aynı hissede açık gölge pozisyon",
+    NO_ENTRY_BAR: "Giriş günü bar yok",
+    ATR_UNAVAILABLE: "ATR hesaplanamadı",
+    NO_PRICE_DATA: "Fiyat verisi yok",
+    NO_SIGNAL_BAR: "Sinyal günü bar yok",
+    STOP: "Stop",
+    TIME: "20 seans doldu",
+};
+
+function Check({ ok, label }: { ok: boolean; label: string }) {
+    return (
+        <div style={{ display: "flex", gap: 6, fontSize: 12, color: ok ? "var(--success)" : "var(--text-muted)" }}>
+            <span>{ok ? "✔" : "○"}</span>
+            <span>{label}</span>
+        </div>
+    );
+}
+
+function StrategyCard({ r }: { r: ShadowStrategyReport }) {
+    const meta = NAMES[r.strategy] || { title: r.strategy, desc: "" };
+    const g = r.gate;
+    const color = GATE_COLOR[g.status] || "var(--text-muted)";
+    const ci = r.net_ci95 || [null, null];
+    return (
+        <div className="card" style={{ borderLeft: `3px solid ${color}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                <strong>{meta.title}</strong>
+                <span style={{ color, fontWeight: 700, fontSize: 13 }}>{g.status}</span>
+            </div>
+            <div style={{ color: "var(--text-muted)", fontSize: 12, margin: "6px 0 12px" }}>{meta.desc}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 12 }}>
+                <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>Net ort. (50 bps)</div>
+                    <div style={{ fontWeight: 700, color: tone(r.net_mean) }}>{pct(r.net_mean)}</div></div>
+                <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>%95 güven aralığı</div>
+                    <div style={{ fontWeight: 600 }}>{ci[0] === null ? "—" : `${pct(ci[0])} … ${pct(ci[1])}`}</div></div>
+                <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>Kazanma oranı</div>
+                    <div style={{ fontWeight: 600 }}>{r.win_rate === undefined ? "—" : `%${r.win_rate.toFixed(0)}`}</div></div>
+                <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>IWM’e göre (işlem başı)</div>
+                    <div style={{ fontWeight: 600, color: tone(r.excess_iwm_mean) }}>{pct(r.excess_iwm_mean)}</div></div>
+                <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>Portföy (%10/işlem)</div>
+                    <div style={{ fontWeight: 600, color: tone(r.portfolio_10pct?.total_pct) }}>{pct(r.portfolio_10pct?.total_pct, 1)}</div></div>
+                <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>IWM al-tut</div>
+                    <div style={{ fontWeight: 600, color: tone(r.iwm_buy_hold_pct) }}>{pct(r.iwm_buy_hold_pct, 1)}</div></div>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
+                Kapanan {r.closed} · değerlendirmeye giren {r.eligible_closed} / {g.need_closed} · {r.months_live.toFixed(1)} / {g.need_months} ay
+                {r.late_decisions > 0 && ` · geç karar ${r.late_decisions}`}
+                {r.warmup > 0 && ` · ısınma ${r.warmup}`}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 4 }}>
+                <Check ok={g.F1_sample} label={`F1 örneklem: ≥${g.need_months} ay ve ≥${g.need_closed} işlem`} />
+                <Check ok={g.F2_net_ci_gt0} label="F2 net ort. > 0 ve güven aralığı alt sınırı > 0" />
+                <Check ok={g.F3_beats_iwm} label="F3 portföy IWM al-tut'u geçiyor" />
+                <Check ok={g.F4_maxdd_lt35} label="F4 maks. düşüş < %35" />
+            </div>
+        </div>
+    );
+}
+
+export default function ShadowPage() {
+    const [data, setData] = useState<ShadowData | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState("");
+    const [strategy, setStrategy] = useState<"all" | "H5" | "H4">("all");
+    const [hideSkipped, setHideSkipped] = useState(true);
+
+    const load = async () => {
+        setLoading(true);
+        setError("");
+        try {
+            setData(await getShadow());
+        } catch (e: unknown) {
+            const ax = e as { response?: { data?: { detail?: string } }; message?: string };
+            setError(ax?.response?.data?.detail || ax?.message || "Gölge verisi alınamadı");
+        } finally {
+            setLoading(false);
+        }
+    };
+    useEffect(() => { void load(); }, []);
+
+    const rows = useMemo(() => {
+        let list: ShadowTrade[] = data?.trades || [];
+        if (strategy !== "all") list = list.filter(t => t.strategy === strategy);
+        if (hideSkipped) list = list.filter(t => t.status !== "SKIPPED");
+        return list;
+    }, [data, strategy, hideSkipped]);
+
+    if (loading) return <div className="card">Gölge sinyaller yükleniyor…</div>;
+    if (error) return <div className="card" style={{ color: "var(--danger)" }}>{error}</div>;
+    if (!data) return null;
+
+    const strategies = data.report ? Object.values(data.report.strategies) : [];
+
+    return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+                <div>
+                    <h1 style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
+                        <Ghost size={22} /> Gölge Sinyaller
+                    </h1>
+                    <p style={{ color: "var(--text-muted)", margin: "6px 0 0", fontSize: 13, maxWidth: 820 }}>
+                        Geçmiş testte havuzu brüt olarak yenen ama maliyet sonrası kanıtlanamayan iki bilgi tabanlı sinyal,
+                        burada <strong>gerçek para olmadan</strong> ileriye doğru izleniyor. Kurallar ve geçme ölçütleri
+                        sonuç görülmeden yazıldı; değişmez. Ana ürünün işlemlerine dokunmaz.
+                    </p>
+                </div>
+                <button className="btn-secondary" onClick={() => void load()}>
+                    <RefreshCw size={15} style={{ marginRight: 6 }} /> Yenile
+                </button>
+            </div>
+
+            <div className="card" style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <Info size={18} style={{ color: "var(--accent)", flexShrink: 0, marginTop: 2 }} />
+                <div style={{ fontSize: 13 }}>
+                    {data.report
+                        ? <>Canlı başlangıç <strong>{data.report.live_start}</strong> · son veri {data.report.asof}
+                            {data.h4_observation_start && <> · H4 gözlem başlangıcı {data.h4_observation_start} (ilk 30 gün ısınma)</>}
+                            <div style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 4 }}>
+                                Terfi otomatik değildir. “TERFİ ADAYI” yalnız gerçek para tartışmasını açar.
+                                “KALDI” durumunda gölge kapatılır. Geç verilen kararlar (açılıştan sonra) ve ısınma dönemi değerlendirmeye girmez.
+                            </div></>
+                        : "Gölge koşusu henüz çalışmadı. İlk sabah cron'undan sonra burada veri görünecek."}
+                </div>
+            </div>
+
+            {strategies.length > 0 && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 16 }}>
+                    {strategies.map(r => <StrategyCard key={r.strategy} r={r} />)}
+                </div>
+            )}
+
+            <div className="card">
+                <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+                    <strong>İşlemler</strong>
+                    {(["all", "H5", "H4"] as const).map(s => (
+                        <button key={s} className={strategy === s ? "btn-primary" : "btn-secondary"}
+                            style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setStrategy(s)}>
+                            {s === "all" ? "Tümü" : s}
+                        </button>
+                    ))}
+                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, cursor: "pointer" }}>
+                        <input type="checkbox" checked={hideSkipped} onChange={e => setHideSkipped(e.target.checked)} />
+                        Atlananları gizle
+                    </label>
+                    <span style={{ color: "var(--text-muted)", fontSize: 12 }}>{rows.length} / {data.total_trades}</span>
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                    <table className="data-table" style={{ width: "100%", fontSize: 13 }}>
+                        <thead>
+                            <tr>
+                                <th>Strateji</th><th>Hisse</th><th>Sinyal</th><th>Durum</th><th>Giriş</th>
+                                <th>Stop</th><th>Çıkış / değerleme</th><th>Getiri</th><th>Net</th><th>IWM</th><th>Not</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {rows.map(t => (
+                                <tr key={t.id}>
+                                    <td>{t.strategy}</td>
+                                    <td style={{ fontWeight: 600 }}>{t.ticker}</td>
+                                    <td>{t.signal_date}</td>
+                                    <td>{STATUS_LABEL[t.status] || t.status}</td>
+                                    <td>{t.entry_date ? `${t.entry_date} · $${(t.entry_price ?? 0).toFixed(2)}` : "—"}</td>
+                                    <td>{t.stop ? `$${t.stop.toFixed(2)}` : "—"}</td>
+                                    <td>{t.exit_date
+                                        ? `${t.exit_date} · $${(t.exit_price ?? 0).toFixed(2)}`
+                                        : t.mark_date ? `${t.mark_date} · $${(t.mark_price ?? 0).toFixed(2)}` : "—"}</td>
+                                    <td style={{ color: tone(t.ret_pct) }}>{pct(t.ret_pct)}</td>
+                                    <td style={{ color: tone(t.net_pct) }}>{pct(t.net_pct)}</td>
+                                    <td style={{ color: tone(t.iwm_ret) }}>{pct(t.iwm_ret)}</td>
+                                    <td style={{ color: "var(--text-muted)", fontSize: 12 }}>
+                                        {[t.reason && (REASON_LABEL[t.reason] || t.reason),
+                                          t.exit_reason && (REASON_LABEL[t.exit_reason] || t.exit_reason),
+                                          t.late_decision ? "geç karar" : null,
+                                          t.warmup ? "ısınma" : null,
+                                          t.strategy === "H5" && t.key != null ? `sürpriz %${t.key.toFixed(0)}` : null,
+                                          t.strategy === "H4" && t.key != null ? `$${Math.round(t.key / 1000)}K alım` : null,
+                                        ].filter(Boolean).join(" · ") || "—"}
+                                    </td>
+                                </tr>
+                            ))}
+                            {rows.length === 0 && (
+                                <tr><td colSpan={11} style={{ color: "var(--text-muted)", textAlign: "center", padding: 18 }}>
+                                    Henüz gölge işlem yok.
+                                </td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+}

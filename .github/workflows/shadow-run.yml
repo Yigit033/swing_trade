@@ -1,0 +1,72 @@
+# Gölge sinyaller (H4 içeriden alım, H5 bilanço sürprizi) — günlük ileri test koşusu
+#
+# NEDEN AYRI: H4 her gün ~1.200 SEC Form 4 dosyası okur (SEC hız sınırında 2–3 dk/gün).
+# Ana daily-run'ı (onay → çıkış → tarama) yavaşlatmasın, biri düşerse diğeri etkilenmesin.
+#
+# NEDEN SABAH: kararın girişin açılışından (09:30 ET) ÖNCE verilmesi gerekir. Form 4'ler
+# F günü 22:00 ET'ye kadar yayımlanır, girişi F'den sonraki ilk açılıştır. Açılıştan
+# sonra verilen kararlar `late_decision` işaretlenir ve terfi değerlendirmesine girmez.
+#   11:15 UTC = 07:15 EDT (yaz) / 06:15 EST (kış)
+#   12:15 UTC = 08:15 EDT (yaz) / 07:15 EST (kış)   ← gecikmeli cron için yedek
+# Çift koşma sorun değil: kayıtlar (strateji, hisse, olay günü) ile idempotent.
+#
+# GEREKLİ SECRET: CRON_SECRET (daily-run ile aynı).
+# İSTEĞE BAĞLI fly secret: SEC_USER_AGENT — SEC adil kullanım politikası tanımlayıcı
+# bir User-Agent ister (ör. "SirketAdi iletisim@alanadi.com"). Verilmezse genel bir değer kullanılır.
+
+name: Shadow Run
+
+on:
+  schedule:
+    - cron: '15 11 * * 1-5'
+    - cron: '15 12 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  shadow-run:
+    name: Trigger shadow forward test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Wake machine, then call shadow daily-run
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::CRON_SECRET repo secret'ı tanımlı değil"
+            exit 1
+          fi
+
+          HEALTH="https://swing-trade.fly.dev/api/health"
+          URL="https://swing-trade.fly.dev/api/shadow/daily-run"
+
+          ready=0
+          for i in 1 2 3 4 5 6 7 8; do
+            body="$(curl -sS --max-time 45 --connect-timeout 20 "$HEALTH" || true)"
+            if echo "$body" | grep -q '"routers_ready": *true'; then
+              ready=1
+              break
+            fi
+            sleep $((5 + i * 5))
+          done
+          [ "$ready" = "1" ] || echo "::warning::routers_ready görülmedi — yine de denenecek"
+
+          for attempt in 1 2 3; do
+            HTTP=$(curl -sS -o response.json -w '%{http_code}' \
+                   --max-time 900 --connect-timeout 60 \
+                   -X POST "$URL" \
+                   -H "X-Cron-Secret: ${CRON_SECRET}" \
+                   -H 'Content-Type: application/json' || echo "000")
+            if [ "$HTTP" = "200" ]; then
+              echo "OK ($HTTP)"
+              cat response.json
+              exit 0
+            fi
+            echo "::warning::HTTP $HTTP"
+            [ -s response.json ] && cat response.json || true
+            [ "$attempt" -lt 3 ] && sleep $((30 * attempt))
+          done
+
+          echo "::error::Gölge koşusu başarısız"
+          exit 1

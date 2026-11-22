@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
     LayoutDashboard, Search, TrendingUp, Clock, BarChart3,
     LineChart, MessageSquare, Zap, FlaskConical, X, LogOut, Settings, BookOpen,
-    Target, PanelLeftClose, PanelLeftOpen,
+    Target, PanelLeftClose, PanelLeftOpen, Ghost,
 } from "lucide-react";
 import { createSupabaseClient } from "@/lib/supabase/client";
 
@@ -26,6 +26,7 @@ const navItems = [
     { href: "/pending", label: "Pending", icon: Clock },
     { href: "/performance", label: "Performance", icon: BarChart3 },
     { href: "/edge", label: "Sinyal Karnesi", icon: Target },
+    { href: "/shadow", label: "Gölge Sinyaller", icon: Ghost },
     { href: "/charts", label: "Charts", icon: LineChart },
     { href: "/backtest", label: "Backtest", icon: FlaskConical },
     { href: "/settings", label: "Ayarlar", icon: Settings },

@@ -101,3 +101,6 @@ tests
 !/tests/test_integration_audit.py
 !/swing_trader/tests/
 !/swing_trader/tests/test_tracker_trail_replay.py
+# Gölge sinyal (H4/H5) kuralları + lab paritesi + koşucu uçtan uca (2026-11-22)
+!/swing_trader/tests/test_shadow_rules.py
+!/swing_trader/tests/test_shadow_runner.py

@@ -662,3 +662,71 @@ export type ScannedMember = {
 export const getEdgeTracking = (refresh = false) =>
     api.get<EdgeTracking>(`/api/scanner/smallcap/edge-tracking?refresh=${refresh}`,
         { timeout: 180000 }).then((r) => r.data);
+
+// ── Gölge sinyaller (H4 içeriden alım, H5 bilanço sürprizi) — ileri test, gerçek para yok ──
+export type ShadowGate = {
+    status: "TOPLANIYOR" | "TERFİ ADAYI" | "KALDI" | "BELİRSİZ" | string;
+    F1_sample: boolean;
+    F2_net_ci_gt0: boolean;
+    F3_beats_iwm: boolean;
+    F4_maxdd_lt35: boolean;
+    need_closed: number;
+    need_months: number;
+};
+
+export type ShadowStrategyReport = {
+    strategy: "H4" | "H5" | string;
+    counts: Record<string, number>;
+    closed: number;
+    eligible_closed: number;
+    late_decisions: number;
+    warmup: number;
+    months_live: number;
+    net_mean?: number;
+    net_median?: number;
+    win_rate?: number;
+    net_ci95?: [number | null, number | null];
+    excess_iwm_mean?: number;
+    portfolio_10pct: { total_pct: number; max_dd_pct: number; taken: number };
+    iwm_buy_hold_pct: number | null;
+    gate: ShadowGate;
+};
+
+export type ShadowTrade = {
+    id: number;
+    strategy: string;
+    ticker: string;
+    event_date: string;
+    signal_date: string;
+    decided_at: string;
+    key: number | null;
+    status: "PENDING" | "OPEN" | "CLOSED" | "SKIPPED" | string;
+    reason: string | null;
+    entry_date: string | null;
+    entry_price: number | null;
+    stop: number | null;
+    exit_date: string | null;
+    exit_price: number | null;
+    exit_reason: string | null;
+    bars: number | null;
+    ret_pct: number | null;
+    net_pct: number | null;
+    iwm_ret: number | null;
+    mark_price: number | null;
+    mark_date: string | null;
+    late_decision: number | null;
+    warmup: number | null;
+};
+
+export type ShadowData = {
+    report: { asof: string; live_start: string; params_sha256: string;
+              strategies: Record<string, ShadowStrategyReport> } | null;
+    last_run: Record<string, unknown> | null;
+    live_start: string | null;
+    h4_observation_start: string | null;
+    trades: ShadowTrade[];
+    total_trades: number;
+};
+
+export const getShadow = () =>
+    api.get<ShadowData>("/api/shadow", { timeout: 60000 }).then((r) => r.data);

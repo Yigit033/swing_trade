@@ -1,0 +1,53 @@
+"""
+Gölge sinyaller (H4 içeriden alım, H5 bilanço sürprizi) — ileri test, GERÇEK PARA YOK.
+
+GET  /api/shadow            → son rapor (terfi kapısı durumu) + işlem listesi
+POST /api/shadow/daily-run  → günlük gölge koşusu (cron; X-Cron-Secret)
+
+Ana ürünün paper işlemlerinden, kapasitesinden ve raporlarından tamamen ayrıdır
+(shadow_* tabloları). Kurallar: lab/PREREGISTRATION.md Ek A + Ek C.
+"""
+import hmac
+import logging
+import os
+
+from fastapi import APIRouter, HTTPException, Query, Request
+
+from api.utils import sanitize_for_json
+
+router = APIRouter(prefix="/api/shadow", tags=["shadow"])
+logger = logging.getLogger(__name__)
+
+_TRADE_FIELDS = ("id", "strategy", "ticker", "event_date", "signal_date", "decided_at", "key", "status",
+                 "reason", "entry_date", "entry_price", "stop", "exit_date", "exit_price", "exit_reason",
+                 "bars", "ret_pct", "net_pct", "iwm_ret", "mark_price", "mark_date", "late_decision", "warmup")
+
+
+@router.get("")
+def get_shadow(limit: int = Query(300, ge=1, le=2000)):
+    from swing_trader.shadow.ledger import ShadowLedger
+
+    ledger = ShadowLedger()
+    trades = ledger.trades()
+    trades.sort(key=lambda t: (t.get("signal_date") or "", t.get("id") or 0), reverse=True)
+    return sanitize_for_json({
+        "report": ledger.get_meta("report"),
+        "last_run": ledger.get_meta("last_run"),
+        "live_start": ledger.get_meta("live_start"),
+        "h4_observation_start": ledger.get_meta("h4_observation_start"),
+        "trades": [{k: t.get(k) for k in _TRADE_FIELDS} for t in trades[:limit]],
+        "total_trades": len(trades),
+    })
+
+
+@router.post("/daily-run")
+def shadow_daily_run(request: Request):
+    expected = (os.environ.get("CRON_SECRET") or "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="CRON_SECRET tanımlı değil — gölge koşusu devre dışı.")
+    provided = (request.headers.get("X-Cron-Secret") or "").strip()
+    if not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="Geçersiz cron secret")
+    from swing_trader.shadow.runner import run_shadow_daily
+
+    return sanitize_for_json(run_shadow_daily())

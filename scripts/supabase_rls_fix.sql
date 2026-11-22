@@ -64,3 +64,12 @@ ALTER TABLE smallcap_signal_runs ENABLE ROW LEVEL SECURITY;
 -- Okuma da FastAPI /api/regime/history endpoint'i üzerinden gidiyor.
 
 ALTER TABLE regime_history ENABLE ROW LEVEL SECURITY;
+
+
+-- ── Gölge sinyaller (H4/H5 ileri test, 2026-11-22) ─────────────────
+-- Backend-only (swing_trader/shadow/ledger.py tabloları oluştururken RLS'i zaten açar).
+-- Politika yok → REST API kapalı; okuma /api/shadow üzerinden.
+
+ALTER TABLE IF EXISTS shadow_trades ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS shadow_insider_purchases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS shadow_meta ENABLE ROW LEVEL SECURITY;
