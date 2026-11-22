@@ -550,13 +550,11 @@ DD eşit (−29.4%) → **geçiyor**.
 | M1 çıkış 9. seans açılışında | +0.75% | +59.9% | **−35.1%** | ❌ DD 5.7 puan kötü (tolerans 1) |
 | M2 eşit riskli boyut (r=%0.88, ort. tutar %8.7) | +0.64% | +44.1% | −22.9% | ❌ toplam düştü |
 | M3 sinyal kapanışında giriş (gece boşluğu) | +0.16 puan | — | — | ❌ eşik +0.30 (kurmaya değmez) |
-| **M4 boş nakde hazine faizi (^IRX ort. %3.29)** | — | **+78.0%** | **−26.3%** | bilgi: **+23.3 puan** |
+| M4 boş nakit | — | — | — | **kapatıldı — kullanıcı ilkesi: faiz yok** |
 
 **Asıl bulgu — boş nakit:** hesap zamanın ortalama **%74'ünde nakitte**. Sinyaller kümelenerek geliyor: o
-günlerde nakit yetmiyor (1.145 sinyalin ~480'i atlandı), diğer günler para boş duruyor. Bu boş nakde faiz
-almak hem getiriyi artırıyor hem düşüşü küçültüyor. Midas'ta boştaki dolar "Dolar Getirisi" ile günlük
-faiz işler (aktivasyon gerekir; oran Midas'tan teyit edilmeli) → ek emir gerekmez. Emirler sayfası boş
-nakdi ve bu hatırlatmayı gösteriyor.
+günlerde nakit yetmiyor (1.145 sinyalin ~480'i atlandı), diğer günler para boş duruyor. Faiz kullanıcı
+ilkesiyle kapalı; boş nakit ancak swing işlemleriyle değerlendirilecek (açık iş).
 
 **IWM kıyası (dürüst tablo):** aynı dönemde IWM fiyatı +46.6% (DD −31.9%). H6S (+54.7%) toplamda IWM'i
 ancak az farkla geçiyor ve **farkın tamamı 2021–2023'ten** geliyor: 2021–23 H6S +50.8% / IWM +6.2%;
@@ -583,7 +581,46 @@ Hesap büyüdükçe sabit ücretin payı küçülüyor (25K$'da aynı strateji +
   boyutluyordu — gerçek hesap böyle davranmaz.
 - **Midas ücreti:** yeni ayar `commission_usd_per_side` (1.5$); net P/L (Performans), H6S hesabı ve
   backtest her emirde düşüyor (kısmi satış = 3. emir).
-- **Emirler sayfası:** bileşik hesap, emir ücreti, boş nakit + "Dolar Getirisi" hatırlatması.
+- **Emirler sayfası:** bileşik hesap, emir ücreti, boş nakit oranı.
 
 **Kapananlar (tekrar önerme):** M1 (çıkış 9. seans açılışı — satış kapanışta kalıyor, Türkiye saatiyle
 ~24:00/yazın 23:00), M2 eşit riskli boyut, M3 kapanışta giriş.
+
+## Ek N — 2024–26'da neden IWM'in gerisinde kaldık? (teşhis + çekirdek IWM denemesi)
+
+Ön kayıt: `lab/PREREGISTRATION.md` Ek N (SHA256 `a7815903…`), betik `lab/core_n.py`, çıktı
+`output/lab/n_core.json`. Taban = canlı ürün (H6S + fren), Ek M portföyü, 10.000$, Midas 1.5$/emir.
+
+**N0 — teşhis (2024-01 → 2026-11, 50 bps + 1.5$):** portföy −8.5% / IWM +43.0%.
+
+| Neden | Ölçüm |
+|---|---|
+| Para çoğunlukla nakitte | Ortalama maruziyet %34 → yükselişin çoğu kaçıyor (maliyetsiz bile +22.7%) |
+| Maliyet + ücret | 413 işlem; işlem başı brüt +0.71% < maliyet ~0.80% → ~31 puan erime |
+| Seçim edge'i yok | BULL rejimindeki 392 işlem brüt −0.08%, aynı pencerede IWM 0.00 |
+| Rejim freni IWM'i zamanlamıyor | CAUTION/BEAR günlerinde (%40) IWM bileşik +27% (2021–23'te de BEAR günleri +11%) |
+| Kuyruk bağımlılığı | En iyi %5 işlem çıkarılınca brüt ort. −1.48% (2021–23'te −1.11%) |
+
+Sinyal kuralları 2024–26'ya göre değiştirilmedi (eğri uydurma olurdu). Yapısal tek aday: boş nakdin
+maruziyeti.
+
+| | Taban | **N1 boş nakit IWM'de** | N2 IWM, BEAR'de nakit | IWM al-tut |
+|---|---:|---:|---:|---:|
+| 50 bps — 6 yıl | +35.7% | **+68.9%** | +49.4% | +49.1% |
+| 2021–23 | +42.6% | +35.7% | +28.8% | +4.5% |
+| 2024–26 | −8.5% | +20.4% | +12.8% | +42.8% |
+| Max düşüş | −31.8% | **−36.6%** | −32.9% | −31.9% |
+| 20 bps (canlı) — 6 yıl | +63.2% | +102.6% | +79.5% | +49.1% |
+| 2021–23 / 2024–26 | +52.8 / +3.5 | +46.0 / +33.7 | +38.6 / +25.2 | +4.5 / +42.8 |
+| Max düşüş | −28.1% | −33.6% | −29.9% | −31.9% |
+
+N1: ~190 IWM emri / 6 yıl (ayda ~2–3), ort. %55 IWM + %26 hisse. "Çekirdeksiz" mod tabanı birebir verdi.
+
+**Karar (ön kayıtlı):** N1 ❌ — (a) +33 puan ✅, (b) 2021–23 yarısı −6.9 puan ❌ (tolerans 3), (c) max düşüş
+−36.6% ❌ (sınır −35%). N2 ❌ — (b) −13.8 puan. **Canlı ürün değişmedi.**
+
+**Dürüst sonuç:** 2024–26 açığının kök nedeni hisse işlemlerinin o dönemde maliyet sonrası endeksi
+yenememesi + paranın üçte ikisinin nakitte durması. IWM çekirdeği açığın ~üçte ikisini kapatıyor ama
+bedeli kötü yıllarda daha derin düşüş (2022'de IWM'le birlikte düşüyor) — ön kayıtlı şartlar bunu kabul
+etmedi. Kullanıcı yönü: kazanç swing işlemlerinden gelecek (faiz yok, endeks çekirdeği değil) → boş nakit
+ve maliyet erimesi swing tarafında çözülmeli. Hisse seçiminin edge'i ileri testte (Mayıs 2027) anlaşılır.

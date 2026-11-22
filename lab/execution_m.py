@@ -1,4 +1,4 @@
-"""Ek M — Kâğıttan Midas'a: M1 açılışta çıkış, M2 eşit riskli boyut, M3 gece boşluğu, M4 boş nakit.
+"""Ek M — Kâğıttan Midas'a: M1 açılışta çıkış, M2 eşit riskli boyut, M3 gece boşluğu, boş nakit oranı.
 
 Taban = canlı ürün (H6S + L2 freni). Portföy günü gerçek sırayla işler (Ek M düzeltmesi):
 açılış çıkışları → açılış girişleri (boyut önceki kapanış değerlemesiyle) → gün içi/kapanış çıkışları.
@@ -78,7 +78,7 @@ def solve_r(atr_pct, target=0.10, cap=0.20):
     return (lo + hi) / 2
 
 
-def portfolio(T, sizing="fixed", r=None, cap=0.20, brake=True, irx=None, cost=COST, cap0=CAP0, fee=0.0):
+def portfolio(T, sizing="fixed", r=None, cap=0.20, brake=True, cost=COST, cap0=CAP0, fee=0.0):
     """Gün içi gerçek sıra. sizing: 'fixed' (%10) | 'risk' (r / (2.5×ATR%), en çok cap).
     fee: kenar başına sabit $ ücret (Midas ABD: 1.5$); cost: yüzde gidiş-dönüş (spread+kayma)."""
     C = panels()["Close"]
@@ -120,10 +120,6 @@ def portfolio(T, sizing="fixed", r=None, cap=0.20, brake=True, irx=None, cost=CO
         for p in pos:                                   # 3) gün içi / kapanış çıkışları
             (close_out(p) if p["exit_day"] == d else keep.append(p))
         pos = keep
-        if irx is not None:                             # M4: boş nakit hazine bonosu getirisi
-            y = irx.get(d, np.nan)
-            if np.isfinite(y):
-                cash *= 1 + y / 100 / 252
         for p in pos:
             v = C.at[d, p["t"]]
             if np.isfinite(v):
@@ -192,15 +188,8 @@ def main():
     m3["worth_building"] = bool(m3["improvement_mean"] >= 0.30 and all(x > 0 for x in m3["improvement_halves"]))
     res["M3_gece_boslugu"] = m3
 
-    # M4 — boş nakit + 3 aylık hazine bonosu
-    import yfinance as yf
-    irx = yf.download("^IRX", start="2020-06-01", progress=False, auto_adjust=False)["Close"]
-    irx = (irx.iloc[:, 0] if isinstance(irx, pd.DataFrame) else irx).dropna()
-    irx.index = pd.DatetimeIndex(irx.index).tz_localize(None)
-    with_bill = portfolio(base, irx=irx.reindex(P["Close"].index).ffill().to_dict())
-    res["M4_bos_nakit"] = dict(idle_cash_pct=b["idle_cash_pct"], irx_mean=round(float(irx.loc["2021":].mean()), 2),
-                               total_with_tbill=with_bill["total_pct"], add_pp=round(with_bill["total_pct"] - b["total_pct"], 1),
-                               max_dd_with_tbill=with_bill["max_dd_pct"])
+    # Boş nakit oranı (bilgi). M4'ün faiz kısmı kullanıcı ilkesiyle kapatıldı (faiz yok) — silindi.
+    res["bos_nakit_orani"] = dict(idle_cash_pct=b["idle_cash_pct"])
 
     # Ek M ek kontrol (gerçeklik): Midas sabit ücreti (1.5$/kenar) ile L2 freni hâlâ geçiyor mu?
     fees = {}

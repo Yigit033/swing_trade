@@ -58,7 +58,7 @@ export default function OrdersPage() {
                     <p style={{ color: "var(--text-muted)", margin: "6px 0 0", fontSize: 13, maxWidth: 860 }}>
                         H6S hesabının bugünkü planı. Kurallar sabit: açılışta al, alır almaz koruyucu stop gir
                         (alış − {data.stop_atr}×ATR), {data.hold_sessions}. seans kapanışında sat. Hedef ve iz süren stop yok.
-                        Hesap {usd(data.account)}{data.start != null && data.start !== data.account ? ` (başlangıç ${usd(data.start)} + kapanan işlemlerin net sonucu)` : ""} · bağlı {usd(data.held)} · boş {usd(data.free)}.
+                        Hesap {usd(data.account)}{data.start != null && data.start !== data.account ? ` (başlangıç ${usd(data.start)} + kapanan işlemlerin net sonucu)` : ""} · bağlı {usd(data.held)} · boş {usd(data.free)}{data.idle_pct != null ? ` (%${data.idle_pct})` : ""}.
                         {data.fee_per_order ? ` Her emir ${usd(data.fee_per_order)} Midas ücreti (net sonuca dahil).` : ""}
                     </p>
                 </div>
@@ -71,15 +71,6 @@ export default function OrdersPage() {
                 <div className="card" style={{ borderLeft: "3px solid #f59e0b", fontSize: 13 }}>
                     ⚠ <strong>Kayıp serisi freni aktif:</strong> son 3 H6S işlemi zararla kapandı. Yeni pozisyonlar yarım boyut
                     (hesabın %5&apos;i); ilk kârlı kapanışta tam boyuta dönülür. Geçmiş testte hem getiriyi hem düşüşü iyileştirdi.
-                </div>
-            )}
-
-            {data.free > 100 && (
-                <div className="card" style={{ borderLeft: "3px solid var(--accent)", fontSize: 13 }}>
-                    💵 <strong>Boş nakit {usd(data.free)}{data.idle_pct != null ? ` (%${data.idle_pct})` : ""}:</strong> Midas&apos;ta
-                    &quot;Dolar Getirisi&quot; açık olsun; boştaki dolar her gün faiz işler, ek emir gerekmez. 6 yıllık testte
-                    hesap zamanın ~%74&apos;ünde nakitteydi; bu nakde hazine faizi toplam getiriyi +23 puan artırdı ve en
-                    dibe düşüşü küçülttü (Lab v3 Ek M).
                 </div>
             )}
 

@@ -424,3 +424,36 @@ hesaplanır; eski değer de yanında raporlanır. Tüm M kararları düzeltilmi�
 - **Gerçeklik şartı (canlı, sonuca bakılmadan):** canlı H6S hesabı lab gibi bileşik olur: hesap =
   başlangıç + kapanmış H6S işlemlerinin maliyet sonrası kâr/zararı; pozisyon boyutu ve nakit sınırı
   bundan hesaplanır (şu an sabit başlangıç tutarı kullanılıyor — gerçek Midas hesabı böyle davranmaz).
+
+# Ek N — 2024–26 açığı: teşhis (N0) ve çekirdek IWM (N1/N2)
+
+**Yazıldığı an: 2026-11-22. N0 teşhisi GÖRÜLDÜ (etiketli); N1/N2 portföy sonuçları görülmeden yazıldı.**
+Taban: canlı ürün H6S + L2 freni, Ek M portföyü (doğru gün içi sıra, %10 bileşik, nakit sınırlı),
+birincil maliyet 50 bps gidiş-dönüş + Midas 1.5$/emir, 10.000$. Duyarlılık: 20 bps + 1.5$ (canlı ayar).
+
+**N0 — teşhis (görüldü, 2024-01-04 → 2026-11-17, 50 bps + 1.5$):** portföy −8.5% vs IWM +43.0%.
+Maliyetsiz +22.7% → maliyet/ücret ~31 puan. Ortalama maruziyet %33.6 (nakit %66). BULL rejimindeki 392
+işlem brüt −0.08% vs aynı pencerede IWM 0.00 (seçim edge'i yok); işlem başı brüt +0.71% < maliyet
+~0.80%. IWM, CAUTION/BEAR günlerinde (%40.5) bileşik +27% yaptı; IWM tabanlı rejim IWM'i
+zamanlayamıyor (2021–23'te de BEAR günleri +11.2%, BULL günleri −8.6%). Bu yüzden sinyal kuralları
+2024–26'ya göre DEĞİŞTİRİLMEZ (eğri uydurma); düzeltme adayı yalnız yapısal: boş nakdin maruziyeti.
+
+- **N1 — Çekirdek IWM, hep açık.** Boş nakit IWM'de durur. Her gün AÇILIŞTA (açılış çıkışlarından sonra,
+  girişlerden önce): o günün girişleri için nakit yetmiyorsa IWM satılır (gereken + 1 dilim, dilim =
+  önceki kapanış özsermayesinin %10'u; IWM yetmiyorsa taban gibi giriş atlanır). Girişlerden sonra nakit
+  3 dilimi aşıyorsa fazlası IWM'e (nakit 1 dilime iner). Kapanış çıkışlarının nakdi ertesi açılışta
+  değerlendirilir. Her IWM emri 1.5$ + 1 bps/kenar. Boyut/fren özsermayeyi (nakit + IWM + pozisyonlar)
+  kullanır. Sinyaller, çıkışlar, fren taban ile aynı.
+- **N2 — Çekirdek yalnız BEAR dışında.** N1 ile aynı; t kapanışında rejim BEAR ise t+1 açılışında tüm
+  IWM satılır ve BEAR bitene kadar alınmaz (N0'a göre muhtemelen N1'den kötü — bilerek kayıtta).
+- **N3 — tanımlayıcı:** IWM al-tut (tek emir) ve aynı dönemde N1/N2'nin IWM'e göre farkı; uydunun
+  (hisse işlemlerinin) çekirdeğe katkısı = N1 − (yalnız çekirdek, işlemsiz).
+
+**Karar (birincil maliyette; N1 ve N2 için ayrı; ikisi de geçerse toplamı yüksek olan):**
+(a) tüm dönem toplamı ≥ taban + 5 puan; (b) iki yarının her biri (2021–23 / 2024–son, her biri
+10.000$'dan) ≥ tabanın o yarısı − 3 puan; (c) tüm dönem max düşüş > −35% (§1 P6). Duyarlılıkta (20 bps)
+(a) da sağlanmalı. Geçmezse canlı ürün değişmez; açık nedeniyle birlikte raporlanır.
+
+**Ek M/N notu (2026-11-22, kullanıcı ilkesi):** faiz kullanılmaz. M4'ün faiz kısmı ve ürün içi faiz
+hatırlatması kaldırıldı; boş nakit yalnız swing işlemleriyle değerlendirilecek. (Yukarıdaki geçmiş
+ön kayıt metni denetim izi için değiştirilmedi.)
