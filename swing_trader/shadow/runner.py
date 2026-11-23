@@ -5,7 +5,8 @@ güncellenmesi → rapor + terfi kapısı. Her adım ayrı try/except: biri dü�
 
 Karar zamanı: sinyal ``decided_at`` ile yazılır. Bu zaman girişin açılışından (09:30 ET)
 sonraysa ``late_decision=1`` — bu işlemler terfi değerlendirmesine girmez (Ek C).
-Bu yüzden asıl tetik, açılıştan ÖNCE koşan sabah cron'udur (.github/workflows/shadow-run.yml).
+Bu yüzden asıl tetik, NY gece yarısından sonra ve açılıştan ÖNCE koşan cron'dur
+(.github/workflows/shadow-run.yml, 05:15/06:15/07:15 UTC — GitHub'ın saatlerce gecikmesine pay bırakır).
 """
 from __future__ import annotations
 

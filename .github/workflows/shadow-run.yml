@@ -3,12 +3,24 @@
 # NEDEN AYRI: H4 her gün ~1.200 SEC Form 4 dosyası okur (SEC hız sınırında 2–3 dk/gün).
 # Ana daily-run'ı (onay → çıkış → tarama) yavaşlatmasın, biri düşerse diğeri etkilenmesin.
 #
-# NEDEN SABAH: kararın girişin açılışından (09:30 ET) ÖNCE verilmesi gerekir. Form 4'ler
-# F günü 22:00 ET'ye kadar yayımlanır, girişi F'den sonraki ilk açılıştır. Açılıştan
-# sonra verilen kararlar `late_decision` işaretlenir ve terfi değerlendirmesine girmez.
-#   11:15 UTC = 07:15 EDT (yaz) / 06:15 EST (kış)
-#   12:15 UTC = 08:15 EDT (yaz) / 07:15 EST (kış)   ← gecikmeli cron için yedek
-# Çift koşma sorun değil: kayıtlar (strateji, hisse, olay günü) ile idempotent.
+# SAAT PENCERESİ — iki sert sınır:
+#   1) NY gece yarısından SONRA: H4 yalnız "bugünden önceki" (ET) dosyalama günlerini işler
+#      (Form 4'ler F günü 22:00 ET'ye kadar yayımlanır) → F'nin dosyaları F+1 00:00 ET'den sonra.
+#      00:00 ET = 05:00 UTC (kış, EST) / 04:00 UTC (yaz, EDT).
+#   2) Girişin açılışından (09:30 ET) ÖNCE: sonra verilen kararlar `late_decision` işaretlenir ve
+#      terfi değerlendirmesine girmez. 09:30 ET = 14:30 UTC (kış) / 13:30 UTC (yaz).
+#   → İki mevsimde de güvenli pencere: 05:00–13:30 UTC.
+#
+# GITHUB CRON GECİKMESİ (2026-11-23 ölçümü, daily-run'ın son 100 zamanlanmış koşusu):
+#   cron saatinden 0.4–7.6 saat GEÇ başlıyor (ortanca ~4 s; Ekim ~3 s → Kasım ~4–6 s, artıyor).
+#   Eski 11:15/12:15 UTC cron'ları bu gecikmeyle açılıştan SONRA koşuyordu → her karar "geç"
+#   sayılacak, ileri test hiç geçerli işlem biriktirmeyecekti. Bu yüzden pencerenin en başı:
+#     05:15 UTC = 00:15 EST / 01:15 EDT  (asıl; +7.6 s gecikmeyle bile 12:51 UTC < 13:30 ✓)
+#     06:15 UTC, 07:15 UTC                (yedek: GitHub koşuyu düşürürse / SEC endeksi gecikirse)
+#   Pzt–Cmt (UTC): Cmt 00:15 ET koşusu Cuma'nın, Pzt koşusu Cuma'nın yedeğidir (giriş Pzt açılışı).
+#   Bu saatler swing_trader/tests/test_shadow_schedule.py ile kilitli.
+# Çok koşma sorun değil: kayıtlar (strateji, hisse, olay günü) ile idempotent; `concurrency`
+# gecikip üst üste binen koşuları sıraya koyar (aynı anda iki H4 SEC'in hız sınırını aşmasın).
 #
 # GEREKLİ SECRET: CRON_SECRET (daily-run ile aynı).
 # İSTEĞE BAĞLI fly secret: SEC_USER_AGENT — SEC adil kullanım politikası tanımlayıcı
@@ -18,9 +30,14 @@ name: Shadow Run
 
 on:
   schedule:
-    - cron: '15 11 * * 1-5'
-    - cron: '15 12 * * 1-5'
+    - cron: '15 5 * * 1-6'
+    - cron: '15 6 * * 1-6'
+    - cron: '15 7 * * 1-6'
   workflow_dispatch:
+
+concurrency:
+  group: shadow-run
+  cancel-in-progress: false
 
 jobs:
   shadow-run:

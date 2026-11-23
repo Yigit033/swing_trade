@@ -173,7 +173,10 @@ Düzeltme (yeniden deneme ya da fail-closed) ayrı bir karar.
 ## Ek C — H4 / H5 gölge modu (ileri test)
 
 `swing_trader/shadow/` (kurallar, veri, defter, koşucu, rapor), `api/routers/shadow.py`,
-`/shadow` sayfası, `.github/workflows/shadow-run.yml` (açılış öncesi 07:15/08:15 ET cron).
+`/shadow` sayfası, `.github/workflows/shadow-run.yml` (NY gece yarısından sonra, açılıştan önce:
+05:15/06:15/07:15 UTC. 2026-11-23'e kadar 11:15/12:15 UTC'ydi; GitHub cron'u 0.4–7.6 saat geç
+başlattığı için kararlar açılıştan sonraya kayıp `late_decision` olacaktı, ilk gün yakalandı.
+Pencere `swing_trader/tests/test_shadow_schedule.py` ile kilitli).
 Ana ürünün işlemlerinden ayrı `shadow_*` tabloları; gerçek para yok; terfi otomatik değil.
 Kurallar ve terfi kapısı (F1–F4) `lab/PREREGISTRATION.md` Ek C'de, sonuç görülmeden yazıldı.
 `PARAMS_SHA256` değişirse koşucu yeni sinyal üretmeyi durdurur.
