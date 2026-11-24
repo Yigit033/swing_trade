@@ -67,10 +67,17 @@ export default function OrdersPage() {
                 </button>
             </div>
 
+            <div className="card" style={{ borderLeft: "3px solid var(--accent)", fontSize: 13 }}>
+                <strong>Bu liste sanal (paper) hesap içindir.</strong> H6S kuralları geçmiş testlerde para kazandırmadı:
+                hiç kullanılmamış 2016–2020 yıllarında hesap −%56 (endeks +%98); 2021–26 dönemindeki eski +%66 sonucu bir veri
+                kusurundan geliyordu, düzeltilince −%30 (Lab v3 Ek R). Stratejinin gerçek değeri ileri testte ölçülüyor
+                (Gölge sayfası).
+            </div>
+
             {data.loss_streak_brake && (
                 <div className="card" style={{ borderLeft: "3px solid #f59e0b", fontSize: 13 }}>
                     ⚠ <strong>Kayıp serisi freni aktif:</strong> son 3 H6S işlemi zararla kapandı. Yeni pozisyonlar yarım boyut
-                    (normal boyutun yarısı); ilk kârlı kapanışta tam boyuta dönülür. Geçmiş testte hem getiriyi hem düşüşü iyileştirdi.
+                    (normal boyutun yarısı); ilk kârlı kapanışta tam boyuta dönülür.
                 </div>
             )}
 

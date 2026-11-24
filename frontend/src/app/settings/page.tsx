@@ -1562,7 +1562,7 @@ export default function SettingsPage() {
                 />
                 <FieldBool
                     label="Ana strateji: H6S Profesyonel VCE"
-                    hint="Açık: otomatik girişler H6S kurallarıyla (VCE + küçük hisse piyasa freni + %10 pozisyon + 2.5×ATR stop + 8. seans çıkışı). Kapalı: eski kurallara tek adımda dönüş."
+                    hint="Açık: otomatik girişler H6S kurallarıyla (VCE + küçük hisse piyasa freni + 2.5×ATR stop + 8. seans çıkışı). Kapalı: eski kurallara tek adımda dönüş. Not: bu kurallar geçmiş testlerde para kazandırmadı (2016–2020: −%56; 2021–26 düzeltilmiş veriyle: −%30 — Lab v3 Ek R); karar ileri testte."
                     value={nstr(["auto_scan", "strategy"], "H6S") === "H6S"}
                     onChange={(v) => sstr(["auto_scan", "strategy"], v ? "H6S" : "LEGACY")}
                 />
@@ -1574,13 +1574,13 @@ export default function SettingsPage() {
                 />
                 <FieldBool
                     label="H6S kayıp serisi freni"
-                    hint="Son 3 kapanmış H6S işleminin hepsi zararlıysa yeni pozisyon yarım boyut; ilk kârlı kapanışta tam boyuta döner. Geçmiş testte portföy +64.5 → +67.1%, düşüş −31.5 → −29.9%. (Sektör sınırı ölçüldü ve eklenmedi: kazancı kesiyordu.)"
+                    hint="Son 3 kapanmış H6S işleminin hepsi zararlıysa yeni pozisyon yarım boyut; ilk kârlı kapanışta tam boyuta döner. (Bu kuralı destekleyen eski geçmiş test rakamları veri kusuru nedeniyle geçersiz — Lab v3 Ek R.)"
                     value={nb(["auto_scan", "h6s_loss_streak_brake"], true)}
                     onChange={(v) => sb(["auto_scan", "h6s_loss_streak_brake"], v)}
                 />
                 <FieldNum
                     label="H6S pozisyon büyüklüğü (hesabın oranı)"
-                    hint="Kullanıcı kararı (Lab v3 Ek O2): 0.15 = her işleme hesabın %15'i (en çok 6 eşzamanlı pozisyon, kaldıraçsız). Geçmiş testte %10'a göre daha çok kazanç, daha derin düşüş (−32 → −38%)."
+                    hint="Kullanıcı kararı (Lab v3 Ek O2): 0.15 = her işleme hesabın %15'i (en çok 6 eşzamanlı pozisyon, kaldıraçsız). Düzeltilmiş geçmiş testlerde büyük pozisyon zararı büyüttü (2016–2020: %10 ile −%50, %15 ile −%56; 2021–26: −%13 ve −%30 — Lab v3 Ek R)."
                     value={nn(["auto_scan", "h6s_position_pct"], 0.15)}
                     onChange={(v) => sn(["auto_scan", "h6s_position_pct"], v)}
                     step={0.01}

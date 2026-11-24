@@ -24,12 +24,12 @@ const NAMES: Record<string, { title: string; desc: string }> = {
         desc: "30 günde ≥2 yönetici/direktör, ≥100K$ açık piyasa alımı (SEC Form 4) → ertesi açılış, 2.5×ATR stop, 20 seans.",
     },
     H6S: {
-        title: "H6S · Profesyonel VCE (Midas adayı)",
-        desc: "H6 sinyalleri + küçük hisse (IWM) piyasa freni (ayı piyasasında giriş yok, temkinli piyasada en çok 1) + 2.5×ATR felaket stop'u → ertesi açılış, 8. seans kapanışı. Geçmiş testte en güçlü aday (iyimser: fikir sonuçtan sonra geldi).",
+        title: "H6S · Profesyonel VCE (canlı paper ürün)",
+        desc: "H6 sinyalleri + küçük hisse (IWM) piyasa freni (ayı piyasasında giriş yok, temkinli piyasada en çok 1) + 2.5×ATR felaket stop'u → ertesi açılış, 8. seans kapanışı. Geçmiş testlerde para kazandırmadı: hiç kullanılmamış 2016–2020 yıllarında hesap −%56 (endeks +%98); 2021–26'daki eski +%66 sonucu bir veri kusurundan geliyordu, düzeltilince −%30 (Lab v3 Ek R). Gerçek para adayı değil; karar bu ileri testte.",
     },
     H6SR: {
         title: "H6SR · Kazananı koştur (H6S'nin çıkış varyantı)",
-        desc: "H6S ile aynı sinyal, aynı piyasa freni ve aynı 2.5×ATR stop. Fark yalnız çıkışta: 8. seans kapanışında kârdaysa satmaz, iz süren stopla (en yüksek kapanış − 2.5×ATR) en çok 40 seans tutar. Geçmiş testte işlem başı kazancı neredeyse ikiye katladı ama dönemden döneme ters döndü (Lab v3 Ek O1) — karar bu ileri testte.",
+        desc: "H6S ile aynı sinyal, aynı piyasa freni ve aynı 2.5×ATR stop. Fark yalnız çıkışta: 8. seans kapanışında kârdaysa satmaz, iz süren stopla (en yüksek kapanış − 2.5×ATR) en çok 40 seans tutar. Düzeltilmiş geçmiş testlerde o da ekside (2016–2020 −%27, 2021–26 −%23; Lab v3 Ek R) — karar bu ileri testte.",
     },
     H6: {
         title: "H6 · Sade VCE (canlı ürünün rakibi)",
