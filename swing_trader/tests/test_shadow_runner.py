@@ -306,3 +306,95 @@ def test_h6sr_mirrors_h6s_entries_and_brake(tmp_path, monkeypatch, regime, expec
         assert r["XYZ"]["status"] == "OPEN" and r["XYZ"]["bars"] > 8   # yükselen seride kazanan koşuyor
         rep = L.get_meta("report")["strategies"]
         assert {"H6S", "H6SR"} <= set(rep) and rep["H6SR"]["gate"]["need_closed"] == 100
+
+
+# ── Koşu sağlığı + "gerekirse koş" (yedek tetikleyiciler; 2026-11-24) ────────────────────────
+
+def _at(day, hour, minute=0):
+    return datetime(2025, 6, day, hour, minute, tzinfo=NY)
+
+
+def test_health_never_ran_is_waiting_not_overdue(tmp_path):
+    h = runner.run_health(ShadowLedger(str(tmp_path / "s.db")), _at(16, 7))
+    assert h["issues"] == ["NEVER_RAN"] and h["complete"] is False and h["overdue_sessions"] is None
+    assert h["expected_asof"] == "2025-06-13" and h["next_deadline"] == "2025-06-16T13:30:00Z"
+
+
+def test_clean_on_time_run_is_complete_and_if_needed_skips_without_touching_last_run(tmp_path):
+    L, src = ShadowLedger(str(tmp_path / "s.db")), FakeSrc()
+    first = runner.run_shadow_daily(now=_at(16, 0, 15), ledger=L, src=src)
+    h = runner.run_health(L, _at(16, 1, 15))
+    assert h == dict(h, expected_asof="2025-06-13", last_asof="2025-06-13", complete=True,
+                     on_time=True, overdue_sessions=0, issues=[])
+    out = runner.run_shadow_daily(now=_at(16, 1, 15), ledger=L, src=src, if_needed=True)
+    assert out["skipped"] == "ALREADY_COMPLETE" and out["asof"] == "2025-06-13"
+    assert L.get_meta("last_run")["decided_at"] == first["decided_at"]      # gerçek koşu kalır
+    # elle (if_needed=False) her zaman koşar
+    again = runner.run_shadow_daily(now=_at(16, 2, 15), ledger=L, src=src)
+    assert "skipped" not in again and L.get_meta("last_run")["decided_at"] == again["decided_at"]
+
+
+@pytest.mark.parametrize("patch,issue", [
+    (dict(H6=dict(error="UNIVERSE_UNAVAILABLE", universe_source="static_fallback")), "H6: UNIVERSE_UNAVAILABLE"),
+    (dict(H6S=dict(hits=2, deferred="IWM_BAR_MISSING")), "H6S: IWM_BAR_MISSING"),
+    (dict(H6=dict(universe=900, fetched=880, current_bar=0, vce=0, hits=0, added=0)), "H6: NO_CURRENT_BARS"),
+    (dict(H4=dict(pending_days=["2025-06-11", "2025-06-12"], processed=[dict(day="2025-06-11")])), "H4: BACKLOG"),
+    (dict(universe_error="snapshot down"), "universe_error: snapshot down"),
+])
+def test_incomplete_run_is_retried_by_backups(tmp_path, patch, issue):
+    L, src = ShadowLedger(str(tmp_path / "s.db")), FakeSrc()
+    runner.run_shadow_daily(now=_at(16, 0, 15), ledger=L, src=src)
+    lr = L.get_meta("last_run")
+    lr.update(patch)
+    L.set_meta("last_run", lr)
+    h = runner.run_health(L, _at(16, 1, 15))
+    assert h["complete"] is False and issue in h["issues"]
+    out = runner.run_shadow_daily(now=_at(16, 1, 15), ledger=L, src=src, if_needed=True)
+    assert "skipped" not in out and runner.run_health(L, _at(16, 1, 20))["complete"] is True
+
+
+def test_missing_strategy_block_counts_as_incomplete(tmp_path):
+    L, src = ShadowLedger(str(tmp_path / "s.db")), FakeSrc()
+    runner.run_shadow_daily(now=_at(16, 0, 15), ledger=L, src=src)
+    lr = L.get_meta("last_run")
+    del lr["H6SR"]                                      # ör. eski sürümün koşusu
+    L.set_meta("last_run", lr)
+    assert "H6SR: MISSING" in runner.run_health(L, _at(16, 1))["issues"]
+
+
+def test_overdue_counts_only_sessions_whose_entry_open_has_passed(tmp_path):
+    L, src = ShadowLedger(str(tmp_path / "s.db")), FakeSrc()
+    runner.run_shadow_daily(now=_at(16, 0, 15), ledger=L, src=src)          # Cuma 13'ü için
+    # Salı 07:00 ET: Pazartesi'nin kararı için son an Salı 09:30 → henüz kaçırılmadı
+    h = runner.run_health(L, _at(17, 7))
+    assert (h["expected_asof"], h["overdue_sessions"], h["complete"]) == ("2025-06-16", 0, False)
+    # Çarşamba 10:00 ET: Pazartesi (16) ve Salı (17) kararlarının son anı geçti → 2 seans kaçırıldı
+    h = runner.run_health(L, _at(18, 10))
+    assert (h["expected_asof"], h["overdue_sessions"]) == ("2025-06-17", 2)
+
+
+def test_late_run_is_complete_but_not_on_time(tmp_path):
+    L, src = ShadowLedger(str(tmp_path / "s.db")), FakeSrc()
+    runner.run_shadow_daily(now=_at(16, 11), ledger=L, src=src)             # açılıştan sonra
+    h = runner.run_health(L, _at(16, 12))
+    assert h["complete"] is True and h["on_time"] is False
+
+
+def test_shadow_api_exposes_health_and_forwards_if_needed(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.routers import shadow as shadow_router
+
+    db = str(tmp_path / "s.db")
+    runner.run_shadow_daily(now=_at(16, 0, 15), ledger=ShadowLedger(db), src=FakeSrc())
+    monkeypatch.setattr("swing_trader.shadow.ledger.ShadowLedger.__init__",
+                        lambda self, db_path=None: (setattr(self, "_path", db), setattr(self, "_pg", False), None)[-1])
+    seen = []
+    monkeypatch.setattr(runner, "run_shadow_daily", lambda **kw: seen.append(kw) or {"ok": True})
+    monkeypatch.setenv("CRON_SECRET", "s3")
+    c = TestClient((lambda a: (a.include_router(shadow_router.router), a)[1])(FastAPI()))
+    h = c.get("/api/shadow").json()["health"]
+    assert h["last_asof"] == "2025-06-13" and set(h) >= {"complete", "overdue_sessions", "next_deadline", "issues"}
+    assert c.post("/api/shadow/daily-run?if_needed=true", headers={"X-Cron-Secret": "s3"}).status_code == 200
+    assert c.post("/api/shadow/daily-run", headers={"X-Cron-Secret": "s3"}).status_code == 200
+    assert seen == [dict(if_needed=True), dict(if_needed=False)]

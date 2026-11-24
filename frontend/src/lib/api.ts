@@ -745,10 +745,23 @@ export type ShadowChampion = {
                        clean: { closed: number; net_mean: number | null }; unflagged: number };
 };
 
+/** Gölge koşusunun sağlığı (runner.run_health): kaçırılan seans, eksik koşu, zamanında mı. */
+export type ShadowHealth = {
+    expected_asof: string;              // en yeni tamamlanmış seans
+    last_asof: string | null;           // son koşunun seansı
+    decided_at: string | null;
+    next_deadline: string;              // expected_asof kararının son anı (girişin açılışı, UTC ISO)
+    overdue_sessions: number | null;    // son tarihi geçtiği halde koşu görmemiş seans sayısı
+    complete: boolean;
+    on_time: boolean | null;
+    issues: string[];
+};
+
 export type ShadowData = {
     report: { asof: string; live_start: string; params_sha256: string; params_h6_sha256?: string;
               strategies: Record<string, ShadowStrategyReport>;
               champion?: ShadowChampion | null } | null;
+    health?: ShadowHealth | null;
     last_run: Record<string, unknown> | null;
     live_start: string | null;
     h4_observation_start: string | null;

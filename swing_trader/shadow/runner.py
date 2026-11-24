@@ -49,9 +49,14 @@ def _utc_iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _late(decided_at: datetime, signal_day: date) -> int:
+def _entry_open(signal_day: date) -> datetime:
+    """``signal_day`` sinyalinin girişi: sonraki seansın 09:30 ET açılışı (karar için son an)."""
     entry = next_trading_day(signal_day)
-    return int(decided_at > datetime(entry.year, entry.month, entry.day, 9, 30, tzinfo=NY))
+    return datetime(entry.year, entry.month, entry.day, 9, 30, tzinfo=NY)
+
+
+def _late(decided_at: datetime, signal_day: date) -> int:
+    return int(decided_at > _entry_open(signal_day))
 
 
 def _frame(bars: Dict[str, pd.DataFrame], t: str, start: date, end: date) -> Optional[pd.DataFrame]:
@@ -428,14 +433,75 @@ def _buy_hold(src, ticker: str, start: date, asof: date) -> Optional[float]:
     return None
 
 
+# ── Sağlık: son koşu tam mı, zamanında mı, kaçırılan seans var mı ────────────
+
+def _run_issues(lr: Dict) -> List[str]:
+    """Son koşuyu "tam" saymayı engelleyen sorunlar (boş liste = tam ve temiz)."""
+    issues: List[str] = []
+    for k in ("error", "universe_error", "report_error"):
+        if lr.get(k):
+            issues.append(f"{k}: {lr[k]}")
+    for k in ("H6", "H6S", "H6SR", "H5", "H4", "update"):
+        v = lr.get(k)
+        if v is None:
+            issues.append(f"{k}: MISSING")
+        elif isinstance(v, dict):
+            if v.get("error"):
+                issues.append(f"{k}: {v['error']}")
+            if v.get("deferred"):                         # ör. IWM barı gecikti → karar ertelendi
+                issues.append(f"{k}: {v['deferred']}")
+    h6 = lr.get("H6")
+    if isinstance(h6, dict) and h6.get("fetched") and not h6.get("current_bar"):
+        issues.append("H6: NO_CURRENT_BARS")              # veri henüz gelmemiş → sonraki koşu karar verir
+    h4 = lr.get("H4")
+    if isinstance(h4, dict) and len(h4.get("pending_days") or []) > len(h4.get("processed") or []):
+        issues.append("H4: BACKLOG")                      # koşu başına 1 gün → birikim sonraki koşuda erir
+    return issues
+
+
+def run_health(ledger: ShadowLedger, now: Optional[datetime] = None) -> Dict:
+    """Gölge koşusunun sağlığı — sayfadaki uyarı ve yedek tetikleyicilerin "gerekirse koş" kararı.
+
+    ``complete``: en yeni tamamlanmış seans için hatasız, eksiksiz bir koşu var (yeniden koşmak
+    bilgi eklemez). ``overdue_sessions``: karar son tarihi (girişin 09:30 ET açılışı) geçtiği halde
+    hiç koşu görmemiş seans sayısı — 0'dan büyükse ileri test o günleri sessizce kaybetmiştir.
+    """
+    now = (now or datetime.now(tz=NY)).astimezone(NY)
+    expected = last_completed_session(now)
+    due = expected if _entry_open(expected) <= now else prev_trading_day(expected)
+    lr = ledger.get_meta("last_run") or None
+    last = date.fromisoformat(lr["asof"]) if isinstance(lr, dict) and lr.get("asof") else None
+    issues = _run_issues(lr) if last else ["NEVER_RAN"]
+    on_time = None
+    if last and lr.get("decided_at"):
+        decided = datetime.fromisoformat(str(lr["decided_at"]).replace("Z", "+00:00"))
+        on_time = decided <= _entry_open(last)
+    return dict(
+        expected_asof=expected.isoformat(),
+        last_asof=last.isoformat() if last else None,
+        decided_at=lr.get("decided_at") if last else None,
+        next_deadline=_utc_iso(_entry_open(expected)),
+        overdue_sessions=len([s for s in rules.sessions_between(last, due) if s > last]) if last else None,
+        complete=bool(last == expected and not issues),
+        on_time=on_time,
+        issues=issues,
+    )
+
+
 # ── Giriş noktası ───────────────────────────────────────────────────────────
 
 def run_shadow_daily(now: Optional[datetime] = None, ledger: Optional[ShadowLedger] = None,
-                     src=None, time_budget_s: int = 780) -> Dict:
+                     src=None, time_budget_s: int = 780, if_needed: bool = False) -> Dict:
+    """Günlük gölge koşusu. ``if_needed=True`` (yedek tetikleyiciler): en yeni seans için tam ve
+    temiz bir koşu zaten varsa hiçbir şey yapmadan döner — ``last_run`` o gerçek koşu olarak kalır."""
     if src is None:
         from . import sources as src
     ledger = ledger or ShadowLedger()
     now = (now or datetime.now(tz=NY)).astimezone(NY)
+    if if_needed:
+        health = run_health(ledger, now)
+        if health["complete"]:
+            return dict(skipped="ALREADY_COMPLETE", asof=health["expected_asof"], health=health)
     deadline = _time.monotonic() + time_budget_s
     asof = last_completed_session(now)
     today_et = now.date()

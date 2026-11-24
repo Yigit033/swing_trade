@@ -6,8 +6,8 @@
  * sonuç görülmeden yazıldı (lab/PREREGISTRATION.md Ek A + Ek C, H6: Ek F). Terfi otomatik değildir.
  */
 import { useEffect, useMemo, useState } from "react";
-import { getShadow, type ShadowChampion, type ShadowData, type ShadowStrategyReport, type ShadowTrade } from "@/lib/api";
-import { Ghost, Info, RefreshCw } from "lucide-react";
+import { getShadow, type ShadowChampion, type ShadowData, type ShadowHealth, type ShadowStrategyReport, type ShadowTrade } from "@/lib/api";
+import { AlertTriangle, CheckCircle2, Clock, Ghost, Info, RefreshCw } from "lucide-react";
 
 const pct = (v: number | null | undefined, d = 2) =>
     v === null || v === undefined ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(d)}%`;
@@ -72,6 +72,34 @@ function Check({ ok, label }: { ok: boolean; label: string }) {
         <div style={{ display: "flex", gap: 6, fontSize: 12, color: ok ? "var(--success)" : "var(--text-muted)" }}>
             <span>{ok ? "✔" : "○"}</span>
             <span>{label}</span>
+        </div>
+    );
+}
+
+const tsi = (iso: string) =>
+    new Date(iso).toLocaleString("tr-TR", {
+        weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Istanbul",
+    }) + " TSİ";
+
+/** Koşu sağlığı: kaçırılan seans (kırmızı), eksik koşu (sarı), bekleniyor (gri), tamam (yeşil). */
+function HealthBanner({ h }: { h: ShadowHealth }) {
+    const overdue = (h.overdue_sessions ?? 0) > 0;
+    const fresh = h.last_asof === h.expected_asof;
+    const [color, Icon, text]: [string, typeof AlertTriangle, string] = overdue
+        ? ["var(--danger)", AlertTriangle,
+           `Gölge koşusu ${h.overdue_sessions} seansın kararını kaçırdı (son koşu: ${h.last_asof}). O günlerin sinyalleri ileri teste girmedi — GitHub tetikleyicilerini kontrol edin.`]
+        : h.complete
+            ? ["var(--success)", CheckCircle2,
+               `${h.expected_asof} sinyalleri için koşu tamam${h.on_time ? " · zamanında (açılıştan önce)" : " · GEÇ (açılıştan sonra, değerlendirmeye girmez)"}.`]
+            : fresh
+                ? ["var(--warning, #f59e0b)", AlertTriangle,
+                   `Son koşu eksik: ${h.issues.join(" · ")}. Yedek tetikleyiciler son ana (${tsi(h.next_deadline)}) kadar yeniden deneyecek.`]
+                : ["var(--text-muted)", Clock,
+                   `${h.expected_asof} sinyalleri için koşu bekleniyor · karar için son an ${tsi(h.next_deadline)}.`];
+    return (
+        <div className="card" style={{ display: "flex", gap: 10, alignItems: "flex-start", borderLeft: `3px solid ${color}`, padding: "10px 14px" }}>
+            <Icon size={17} style={{ color, flexShrink: 0, marginTop: 1 }} />
+            <div style={{ fontSize: 13, color: overdue ? color : undefined }}>{text}</div>
         </div>
     );
 }
@@ -225,9 +253,11 @@ export default function ShadowPage() {
                                 Terfi otomatik değildir. “TERFİ ADAYI” yalnız gerçek para tartışmasını açar.
                                 “KALDI” durumunda gölge kapatılır. Geç verilen kararlar (açılıştan sonra) ve ısınma dönemi değerlendirmeye girmez.
                             </div></>
-                        : "Gölge koşusu henüz çalışmadı. İlk sabah cron'undan sonra burada veri görünecek."}
+                        : "Gölge koşusu henüz çalışmadı. İlk koşudan sonra burada veri görünecek."}
                 </div>
             </div>
+
+            {data.health && <HealthBanner h={data.health} />}
 
             {strategies.length > 0 && (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 16 }}>

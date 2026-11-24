@@ -19,6 +19,17 @@
 #     06:15 UTC, 07:15 UTC                (yedek: GitHub koşuyu düşürürse / SEC endeksi gecikirse)
 #   Pzt–Cmt (UTC): Cmt 00:15 ET koşusu Cuma'nın, Pzt koşusu Cuma'nın yedeğidir (giriş Pzt açılışı).
 #   Bu saatler swing_trader/tests/test_shadow_schedule.py ile kilitli.
+#
+# İKİNCİ, BAĞIMSIZ TETİK — Daily Run zinciri (`workflow_run`): 2026-11-23 Pazartesi'nin iki gölge
+#   cron'u HİÇ tetiklenmedi (GitHub zamanlanmış koşuları düşürebilir), oysa Daily Run son 2 ayda
+#   46 seansın hiçbirini atlamadı. Daily Run (canlı tarama) bitince bu iş başlar; ET akşamıysa NY
+#   gece yarısı + 5 dk'yı bekler (.github/scripts/shadow_window.py, en çok 4.5 s; sığmazsa atlar,
+#   cron'lar karşılar). Canlı taramadan SONRA başladığı için onunla çakışmaz.
+#
+# GEREKİRSE KOŞ: zamanlanmış ve zincir tetikleri `?if_needed=true` gönderir — en yeni seans için
+#   tam ve temiz bir koşu zaten varsa sunucu hiçbir şey yapmadan döner (ağır VCE/SEC işi tekrar
+#   koşmaz, last_run gerçek koşu olarak kalır). Hata, ertelenen karar (IWM barı gecikti), eksik
+#   bar veya H4 birikimi varsa yeniden koşar. Elle tetikleme (workflow_dispatch) her zaman koşar.
 # Çok koşma sorun değil: kayıtlar (strateji, hisse, olay günü) ile idempotent; `concurrency`
 # gecikip üst üste binen koşuları sıraya koyar (aynı anda iki H4 SEC'in hız sınırını aşmasın).
 #
@@ -33,6 +44,9 @@ on:
     - cron: '15 5 * * 1-6'
     - cron: '15 6 * * 1-6'
     - cron: '15 7 * * 1-6'
+  workflow_run:
+    workflows: ["Daily Run"]
+    types: [completed]
   workflow_dispatch:
 
 concurrency:
@@ -43,11 +57,34 @@ jobs:
   shadow-run:
     name: Trigger shadow forward test
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 330          # zincirde en çok 4.5 s bekleme (MAX_WAIT_S) + uyanış/koşu payı
     steps:
+      - name: Checkout window helper (Daily Run chain only)
+        if: github.event_name == 'workflow_run'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Wait for the decision window (Daily Run chain only)
+        id: window
+        if: github.event_name == 'workflow_run'
+        run: |
+          set -euo pipefail
+          wait_s=$(python3 .github/scripts/shadow_window.py)
+          if [ "$wait_s" -lt 0 ]; then
+            echo "::notice::NY gece yarısı 4.5 saatten uzak — sabah cron'ları karşılayacak, atlanıyor"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          elif [ "$wait_s" -gt 0 ]; then
+            echo "NY gece yarısı + 5 dk için $((wait_s / 60)) dk bekleniyor (H4: günün Form 4'leri)"
+            sleep "$wait_s"
+          fi
+
       - name: Wake machine, then call shadow daily-run
+        if: steps.window.outputs.skip != '1'
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          IF_NEEDED: ${{ github.event_name == 'workflow_dispatch' && 'false' || 'true' }}
         run: |
           set -euo pipefail
           if [ -z "${CRON_SECRET:-}" ]; then
@@ -56,7 +93,7 @@ jobs:
           fi
 
           HEALTH="https://swing-trade.fly.dev/api/health"
-          URL="https://swing-trade.fly.dev/api/shadow/daily-run"
+          URL="https://swing-trade.fly.dev/api/shadow/daily-run?if_needed=${IF_NEEDED}"
 
           ready=0
           for i in 1 2 3 4 5 6 7 8; do
