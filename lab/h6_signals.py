@@ -7,7 +7,7 @@ zaten geçilmiştir (filter_failed motorda tetikten önce). Bilanço kapısı on
 bilinmiyorsa ret (canlı kural). Giriş t+1 Open, çıkış 8. seans Close, stop/hedef yok.
 
 Usage: python lab/h6_signals.py
-Output: output/lab/challengers/trades_H6.parquet, output/lab/h6_report.json
+Output: <kök>/challengers/trades_H6.parquet, <kök>/h6_report.json  (kök: LAB_DATA, varsayılan output/lab)
 """
 import json
 import sys
@@ -18,7 +18,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lab.challengers import OUT, simulate, walk  # noqa: E402
-from lab.common import EVAL_START, earnings_dates, frames, indicators, panels, window_6mo  # noqa: E402
+from lab.common import (EVAL_END, EVAL_START, LAB, asof_window, earnings_dates, frames, indicators,  # noqa: E402
+                        panels, split_factor)
 from lab.evaluate import evaluate  # noqa: E402
 import lab.h0_signals as h0  # noqa: E402
 
@@ -26,29 +27,57 @@ PASSED_TRIGGER = ("swing_not_ready", "rsi_gate", "stage_rejected", "SIGNAL")
 HOLD = 8
 
 
-def main():
-    h0._init()
+def trigger_rows() -> pd.DataFrame:
+    """Motor kayıtlarından değerlendirme dönemindeki, tetiği geçmiş hisse-günler."""
+    o = pd.read_parquet(LAB / "h0/outcomes_emulated.parquet")
+    d = pd.DatetimeIndex(o.date)
+    keep = (d >= EVAL_START) & (o.reject.isin(PASSED_TRIGGER) | o.reject.str.startswith("quality_type"))
+    if EVAL_END is not None:
+        keep &= d <= EVAL_END
+    return o[keep]
+
+
+def vce_hits(o: pd.DataFrame) -> list:
+    """Canlı VCE tetiğini her kayıtta yeniden çalıştırır → [(gün, hisse)] (h0._init çağrılmış olmalı)."""
     eng, rep = h0._ENGINE, h0._FETCH
-    from swing_trader.small_cap.filters import SmallCapFilters
-    filt = SmallCapFilters(None, eng.settings)
-    o = pd.read_parquet(ROOT / "output/lab/h0/outcomes_emulated.parquet")
-    o = o[(pd.DatetimeIndex(o.date) >= EVAL_START)
-          & (o.reject.isin(PASSED_TRIGGER) | o.reject.str.startswith("quality_type"))]
-    F, dv = frames(), indicators()["dv20"]
-    rows, n_vce, n_earn_rej = [], 0, 0
+    F, SF = frames(), split_factor()
+    hits = []
     for r in o.itertuples():
-        w = window_6mo(F[r.ticker], r.date)
+        w = asof_window(F[r.ticker], r.date, float(SF.at[r.date, r.ticker]))
         w = rep._repair_ohlc_bars(w, r.ticker)
         _, td = eng.signals.check_all_triggers(w)
-        if not ((td.get("triggers") or {}).get("vce_breakout") or {}).get("passed"):
+        if ((td.get("triggers") or {}).get("vce_breakout") or {}).get("passed"):
+            hits.append((r.date, r.ticker))
+    return hits
+
+
+def earnings_gate(hits, known=None):
+    """Canlı bilanço kapısı (bilinmiyorsa ret) → (aday tablosu, reddedilen sayısı).
+
+    known(dates, day) → o gün için takvim güvenilir mi (Ek R veri kalitesi kuralı). None = 2021–26
+    davranışı: takvim boş değilse güvenilir.
+    """
+    from swing_trader.small_cap.filters import SmallCapFilters
+    filt = SmallCapFilters(None, h0._ENGINE.settings)
+    dv = indicators()["dv20"]
+    rows, rejected = [], 0
+    for d, t in hits:
+        ed = earnings_dates(t)
+        if ed is None or len(ed) == 0 or (known is not None and not known(ed, d)) \
+                or not filt.check_earnings(t, d.to_pydatetime(), list(ed))[0]:
+            rejected += 1
             continue
-        n_vce += 1
-        ed = earnings_dates(r.ticker)
-        if ed is None or len(ed) == 0 or not filt.check_earnings(r.ticker, r.date.to_pydatetime(), list(ed))[0]:
-            n_earn_rej += 1
-            continue
-        rows.append(dict(date=r.date, ticker=r.ticker, key=float(dv.at[r.date, r.ticker]), atr=0.0))
-    cands = pd.DataFrame(rows).sort_values(["date", "key"], ascending=[True, False])
+        rows.append(dict(date=d, ticker=t, key=float(dv.at[d, t]), atr=0.0))
+    cands = pd.DataFrame(rows, columns=["date", "ticker", "key", "atr"])
+    return cands.sort_values(["date", "key"], ascending=[True, False]), rejected
+
+
+def main():
+    h0._init()
+    o = trigger_rows()
+    hits = vce_hits(o)
+    cands, n_earn_rej = earnings_gate(hits)
+    n_vce = len(hits)
     cands.to_parquet(OUT / "h6_candidates.parquet", index=False)      # Ek H filtreleri için
     P = panels()
     T = simulate(cands, P, lambda ie, arr, row: walk(ie, arr, None, HOLD), "H6")
@@ -58,7 +87,7 @@ def main():
     for cost in (0.50, 0.20):
         out, _, _ = evaluate("H6", T, cost=cost)
         res[f"cost_{int(cost * 100)}bps"] = out
-    (ROOT / "output/lab/h6_report.json").write_text(json.dumps(res, indent=1, default=str))
+    (LAB / "h6_report.json").write_text(json.dumps(res, indent=1, default=str))
     m = res["cost_50bps"]
     print(f"trigger rows {len(o)} → VCE {n_vce} → earnings rejected {n_earn_rej} → candidates {len(cands)} "
           f"→ trades {m['n']} over {m['months']} months")

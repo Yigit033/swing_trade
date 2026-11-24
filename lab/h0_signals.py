@@ -25,8 +25,10 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from lab.common import LAB  # noqa: E402  (veri kökü: LAB_DATA, varsayılan output/lab)
+
 PATCH = ROOT / "output/discovery_v2/phase2/effective_patch.json"
-OUT = ROOT / "output/lab/h0"
+OUT = LAB / "h0"
 
 _ENGINE = None
 _FETCH = None
@@ -74,8 +76,8 @@ def regime_series():
 
 def build_infos(members, days):
     """(d, t) -> live-shaped Finviz metadata (computed once in the parent process)."""
-    from lab.common import shares_panel, info_frame, panels
-    S, info, C = shares_panel(), info_frame(), panels()["Close"]
+    from lab.common import shares_panel, info_frame, actual_close
+    S, info, C = shares_panel(), info_frame(), actual_close()   # o günün gerçek fiyatı (Ek R; 2021–26'da aynı)
     out = {}
     for d in days:
         for t in members[d]:
@@ -98,10 +100,11 @@ _REAL_FLOAT = False  # PREREGISTRATION Ek B (H0F): supply approximate float inst
 
 
 def _work(args):
-    days, members, regimes, infos, F, real_float = args
+    days, members, regimes, infos, F, real_float, *rest = args
+    factors = rest[0] if rest else {}                    # (gün, hisse) → bölünme katsayısı; yoksa 1 (static_merge)
     global _REAL_FLOAT
     _REAL_FLOAT = real_float
-    from lab.common import window_6mo
+    from lab.common import asof_window
     sig_rows, out_rows = [], []
     for d in days:
         regime, conf = regimes.get(d, ("UNKNOWN", "TENTATIVE"))
@@ -110,7 +113,7 @@ def _work(args):
             stock_info = infos.get((d, t))
             if df is None or stock_info is None:
                 continue
-            w = window_6mo(df, d)
+            w = asof_window(df, d, factors.get((d, t), 1.0))   # canlının o gün gördüğü fiyat ölçeği (Ek R)
             if len(w) < 20 or w.Date.iloc[-1] != d:
                 continue
             w = _FETCH._repair_ohlc_bars(w, t)
@@ -151,7 +154,7 @@ def main():
     ap.add_argument("--float", dest="flt", default="live", choices=["live", "real"])
     ap.add_argument("--workers", type=int, default=max(2, (os.cpu_count() or 4) - 2))
     a = ap.parse_args()
-    from lab.common import finviz_members, panels, EVAL_START
+    from lab.common import finviz_members, panels, split_factor, EVAL_START, EVAL_END
     t0 = time.time()
     regimes = regime_series()
     if a.universe == "recorded":
@@ -167,10 +170,13 @@ def main():
         days = sorted(d for d in members if d in panels()["Close"].index)
     else:
         members = finviz_members()
-        days = [d for d in sorted(members) if d >= EVAL_START]
+        days = [d for d in sorted(members) if d >= EVAL_START and (EVAL_END is None or d <= EVAL_END)]
     from lab.common import frames
     infos = build_infos(members, days)
     allF = frames()
+    SF = split_factor()                                   # 2021–26 kökünde ≡ 1 → factors boş
+    factors = {(d, t): float(SF.at[d, t]) for d in days for t in members[d]
+               if t in SF.columns and SF.at[d, t] != 1.0}
     print(f"{len(days)} days, {sum(len(members[d]) for d in days)} scans, prep {time.time()-t0:.0f}s", flush=True)
     # Contiguous date blocks keep each job's ticker set (and pickle) small.
     nb = a.workers * 6
@@ -181,8 +187,10 @@ def main():
         tick = {t for d in c for t in members[d]}
         lo = c[0] - pd.DateOffset(months=7)
         Fsub = {t: allF[t][(allF[t].Date >= lo) & (allF[t].Date <= c[-1])] for t in tick if t in allF}
+        cs = set(c)
         jobs.append((c, {d: members[d] for d in c}, regimes,
-                     {k: v for k, v in infos.items() if k[0] in set(c)}, Fsub, a.flt == "real"))
+                     {k: v for k, v in infos.items() if k[0] in cs}, Fsub, a.flt == "real",
+                     {k: v for k, v in factors.items() if k[0] in cs}))
     sigs, outs = [], []
     with ProcessPoolExecutor(a.workers, initializer=_init) as ex:
         for i, (s, o) in enumerate(ex.map(_work, jobs)):

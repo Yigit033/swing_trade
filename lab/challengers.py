@@ -15,9 +15,9 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from lab.common import panels, pool_mask, EVAL_START  # noqa: E402
+from lab.common import LAB, panels, pool_mask, EVAL_START  # noqa: E402
 
-OUT = ROOT / "output/lab/challengers"
+OUT = LAB / "challengers"
 
 
 def rsi_wilder(c: pd.DataFrame, n: int) -> pd.DataFrame:

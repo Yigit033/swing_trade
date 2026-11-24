@@ -5,6 +5,13 @@
 `1cd64f8aac6a3dc47058d0b3a53c339e318e18dc1a54769c45c380c44a5370b9`. Bu dosya sonuçlardan
 önce yazıldı; parametreler sonradan değiştirilmedi.
 
+> **Düzeltme ve güncelleme (24 Kasım 2026 — Ek R).** Bu rapordaki evren emülasyonu, sonradan bölünen ya da
+> birleşen hisselerde o günün fiyatını ve piyasa değerini yanlış hesaplıyordu. H6S'nin 2021–26 sonucu
+> (+66%) bu kusurdan geliyordu: kârın %76'sı canlı ürünün asla alamayacağı tek bir işlemdi (AMC, gerçek
+> fiyat 3 $). **Düzeltilmiş veriyle H6S 2021–26'da −30%, hiç kullanılmamış 2016–2020'de −56% (IWM +98%).**
+> Ek A–Q'daki rakamlar düzeltilmemiş evrenle üretildi ve yeniden hesaplanmadı; oradaki olumlu bulgular
+> kanıt sayılmamalı.
+
 ## 1. Kısa sonuç
 
 **Bugünkü canlı ürün, 2021–2026 boyunca maliyet sonrası para kaybettirirdi. Aynı
@@ -694,3 +701,125 @@ portföyde dönemden döneme ters döndü. Karar geleceğin verisine bırakıld�
 yolda (eksik barlı) birebir. H4/H5/H6/H6S kilitleri değişmedi; canlı paper ürün değişmedi.
 Kapı Ek C düzeni (≥6 ay ve ≥100 işlem, net CI > 0, IWM'i geçmek, düşüş > −35%) + aynı dönemde H6S'den
 yüksek portföy → ancak o zaman kullanıcıya önerilir. Gölge sayfasında H6S'nin yanında görünür.
+
+## Ek R — H6S'nin dokunulmamış yıllarda sınavı ve evren emülasyonundaki bölünme kusuru (24 Kasım 2026)
+
+Ön kayıt: `lab/PREREGISTRATION.md` Ek R (bölümün LF satır sonlu SHA256'sı
+`31fe5e5edea8b1135e97607a8ab7453b4a91e844c0cc56da42f2e7ff188632f4`; 2016–2020 verisi indirilmeden önce
+yazıldı). Kod: [lab/oos_r.py](lab/oos_r.py). Veri kökü `output/lab_oos`: 3.599 hisse (2014-10 → 2021-03),
+2.794 bölünme olayı, 2.217 hisse sayısı serisi, 839 bilanço takvimi (hepsi eksiksiz indi).
+
+**Hüküm: KALDI.** Canlı ürünün kuralları (H6S), projede hiçbir kararda kullanılmamış 2016–2020 yıllarında
+para kaybettirdi ve hisse seçiminde rastgele bir havuz hissesinden iyi değildi. Hazırlık sırasında bulunan
+bir veri kusuru düzeltilince 2021–26 sonucu da eksiye döndü (R.3).
+
+### R.1 Sınav sonucu (sinyal günleri 2016-01-04 → 2020-12-31, kurallar donuk)
+
+| Ölçü | H6S | Kıyas |
+|---|---:|---|
+| İşlem | 971 (50 ay) | — |
+| İşlem başı brüt | +0.24% | havuz +0.24%, IWM +0.25% |
+| İşlem başı net (50 bps) | **−0.26%** | 20 bps'de +0.04% |
+| Havuza göre fark | **−0.00** [−0.55, +0.58] | 2021–26 (kusurlu veri): +0.96 |
+| Kazanma oranı / PF | %43.7 / 0.91 | medyan net −0.82% |
+| En iyi %5 hariç net | −1.55% | — |
+| **Portföy, canlı ayar** (%15, L2 freni, 50 bps + 1.5$, 10.000$) | **−56.0%** | **IWM al-tut +97.5%** |
+| Max düşüş | −63.4% | — |
+| Frensiz (R5) | −47.3% / düşüş −61.9% | — |
+
+| Yıl | İşlem | Net/işlem | Havuz farkı | Portföy | IWM |
+|---|---:|---:|---:|---:|---:|
+| 2016 | 216 | −0.74 | +0.21 | −10.1% | +21.6% |
+| 2017 | 198 | −0.41 | +0.08 | −12.2% | +14.6% |
+| 2018 | 210 | −0.89 | −0.60 | −27.0% | −11.1% |
+| 2019 | 139 | −1.61 | −1.09 | −18.9% | +25.4% |
+| 2020 | 208 | +1.91 | +1.04 | −6.6% | +20.0% |
+
+- **Ölçütler:** R0 yeterlilik ✔ · R1 net > 0 ve havuz farkı > 0 ✘ · R2 CI alt sınırı > 0 ✘ · R3 portföy >
+  IWM ✘ · R4 düşüş > −35% ✘ · R5 frenin değeri ✘. §1 P1 ✔, P2–P6 ✘.
+- **Fren ne yaptı:** üç düşüş penceresinde hesabı korudu (2016 başı 0.0% vs IWM −15.8%; 2018 son çeyrek −8.8%
+  vs −26.8%; 2020 Şubat–Mart −5.0% vs −40.6%). Ama para yükseliş günlerinde kaybedildi: BULL rejiminde 948
+  işlem, brüt +0.27% (maliyetin altında). Frensiz varyant daha az kaybettiği için R5 sağlanmadı.
+- **Duyarlılık (hüküm değiştirmez):** %10 pozisyon −50.2% (düşüş −56.1); 20 bps −44.6%; 25.000$ hesap −49.1%;
+  bilanço veri kalitesi kuralı olmadan n=1.006, −57.9%; H6SR çıkışı (Ek O1) −26.8% (düşüş −42.2).
+- **Veri kalitesi:** işlem yapılan 578 hissenin hepsinde tarihli hisse sayısı serisi var (84 işlemde ilk gözlem
+  sinyalden sonra → geriye taşındı); 100 işlem bölünme düzeltmesi gerektiren hissede; bilanço takvimi kuralı
+  2.407 VCE isabetinin 80'ini "bilinmiyor" diye reddetti. İşlem getirileri [−35.8%, +151.8%] aralığında; stop
+  234 işlem (ort. −8.0%), süre 737 işlem (ort. +2.9%) — veri hatası izi yok.
+- **Yanlılık yönü:** evren 2026'da hâlâ listede olan hisseler (survivorship) → gerçek sonuç daha kötü olur.
+
+### R.2 Bölünme kusuru (2016–2020 verisi görülmeden bulundu, ön kayıtta ilan edildi)
+
+Yahoo fiyat ve hacmi bugüne kadarki bölünmelere göre düzeltilmiş verir; hisse sayısı serisi ise o günün ham
+sayısıdır. Lab ikisini çarpıp piyasa değeri hesaplıyor, fiyat bandını da düzeltilmiş fiyatla uyguluyordu.
+Sonuç: sonradan **birleşen** (ters bölünen) hisselerde 7 $ altı kâğıtlar 7 $ üstü görünüyor; sonradan
+**bölünen** hisselerde büyük şirketler küçük şirket gibi görünüyor ya da fiyat tavanının üstündeki hisseler
+banda giriyor. 2016'nın sıradan bir gününde verisi olan hisselerin %40'ında düzeltme katsayısı 1'den farklı.
+
+Düzeltme (`lab/common.split_factor`, `actual_close`, `asof_window`, `shares_panel`): F(t) = t'den sonraki
+bölünme oranlarının çarpımı; o günün gerçek fiyatı = düzeltilmiş × F, gerçek hacmi = düzeltilmiş ÷ F, piyasa
+değeri = gerçek fiyat × o günün hisse sayısı. Evren üyeliği, havuz, sert filtreler ve motorun gördüğü 6 aylık
+pencere gerçek değerlerle; getiriler düzeltilmiş fiyatla. Doğrulama: AMC 2021-01-19 → 3.06 $, MSTR 2021-01-04
+→ 425 $, ANET 2021-06-03 → 344 $ / 26 milyar $ (gerçek değerlerle aynı). Bölünme dosyası olmayan kökte
+(`output/lab`) davranış bit düzeyinde aynı: 2.529 aday, 1.145 işlem, +66.2% yeniden üretildi.
+
+### R.3 Aynı kusurun 2021–26 sonucuna etkisi (etiketli: in-sample'a yeniden bakış, karar değil)
+
+| 2021–26, aynı tanım (bilanço kuralı yok), 50 bps + 1.5$ | Eski (kusurlu evren) | Düzeltilmiş evren |
+|---|---:|---:|
+| İşlem | 1.145 | 1.134 (1.095 ortak, 50 çıktı, 39 girdi) |
+| İşlem başı net (50 bps) | +0.64% | +0.23% |
+| Havuza göre fark | +0.96 [+0.02, +1.97] | +0.60 [−0.28, +1.66] |
+| Portföy %15 (canlı ayar) | **+66.2%** / düşüş −37.9 | **−30.2%** / düşüş −40.8 |
+| Portföy %10 | +35.7% / −31.8 | −12.6% / −30.9 |
+| Portföy %15, 20 bps | +106.4% | −12.3% |
+| IWM al-tut | +46.9% | +46.9% |
+
+- **Çıkan 50 işlemin ortalaması +9.3%** (toplam +464 puan); giren 39 işlemin ortalaması −0.2%.
+- Eski koşudaki 1.145 işlemin **34'ü canlı evren kurallarına göre imkânsızdı** (gerçek fiyat < 7 $ veya > 250 $,
+  ya da piyasa değeri 300 milyon–10 milyar $ dışında): ortalama getirileri +12.3%, kalanların +0.8%.
+- Eski +66.2% = +6.624 $ kâr. Bunun **+5.055 $'ı tek işlem: AMC, 2021-01-19, +303%.** O gün AMC gerçekte
+  3.06 $'dı (ürün 7 $ altını almaz); Ağustos 2023'teki 10→1 birleşme yüzünden veride 30.6 $ görünüyordu.
+  Alınan 18 imkânsız işlemin toplam katkısı +4.494 $. Yalnız bu 34 işlem çıkarılınca (başka hiçbir şey
+  değişmeden) sonuç +1.6%; evren tamamen düzeltilince −30.2%.
+- Kalan kâr da tek bir uç olaya bağlı: GME 2024-05-02 (+292%, +7.507 $; gerçek ve alınabilir bir işlem) tek
+  başına toplam kârdan büyük. P4 ("en iyi %5 çıkınca net > 0") bu kırılganlığı zaten işaretlemişti.
+- Düzeltilmiş 2021–26 yıllık portföy (%15): 2021 −21.8, 2022 −4.8, 2023 +1.2, 2024 +28.4, 2025 −16.4,
+  2026 −13.7. Bilanço veri kalitesi kuralıyla aynı koşu: n=1.070, −7.1% (düşüş −37.6) — yüzlerce işlemden
+  hangilerinin nakde sığdığına bağlı, yani portföy sonucu yol bağımlı ve kırılgan.
+- Düzeltilmiş 2021–26'da fren işe yarıyor (frensiz −66.3%); H6SR %15'te −22.9%, %10'da +15.9%.
+
+### R.4 Kontroller
+
+| Kontrol | Sonuç |
+|---|---|
+| Kod değişikliği eski sonucu bozdu mu? | Hayır: `output/lab` kökünde 2.529 aday ve 1.145 işlem birebir, +66.2% |
+| Sınav betiği doğru hesaplıyor mu? | 2021–26 verisinde uçtan uca deneme: bilinen rakamları üretti |
+| Kötü sonuç bölünme düzeltmesinden mi? | Hayır: düzeltmesiz 2016–2020 de KALDI (n=1.038, net −0.04%, portföy −36.9%, IWM +97.5%) |
+| Bilanço kuralından mı? | Hayır: kuralsız −57.9% |
+| Veri/simülasyon hatası? | İşlem dağılımı, en iyi/en kötü işlemler ve çıkış nedenleri incelendi; anormallik yok |
+
+### R.5 Sonuç ve kararlar
+
+1. **H6S'nin para kazandırdığına dair kanıt kalmadı.** Doğru veriyle iki dönemde de zarar: 2016–2020 −56%,
+   2021–26 −30% (canlı ayar); IWM +98% ve +47%. İşlem başı net, iki dönem birlikte ≈ 0.
+2. Ön kayıt gereği canlı paper ürünün kuralları ve gölge kilitleri değişmedi; nihai hakem gölge ileri test
+   (canlı veride bölünme kusuru yok: Finviz o günün gerçek fiyatını verir). Ürün ekranlarındaki "Midas adayı"
+   ifadesi ve geçersiz geçmiş test rakamları kaldırıldı; Emirler sayfasına sonuç notu eklendi.
+3. Ek A–Q düzeltilmemiş evrenle üretildi ve yeniden hesaplanmadı. Oradaki olumlu bulgular (H6S, L2 freni,
+   %15 pozisyon, 20 bps senaryosu) kanıt sayılmamalı. `output/lab` tarihsel kayıt olarak aynen duruyor;
+   düzeltilmiş 2021–26 kökü `output/lab_is_split`.
+4. **Bundan sonra kural:** yeni bir fikir gölgeye girmeden önce düzeltilmiş evrende **iki dönemde de**
+   (2016–2020 ve 2021–2026) ön kayıtlı olarak sınanır. 2016–2020 dönemi H6S için kullanıldı: bu veride H6S
+   kural/parametre/varyant denemesi yapılmaz.
+
+Tekrar üretim:
+
+```text
+python lab/oos_r.py ohlcv      # fiyat + bölünme olayları → output/lab_oos
+python lab/oos_r.py tickers && python lab/oos_r.py shares
+LAB_WORKERS=4 python lab/oos_r.py h0
+python lab/oos_r.py vce && python lab/oos_r.py earnings
+python lab/oos_r.py run        # → output/lab_oos/r_oos.json
+python -m pytest swing_trader/tests/test_lab_oos_rules.py
+```

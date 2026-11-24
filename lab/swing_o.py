@@ -82,8 +82,9 @@ def simulate(cands, P, regimes, caution_max, bear_block=True, runner=False):
     return pd.DataFrame(rows)
 
 
-def portfolio(T, frac=0.10, cost=0.50, fee=FEE, cap0=CAP0, brake=True):
-    """execution_m.portfolio (sabit boyut) + boyut parametresi + maruziyet. frac=0.10 → birebir taban."""
+def portfolio(T, frac=0.10, cost=0.50, fee=FEE, cap0=CAP0, brake=True, return_curve=False):
+    """execution_m.portfolio (sabit boyut) + boyut parametresi + maruziyet. frac=0.10 → birebir taban.
+    return_curve=True → (özet, günlük özsermaye serisi) döner (Ek R yıllık tablo); hesap aynı."""
     C = panels()["Close"]
     T = T.sort_values(["entry_day", "key"], ascending=[True, False])
     days = C.index[(C.index >= T.entry_day.min()) & (C.index <= T.exit_day.max())]
@@ -125,12 +126,13 @@ def portfolio(T, frac=0.10, cost=0.50, fee=FEE, cap0=CAP0, brake=True):
     eq = pd.Series(curve, index=days)
     yrs = (days[-1] - days[0]).days / 365.25
     Tk = T.loc[taken]
-    return dict(total_pct=round(float((eq.iloc[-1] / cap0 - 1) * 100), 1),
-                cagr_pct=round(float(((eq.iloc[-1] / cap0) ** (1 / yrs) - 1) * 100), 1),
-                max_dd_pct=round(float((eq / eq.cummax() - 1).min() * 100), 1),
-                taken=len(taken), idle_cash_pct=round(100 * float(np.mean(idle)), 1),
-                net_per_trade=round(float((Tk.ret_pct - cost).mean()), 3),
-                mean_bars=round(float(Tk.bars.mean()), 1) if "bars" in Tk else None)
+    out = dict(total_pct=round(float((eq.iloc[-1] / cap0 - 1) * 100), 1),
+               cagr_pct=round(float(((eq.iloc[-1] / cap0) ** (1 / yrs) - 1) * 100), 1),
+               max_dd_pct=round(float((eq / eq.cummax() - 1).min() * 100), 1),
+               taken=len(taken), idle_cash_pct=round(100 * float(np.mean(idle)), 1),
+               net_per_trade=round(float((Tk.ret_pct - cost).mean()), 3),
+               mean_bars=round(float(Tk.bars.mean()), 1) if "bars" in Tk else None)
+    return (out, eq) if return_curve else out
 
 
 def evaluate(T, frac, cost):

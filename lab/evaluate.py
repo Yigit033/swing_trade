@@ -15,9 +15,8 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from lab.common import panels, pool_mask  # noqa: E402
+from lab.common import LAB, panels, pool_mask  # noqa: E402
 
-LAB = ROOT / "output/lab"
 COST = 0.50  # % round trip (primary)
 
 

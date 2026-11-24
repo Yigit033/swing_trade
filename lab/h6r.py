@@ -13,7 +13,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lab.challengers import OUT, atr14, walk  # noqa: E402
-from lab.common import panels  # noqa: E402
+from lab.common import LAB, panels  # noqa: E402
 from lab.evaluate import evaluate  # noqa: E402
 import lab.h0_signals as h0  # noqa: E402
 
@@ -106,7 +106,7 @@ def main():
     print("criteria", m["criteria"], "PROMOTED", m["promoted"])
     print(pd.DataFrame(m["yearly"]).to_string(index=False))
     print(T.reason.value_counts().to_dict(), T.groupby("regime").ret_pct.agg(["size", "mean"]).round(2).to_dict())
-    (ROOT / f"output/lab/{name.lower()}_report.json").write_text(json.dumps(res, indent=1, default=str))
+    (LAB / f"{name.lower()}_report.json").write_text(json.dumps(res, indent=1, default=str))
 
 
 if __name__ == "__main__":

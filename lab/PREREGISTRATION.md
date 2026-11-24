@@ -552,3 +552,94 @@ geleceğin verisine bırakılır: gölge defterde H6S ile yan yana, AYNI sinyall
   ortalama > 0 VE CI alt sınırı > 0; F3 %10 portföy > IWM al-tut; F4 max düşüş > −35%. Ek olarak aynı
   dönemde H6S ile kıyas raporlanır; H6SR, H6S'nin yerine ancak F1–F4 geçer VE portföy toplamı H6S'den
   yüksekse kullanıcıya önerilir.
+
+# Ek R — H6S'nin dokunulmamış yıllarda sınavı (2016–2020, kurallar donuk)
+
+**Yazıldığı an: 2026-11-24, 2016–2020 dönemine ait hiçbir fiyat, sinyal veya sonuç görülmeden; veri henüz
+indirilmedi.** Yalnız veri erişimi yoklandı (8 hisse: Yahoo hisse sayısı serisi 2015 sonunda başlıyor ve
+bölünmeye göre DÜZELTİLMEMİŞ; bilanço takvimi 2015 öncesine iniyor; 2014 barları mevcut — getiri/sinyal
+bakılmadı).
+
+**Gerekçe.** H6S'nin kanıtı 2021–2026'ya ait ve iyimser: IWM freni fikri sonuç görüldükten sonra geldi,
+2024–26 yarısı iki kez kullanıldı, kazancın tamamı tek bir düşüşten (2022) kaçmaktan geliyor. Projedeki
+bütün ayar ve ölçümler 2021-01 → 2026-11 (Lab v3) ya da 2024-06 → 2026-05 (scripts/) verisini kullandı;
+**2016–2020 hiçbir kararda kullanılmadı.** Donuk kuralları orada çalıştırmak, ileri testi beklemeden
+yapılabilen tek "görülmemiş veri" sınavıdır. Dönem üç ayrı küçük hisse düşüşü içerir (2016 başı, 2018 son
+çeyrek, 2020 Şubat–Mart) ve güçlü yükseliş yılları (2016–17, 2019, 2020 sonu).
+
+**Donuk olanlar (hiçbiri değiştirilemez).** Kurallar ve kod: commit 45ebb3c; `PARAMS_H6S` kilidi
+47dfd9d0…; ayarlar canlı yamanın 2026-10-11 kopyası (in-sample ile aynı). Sinyal yolu in-sample ile aynı
+betikler: `lab/h0_signals.py --universe emulated` (Finviz emülasyonu + canlı motor) → `lab/h6_signals.py`
+(canlı VCE tetiği + bilanço kapısı) → IWM rejimli `lab/swing_o.simulate` (BEAR giriş yok, CAUTION'da en çok
+1; t+1 açılış; 2.5×ATR14 stop; 8. seans kapanışı; dolar hacim sırası; hisse başına tek pozisyon). Portföy:
+`lab/swing_o.portfolio` (doğru gün içi sıra, L2 kayıp serisi freni, 10.000$).
+
+**Veri.** yfinance günlük OHLCV (auto_adjust), aynı evren anlık görüntüsü (2026-10-10 adayları),
+2014-10-01 → 2021-03-05. **Sinyal günleri 2016-01-04 → 2020-12-31** (5 takvim yılı). Hisse sayısı:
+`get_shares_full(start=2015-01-01)`, in-sample ile aynı kurallar (ilk gözlem geriye taşınır; serisi olmayan
+hisse güncel hisse sayısına düşer). Ülke/sektör/float: güncel. Bilanço takvimi: `get_earnings_dates(limit=100)`.
+
+- **Bölünme düzeltmesi (veri görülmeden bulunan emülasyon kusuru, bu sınavda düzeltilir).** Yahoo fiyatları
+  bugüne kadarki bölünmelere göre düzeltilmiş, hisse sayıları ise o günkü ham sayı. İkisinin çarpımı,
+  sonradan bölünen hisselerde piyasa değerini bölünme oranı kadar küçültür (ör. Tesla 2016: gerçek ~30 milyar
+  $, hesaplanan ~2 milyar $ → evrene sızar); ters bölünenlerde 7 $ altı kâğıtları 7 $ üstü gösterir. Kural:
+  F(t) = t'den SONRAKİ bölünme oranlarının çarpımı (Yahoo "Stock Splits", bugüne kadar). O günkü gerçek
+  fiyat = düzeltilmiş fiyat × F(t); gerçek ortalama hacim = düzeltilmiş ÷ F(t); piyasa değeri = gerçek fiyat ×
+  o günkü hisse sayısı. Evren üyeliği, havuz, sert filtreler ve motorun gördüğü 6 aylık pencere bu gerçek
+  değerlerle hesaplanır; getiriler düzeltilmiş fiyatla (değişmez). In-sample kökünde bölünme dosyası yok →
+  o sonuçlar aynen kalır (aynı kusurun 2021–26'daki etkisi ayrıca, etiketli olarak ölçülebilir).
+- **Bilanço veri kalitesi kuralı (canlıdaki "bilinmiyorsa ret" ilkesinin geçmiş veri karşılığı).** Sinyal
+  günü d için takvim "biliniyor" sayılır ancak d'den önceki son kayıt ile d ve sonrasındaki ilk kayıt
+  mevcutsa VE aralarındaki süre ≤ 155 günse (arada eksik çeyrek yok). Değilse sinyal reddedilir. Reddedilen
+  sayı ve kuralsız sonuç betimleyici olarak raporlanır.
+- **Bilinen yanlılık (in-sample'dakinden BÜYÜK).** Evren 2026'da hâlâ listede olan hisseler; 2016–2020'de
+  listeden çıkan / satın alınan şirketler yok. Mutlak getiri iyimser çıkar. Bu yüzden: olumlu sonuç
+  "destekleyici ama iyimser", olumsuz sonuç "güçlü olumsuz kanıt" sayılır. Yanlılık göstergesi olarak
+  havuzun işlem başı getirisi IWM'inkiyle yan yana raporlanır.
+
+**Ölçütler (2016–2020; birincil maliyet 50 bps gidiş-dönüş, portföyde ayrıca Midas 1.5$/emir).**
+
+| # | Ölçüt |
+|---|---|
+| R0 | Yeterlilik: ≥150 H6S işlemi ve ≥30 farklı ay. Sağlanmazsa hüküm verilmez ("yetersiz veri"). |
+| R1 | İşlem başı net ortalama (50 bps) > 0 VE havuza göre fark ortalaması > 0 |
+| R2 | Havuz farkının gün kümeli bootstrap %95 CI alt sınırı > 0 (`lab/evaluate.boot_ci`) |
+| R3 | Canlı ayar portföyü (%15 pozisyon, L2 freni, 50 bps + 1.5$, 10.000$) toplam getirisi > IWM al-tut. Pencere: 2015-12-31 kapanışı → son H6S çıkış günü kapanışı; portföy ilk işleme kadar nakitte. |
+| R4 | Aynı portföyün max düşüşü > −35% |
+| R5 | Frenin değeri: aynı portföy ayarında IWM frenli H6S toplamı ≥ frensiz varyantın toplamı (BEAR'de giriş serbest, CAUTION sınırsız; stop ve tutuş aynı) VE max düşüşü daha sığ |
+
+**Hüküm (önceden sabit).**
+- **GEÇTİ:** R1, R2, R3, R4 birlikte.
+- **KISMEN:** R1 sağlanır VE canlı ayar portföyünün toplamı > 0, ama R2 / R3 / R4'ten en az biri sağlanmaz.
+- **KALDI:** R1 sağlanmaz veya canlı ayar portföyünün toplamı ≤ 0.
+
+R5 ayrıca geçti/kaldı olarak raporlanır (fren 2022 dışındaki düşüşlerde de işe yarıyor mu).
+
+**Betimleyici okumalar (hükmü değiştirmez).** %10 pozisyon; 20 bps; 25.000$ hesap; yıllık tablo (portföy ve
+IWM); üç düşüş penceresi (2015-12-31→2016-02-11, 2018-08-31→2018-12-24, 2020-02-19→2020-03-18) ve rejim
+dağılımı; §1 P1–P6 (P3 için havuz farkı pozitif yıl sayısı x/5 olarak verilir); H6SR çıkışı (Ek O1) aynı
+sinyallerde; bölünme düzeltmesinin, hisse sayısı yedeğinin ve bilanço kuralının etkilediği sinyal sayıları.
+
+**Sonuca göre ne yapılacak (önceden sabit).** Hüküm ne olursa olsun canlı ürünün kuralları ve gölge kilitleri
+DEĞİŞMEZ; nihai hakem gölge ileri testtir. GEÇTİ / KISMEN → H6S'ye güven artar, başka işlem yok. KALDI →
+kullanıcıya açıkça "2021–26 kazancı döneme özgü olabilir" denir. **Bu dönem bir kez kullanılır:** sonuç
+görüldükten sonra 2016–2020 verisinde kural, parametre veya varyant denemesi yapılmaz (yapılırsa bu dönem
+de in-sample olur); yeni fikirler yalnız ileri testte sınanır.
+
+# Ek R sonucu ve etiketli ek kontroller (2026-11-24, SONUÇ GÖRÜLDÜKTEN SONRA yazıldı)
+
+Yukarıdaki Ek R metni değiştirilmedi (bölüm SHA256, LF: 31fe5e5edea8b1135e97607a8ab7453b4a91e844c0cc56da42f2e7ff188632f4;
+`lab/oos_r.prereg_sha256`). **Hüküm: KALDI** — 971 işlem, net −0.26%, havuz farkı −0.00 [−0.55, +0.58], canlı ayar
+portföyü −56.0% (düşüş −63.4) vs IWM +97.5%; R1–R5 ✘. Ayrıntı: LAB_V3_REPORT.md Ek R.
+
+Sonuç görüldükten sonra yapılan, hükmü DEĞİŞTİRMEYEN iki tanı (strateji varyantı değil, veri işleme kontrolü):
+- **Düzeltmesiz 2016–2020** (in-sample ile aynı kusurlu evren emülasyonu): yine KALDI (−36.9%). Kötü sonuç
+  bölünme düzeltmesinden gelmiyor.
+- **Düzeltilmiş 2021–26** (ön kayıtta "ayrıca, etiketli olarak ölçülebilir" denen in-sample'a yeniden bakış):
+  +66.2% → −30.2%. Eski kârın +5.055 $'ı (toplam +6.624 $) canlı evrende imkânsız tek işlemdi (AMC, gerçek
+  fiyat 3.06 $). Bu bulgu H6S'nin 2021–26 kanıtını geçersiz kılar; Ek J/L/M/N/O rakamları kusurlu evrenledir.
+
+Bundan sonraki kural (yeni ön kayıtlar için): hipotezler düzeltilmiş evrende iki dönemde de sınanır
+(`output/lab_oos` 2016–2020, `output/lab_is_split` 2021–26). Ek R'nin "yeni fikirler yalnız ileri testte" cümlesi
+H6S varyantları için geçerlidir; H6S'den bağımsız, önceden kilitlenmiş hipotezlerin (ör. H4, H5) 2016–2020'de
+sınanması ayrı bir ön kayıtla yapılabilir.
