@@ -10,7 +10,8 @@
 > (+66%) bu kusurdan geliyordu: kârın %76'sı canlı ürünün asla alamayacağı tek bir işlemdi (AMC, gerçek
 > fiyat 3 $). **Düzeltilmiş veriyle H6S 2021–26'da −30%, hiç kullanılmamış 2016–2020'de −56% (IWM +98%).**
 > Ek A–Q'daki rakamlar düzeltilmemiş evrenle üretildi ve yeniden hesaplanmadı; oradaki olumlu bulgular
-> kanıt sayılmamalı.
+> kanıt sayılmamalı. Gölgedeki iki bilgi sinyali (H4, H5) de düzeltilmiş evrende iki dönemde sınandı ve
+> **KALDI** (Ek S): hiçbiri havuzu anlamlı biçimde yenmiyor, hiçbiri endeksi geçmiyor.
 
 ## 1. Kısa sonuç
 
@@ -822,4 +823,56 @@ LAB_WORKERS=4 python lab/oos_r.py h0
 python lab/oos_r.py vce && python lab/oos_r.py earnings
 python lab/oos_r.py run        # → output/lab_oos/r_oos.json
 python -m pytest swing_trader/tests/test_lab_oos_rules.py
+```
+
+## Ek S — H4 ve H5'in iki dönemde sınavı (24 Kasım 2026)
+
+Ön kayıt: `lab/PREREGISTRATION.md` Ek S (bölümün LF satır sonlu SHA256'sı
+`14b3007e1ce759fd056fbe6510fdc02c52fc1520bc7dee8834f0c6eddbe1aeb2`; H4/H5'in 2016–2020 verisi indirilmeden ve
+düzeltilmiş evrendeki hiçbir sonuçları görülmeden yazıldı). Kod: [lab/oos_s.py](lab/oos_s.py); kurallar Ek A
+ile birebir (`lab/info_signals.py`, kilit `PARAMS_SHA256` 178c293e…). Veri: SEC DERA 2015Q3–2020Q4 (22 dosya)
+ve 1.710 havuz hissesinin bilanço kayıtları (7'si boş: kapalı uçlu fonlar vb.); 2021–26 için Ek A'nın verisi,
+bölünme düzeltmeli evrenle (`output/lab_is_split`).
+
+**Hüküm: ikisi de KALDI.** Hiçbiri havuzu istatistiksel olarak yenemiyor, hiçbiri endeksi geçemiyor.
+
+| 50 bps, %10/işlem portföy | H4 2016–2020 | H4 2021–26 | H5 2016–2020 | H5 2021–26 |
+|---|---:|---:|---:|---:|
+| İşlem (ay) | 727 (59) | 929 (64) | 3.728 (60) | 6.575 (71) |
+| İşlem başı net | +1.29% | +0.33% | +1.00% | −0.35% |
+| Havuzun aynı pencerede getirisi | +1.67% | +0.54% | +2.25% | −0.08% |
+| **Havuza göre fark** | +0.12 [−0.73, +0.98] | +0.30 [−0.40, +1.02] | **−0.75 [−1.11, −0.38]** | +0.23 [−0.06, +0.53] |
+| Havuz farkı pozitif yıl | 3/5 | 5/6 | 2/5 | 4/6 |
+| En iyi %5 hariç net | −0.80% | −1.47% | −0.65% | −2.05% |
+| **Portföy** | **+15.8%** | **−11.8%** | **−17.9%** | **−26.9%** |
+| Max düşüş | −43.3% | −44.6% | −60.9% | −51.7% |
+| **IWM al-tut** | **+102.0%** | **+47.8%** | **+103.8%** | **+40.1%** |
+| S1 yeterlilik / S2 net / S3 fark CI / S4 > IWM / S5 düşüş | ✔ ✔ ✘ ✘ ✘ | ✔ ✔ ✘ ✘ ✘ | ✔ ✔ ✘ ✘ ✘ | ✔ ✘ ✘ ✘ ✘ |
+
+| İki dönem birlikte | İşlem | Havuza göre fark (95% CI) | Net (50 bps) | Hüküm |
+|---|---:|---|---:|---|
+| H4 içeriden alım kümesi | 1.656 | +0.22 [−0.32, +0.75] | +0.75% | **KALDI** |
+| H5 bilanço sürprizi | 10.303 | −0.12 [−0.36, +0.11] | +0.14% | **KALDI** |
+
+- **H4:** işlem başı net iki dönemde de pozitif, ama bu avantaj değil piyasa getirisi: aynı pencerelerde rastgele
+  bir havuz hissesi neredeyse aynısını kazandı (fark +0.22, CI sıfırı içeriyor). Portföyde 2016–2020 +15.8%
+  (IWM +102%), 2021–26 −11.8% (IWM +48%); iki dönemde de düşüş −43/−45%.
+- **H5:** 2021–26'daki küçük pozitif fark (+0.23) 2016–2020'de **anlamlı biçimde negatife** döndü (−0.75): pozitif
+  sürprizle yükselen hisseler sonraki 20 seansta havuzun gerisinde kaldı. Açıklama saat damgaları iki dönemde de
+  düzgün (%2–3'ü beklenen aralık dışında) → "zamanlama belirsiz" etiketi yok.
+- 2016–2020'deki yüksek mutlak getiriler (havuz +1.7–2.3% / 20 seans) dönemin yükselişi ve survivorship'tir;
+  bu yüzden ölçüt havuz farkı ve endeks kıyasıdır.
+- **Karar (ön kayıt):** H4 ve H5 aday sayılmaz; gölge kayıtları kendi kapılarına (Ek C) kadar sürer. Parametre
+  değişmedi, varyant denenmedi.
+
+**Lab v3'ün genel sonucu (Ek R + Ek S, düzeltilmiş evren, iki dönem).** Canlı ürün (H6S), çıkış varyantı (H6SR) ve
+gölgedeki iki bilgi sinyali (H4, H5): hiçbiri iki dönemin hiçbirinde IWM al-tut'u geçmedi; H4'ün 2016–2020
+sonucu dışında hepsi mutlak olarak da ekside. Günlük barlı, long-only, kamuya açık veriyle çalışan small/mid-cap
+swing stratejilerinde maliyet sonrası kanıtlanabilir bir avantaj bulunamadı.
+
+```text
+python lab/oos_s.py sec && python lab/oos_s.py earnings      # 2016–2020 verisi → output/lab_oos
+python lab/oos_s.py run                                      # 2016–2020
+LAB_DATA=output/lab_is_split LAB_EVAL_START=2021-01-04 LAB_EVAL_END=2026-11-20 python lab/oos_s.py run
+python lab/oos_s.py verdict                                  # → output/lab_oos/s_verdict.json
 ```

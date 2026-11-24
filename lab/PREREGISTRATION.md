@@ -643,3 +643,65 @@ Bundan sonraki kural (yeni ön kayıtlar için): hipotezler düzeltilmiş evrend
 (`output/lab_oos` 2016–2020, `output/lab_is_split` 2021–26). Ek R'nin "yeni fikirler yalnız ileri testte" cümlesi
 H6S varyantları için geçerlidir; H6S'den bağımsız, önceden kilitlenmiş hipotezlerin (ör. H4, H5) 2016–2020'de
 sınanması ayrı bir ön kayıtla yapılabilir.
+
+# Ek S — H4 ve H5'in iki dönemde sınavı (düzeltilmiş evren; 2016–2020 ilk kez, 2021–26 yeniden)
+
+**Yazıldığı an: 2026-11-24, Ek R sonucundan SONRA; H4/H5'in 2016–2020 verisi (SEC Form 4, bilanço sürprizleri)
+indirilmeden ve bu iki sinyalin düzeltilmiş evrendeki hiçbir sonucu görülmeden.** Görülenler: (i) H4/H5'in
+kusurlu evrendeki 2021–26 sonuçları (Ek A: H4 net +0.23%, havuz farkı +0.19 [−0.53, +0.94]; H5 net −0.26%,
+havuz farkı +0.27 [−0.02, +0.57]); (ii) 2016–2020'de yalnız H6S'nin ve havuz/IWM'in getirileri (Ek R).
+
+**Gerekçe.** Kullanıcı kararı (2026-11-24): H6S'nin kanıtı çöktükten sonra gölgedeki iki bilgi tabanlı sinyal
+aynı yöntemle sınansın. İkisi de fiyat kalıbı değil kamuya açık bilgi kullanıyor; kusurlu evrende havuzu
+brüt yendiler ama maliyeti aşamadılar.
+
+**Donuk olanlar.** Kurallar Ek A ile birebir (kilit `PARAMS_SHA256` 178c293e…); kod `lab/info_signals.py`
+(commit b77d7e5; tek ekleme değerlendirme dönemi sonu `EVAL_END`). Havuz §0, bölünme düzeltmeli (o günün
+gerçek fiyatı 7–250 $, gerçek ortalama hacim > 300K, dolar hacim > 5M $, piyasa değeri 300M–10B $). Giriş
+sinyal barından sonraki ilk açılış; stop giriş − 2.5×ATR14; 20. seans kapanışı; hisse başına tek pozisyon;
+aynı gün sıralama H4'te alım değeri, H5'te sürpriz yüzdesi. Maliyet 50 bps gidiş-dönüş (20 bps ayrıca).
+Portföy §3 (`lab/evaluate.portfolio`: 10.000$, %10/işlem, nakit sınırlı, doğru gün içi sıra).
+
+**Veri.**
+- **2016–2020** (`output/lab_oos`; fiyat, bölünme ve hisse sayısı Ek R'de indirildi): H4 için SEC DERA
+  "Insider Transactions Data Sets" 2015Q3–2020Q4; H5 için havuza en az bir gün girmiş 1.710 hissenin
+  `get_earnings_dates(limit=100)` kayıtları (zaman damgası, tahmin, açıklanan, sürpriz). Sinyal günleri
+  2016-01-04 → 2020-12-31.
+- **2021–26 düzeltilmiş** (`output/lab_is_split`): Ek A'nın aynı verisi (SEC 2020Q3–2026Q1; `earnings_full`,
+  limit=40), evren ve havuz bölünme düzeltmeli. Sinyal günleri 2021-01-04 → 2026-11-20 (H4 verisi 2026Q1'de biter).
+- **Bilinen sınırlar:** survivorship (evren 2026'da listede olanlar; mutlak getiri iyimser, havuz farkı kısmen
+  nötr); Form 4'teki sembol o günün sembolüdür (sembol değiştiren şirketler düşer, yeniden kullanılan semboller
+  gürültü ekler); Yahoo tahmin/EPS değerleri sonradan revize edilmiş olabilir; eski yıllarda açıklama saat
+  damgası güvenilmez olabilir → her dönem için havuz içi H5 olaylarının saat dağılımı raporlanır; olayların
+  ≥%30'u [05:00–09:30) ∪ [16:00–20:00] ET dışındaysa o dönemin H5 sonucu "zamanlama belirsiz" diye etiketlenir
+  (hüküm yine verilir).
+
+**Ölçütler (her sinyal için, her dönemde ayrı).**
+
+| # | Ölçüt |
+|---|---|
+| S1 | Yeterlilik: H5 ≥ 150, H4 ≥ 50 işlem ve ≥ 30 farklı ay |
+| S2 | İşlem başı net ortalama (50 bps) > 0 |
+| S3 | Havuza göre fark > 0 VE gün kümeli bootstrap %95 CI alt sınırı > 0 (`lab/evaluate.boot_ci`) |
+| S4 | §3 portföyünün toplamı > IWM al-tut (pencere: dönem başından önceki son kapanış → son çıkış günü; portföy ilk işleme kadar nakitte) |
+| S5 | Portföyün max düşüşü > −35% |
+
+**Hüküm (her sinyal için, önceden sabit).**
+- **GEÇTİ:** 2016–2020'de S1–S5 hepsi VE düzeltilmiş 2021–26'da S2 ile S4 sağlanır ve havuz farkı > 0.
+- **KISMEN (gerçek ama küçük):** havuz farkı iki dönemde de > 0 VE iki dönemin işlemleri birlikte alındığında
+  gün kümeli %95 CI alt sınırı > 0; ama GEÇTİ şartları sağlanmaz.
+- **KALDI:** diğer her durum. S1 2016–2020'de sağlanmazsa hüküm "yetersiz veri".
+
+**Sonuca göre (önceden sabit).** GEÇTİ → sinyal kullanıcıya canlı paper adayı olarak sunulur (karar kullanıcıda);
+gölge kaydı ve kilidi aynen sürer. KISMEN → gölgede kalır; maliyeti aşacak yeni bir tasarım ancak yeni ön kayıt
+ve ileri testle. KALDI → aday sayılmaz; gölge kaydı kendi kapısına (Ek C) kadar sürer. Hiçbir durumda parametre
+değiştirilmez ve bu veride H4/H5 varyantı denenmez. Betimleyici: yıllık tablo, 20 bps, §1 P1–P6, çıkış nedenleri.
+
+# Ek S sonucu (2026-11-24, SONUÇ GÖRÜLDÜKTEN SONRA yazıldı)
+
+Yukarıdaki Ek S metni değiştirilmedi (bölüm SHA256, LF: 14b3007e1ce759fd056fbe6510fdc02c52fc1520bc7dee8834f0c6eddbe1aeb2;
+`lab/oos_s.prereg_sha256`). **Hüküm: H4 KALDI, H5 KALDI.** H4: havuz farkı 2016–2020 +0.12 [−0.73, +0.98],
+2021–26 +0.30 [−0.40, +1.02], birlikte +0.22 [−0.32, +0.75]; portföy +15.8% / −11.8% vs IWM +102% / +48%.
+H5: havuz farkı 2016–2020 −0.75 [−1.11, −0.38], 2021–26 +0.23 [−0.06, +0.53], birlikte −0.12 [−0.36, +0.11];
+portföy −17.9% / −26.9% vs IWM +104% / +40%. Ön kayıt gereği ikisi de aday sayılmaz; gölge kayıtları Ek C
+kapısına kadar sürer. Ayrıntı: LAB_V3_REPORT.md Ek S.

@@ -17,11 +17,11 @@ const tone = (v: number | null | undefined) =>
 const NAMES: Record<string, { title: string; desc: string }> = {
     H5: {
         title: "H5 · Bilanço sürprizi",
-        desc: "EPS sürprizi ≥ %10 ve tepki günü yükselen kapanış → ertesi açılış, 2.5×ATR stop, 20 seans.",
+        desc: "EPS sürprizi ≥ %10 ve tepki günü yükselen kapanış → ertesi açılış, 2.5×ATR stop, 20 seans. Düzeltilmiş geçmiş testlerde rastgele hisseden iyi değil; portföy 2016–2020 −%18, 2021–26 −%27 (Lab v3 Ek S).",
     },
     H4: {
         title: "H4 · İçeriden alım kümesi",
-        desc: "30 günde ≥2 yönetici/direktör, ≥100K$ açık piyasa alımı (SEC Form 4) → ertesi açılış, 2.5×ATR stop, 20 seans.",
+        desc: "30 günde ≥2 yönetici/direktör, ≥100K$ açık piyasa alımı (SEC Form 4) → ertesi açılış, 2.5×ATR stop, 20 seans. Düzeltilmiş geçmiş testlerde rastgele hisseden anlamlı biçimde iyi değil; portföy 2016–2020 +%16 (endeks +%102), 2021–26 −%12 (Lab v3 Ek S).",
     },
     H6S: {
         title: "H6S · Profesyonel VCE (canlı paper ürün)",
@@ -220,8 +220,9 @@ export default function ShadowPage() {
                         <Ghost size={22} /> Gölge Sinyaller
                     </h1>
                     <p style={{ color: "var(--text-muted)", margin: "6px 0 0", fontSize: 13, maxWidth: 820 }}>
-                        Geçmiş testte havuzu brüt olarak yenen ama maliyet sonrası kanıtlanamayan iki bilgi tabanlı sinyal (H4, H5)
-                        ve canlı ürünün sadeleştirilmiş rakibi (H6), burada <strong>gerçek para olmadan</strong> ileriye doğru izleniyor.
+                        İki bilgi tabanlı sinyal (H4, H5) ve canlı ürünün VCE varyantları (H6, H6S, H6SR) burada{" "}
+                        <strong>gerçek para olmadan</strong> ileriye doğru izleniyor. Düzeltilmiş geçmiş testlerde (2016–2020 ve
+                        2021–2026) hiçbiri endeksi geçemedi (Lab v3 Ek R ve Ek S); geçerli kanıt yalnız bu ileri testten gelebilir.
                         Kurallar ve geçme ölçütleri sonuç görülmeden yazıldı; değişmez. Ana ürünün işlemlerine dokunmaz.
                     </p>
                 </div>

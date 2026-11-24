@@ -15,7 +15,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from lab.common import panels, pool_mask, pool_mask_large, EVAL_START, LAB  # noqa: E402
+from lab.common import panels, pool_mask, pool_mask_large, EVAL_END, EVAL_START, LAB  # noqa: E402
 from lab.challengers import simulate, walk, atr14, OUT  # noqa: E402
 
 
@@ -80,7 +80,7 @@ def to_candidates(ev, date_col, key_col, P, pool):
         if i < 0:
             continue
         d = cal[i]
-        if d < EVAL_START or not bool(pool.at[d, t]):
+        if d < EVAL_START or (EVAL_END is not None and d > EVAL_END) or not bool(pool.at[d, t]):
             continue
         rows.append(dict(date=d, ticker=t, key=float(getattr(r, key_col)), atr=float(a.at[d, t])))
     c = pd.DataFrame(rows)
@@ -126,7 +126,7 @@ def h5_events(P):
             R = cal[j]
             if not (C.at[R, t] > C.at[cal[j - 1], t]):
                 continue
-            ev.append(dict(ticker=t, R=R, surprise=s))
+            ev.append(dict(ticker=t, R=R, surprise=s, hour=ts.hour + ts.minute / 60))   # hour: Ek S veri kalitesi
     return pd.DataFrame(ev)
 
 
