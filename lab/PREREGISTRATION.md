@@ -705,3 +705,75 @@ Yukarıdaki Ek S metni değiştirilmedi (bölüm SHA256, LF: 14b3007e1ce759fd056
 H5: havuz farkı 2016–2020 −0.75 [−1.11, −0.38], 2021–26 +0.23 [−0.06, +0.53], birlikte −0.12 [−0.36, +0.11];
 portföy −17.9% / −26.9% vs IWM +104% / +40%. Ön kayıt gereği ikisi de aday sayılmaz; gölge kayıtları Ek C
 kapısına kadar sürer. Ayrıntı: LAB_V3_REPORT.md Ek S.
+
+# Ek T — Farklı türden iki fikir, büyük ve likit hisselerde: MOM (lider rotasyonu) ve DIP (panik dipleri)
+
+**Yazıldığı an: 2026-11-24, Ek R ve Ek S sonuçlarından SONRA; bu iki fikrin büyük hisse havuzundaki hiçbir
+sonucu görülmeden ve sürekli veri kökü (2014–2026) indirilmeden.** Görülenler: küçük/orta havuzda H2 (RSI2
+dönüşü) ve H3 (52 hafta zirvesi + göreli güç) 2021–26 sonuçları (kusurlu evren; ikisi de maliyet sonrası
+negatif), büyük havuzda yalnız H4L/H5L (Ek D2). Genel piyasa bilgisi (veriden değil): büyük hisse momentumu
+2016–2020 ve 2023–2025'te iyi, 2021–22'de kötüydü; RSI2 dönüşü 2010 sonrası zayıfladı.
+
+**Gerekçe (kullanıcı kararı, 2026-11-24).** Küçük/orta hisselerde günlük al-sat ailesinden ~15 fikir maliyeti
+aşamadı. İki yapısal fark denenir: (1) maliyetin çok düşük olduğu büyük ve likit hisseler; (2) MOM'da az işlem
+ve uzun tutuş, DIP'te kırılımın tersi (düşüşü almak). İkisi de literatürün standart kurallarıyla, tek
+parametre setiyle; tarama yok.
+
+**Evren ve veri.** Havuz L = Ek D2 havuzu, bölünme düzeltmeli: o günün gerçek fiyatı ≥ 7 $, gerçek ortalama
+hacim (63 seans) > 300K, 20 seans ortalama dolar hacim > 5M $, piyasa değeri ≥ 10 milyar $ (tavan yok, ülke
+filtresi yok). Veri: tek bir sürekli kök (`output/lab_liq`), yfinance günlük OHLCV + bölünme olayları,
+2014-10-01 → 2026-11-20; hisse listesi = mevcut iki kökte en az bir gün havuz L'nin piyasa değeri dışındaki
+şartlarını sağlamış hisseler; hisse sayısı `get_shares_full(start=2015-01-01)`. İki dönem ayrı ayrı, her biri
+10.000$'dan: **A = 2016-01-04 → 2020-12-31, B = 2021-01-04 → 2026-11-20.** Bilinen yanlılık: survivorship
+(evren 2026'da listede olanlar) → mutlak getiri iyimser; bu yüzden havuz farkı da ölçüttür.
+
+**MOM — lider rotasyonu (aylık, 12-1 momentum).**
+- Karar günü t: her ayın son seansı (dönem başından önceki son seans dahil; dönemin son seansı hariç). İşlem
+  t'den sonraki ilk seansın açılışında.
+- Uygun hisse: t'de havuz L'de, Close_t > SMA200_t, skoru hesaplanabiliyor. Skor = Close_{t−21} / Close_{t−252} − 1.
+- Sat: elde tutulan hisse t'de uygun değilse ya da uygunlar içinde skor sırası 20'den büyükse.
+- Al: yalnız sistemin piyasa rejimi t'de BULL ise (canlı `regime_from_spy_close`, SPY 1 yıl + VIX; CAUTION ve
+  BEAR'de yeni alım yok, eldekiler kendi satış kuralına kadar tutulur). Boş yerler elde olmayan en yüksek
+  skorlu uygun hisselerle doldurulur; en çok **10** pozisyon; her alım özsermayenin **%10**'u.
+- Stop ve hedef yok. Dönem sonunda açık pozisyonlar son seansın kapanışıyla kapatılır.
+
+**DIP — panik dipleri (Ek §2 H2 kuralı birebir, havuz L'de).**
+- Sinyal t: Close_t > SMA200_t, RSI(2)_t < 5 (Wilder), Close_t > SMA50_t × 0.95, t'de havuz L'de.
+- Giriş t+1 açılış. Çıkış: Close > SMA5 olan ilk günün kapanışı, en geç 10. seans kapanışı; felaket stop'u
+  giriş × 0.85 (stop önce, gap'te açılıştan). Hisse başına tek pozisyon; aynı gün sıralama RSI(2) küçükten büyüğe.
+- Her işlem özsermayenin %10'u, nakit yetmezse atlanır (en çok 10 eşzamanlı).
+
+**Maliyet ve portföy.** Birincil: **10 bps gidiş-dönüş** (Ek D2'nin büyük hisse maliyeti) **+ Midas 1.5$/emir**,
+10.000$; `lab/swing_o.portfolio` (doğru gün içi sıra, kayıp serisi freni yok). Duyarlılık: 20 bps; 25.000$ ve
+50.000$ hesap.
+
+**Ölçütler (her fikir için; her dönemde ayrı).**
+
+| # | Ölçüt |
+|---|---|
+| T0 | Yeterlilik: her dönemde ≥ 100 işlem |
+| T1 | Para: portföy toplam getirisi > SPY al-tut (dönem başından önceki son kapanış → dönemin son seansı), **iki dönemde de** |
+| T2 | Risk: portföy max düşüşü > −35%, iki dönemde de |
+| T3 | Seçim: havuz L'ye göre fark (aynı giriş ve çıkış zamanlaması, eşit ağırlıklı havuz L üyeleri) iki dönemde de > 0 VE iki dönem birlikte gün kümeli bootstrap %95 CI alt sınırı > 0 |
+
+**Hüküm (önceden sabit).**
+- **GEÇTİ:** T0–T3 hepsi.
+- **KISMEN:** T0 ve T1 sağlanır (iki dönemde de SPY'ı geçer) ama T2 veya T3 sağlanmaz.
+- **KALDI:** T1 herhangi bir dönemde sağlanmaz. T0 sağlanmazsa "yetersiz veri".
+
+**Sonuca göre (önceden sabit).** GEÇTİ → kullanıcıya ürünün ana stratejisi olarak önerilir (mimari değişikliği;
+karar kullanıcıda) ve donmuş kurallarla gölge ileri teste alınır. KISMEN → yalnız gölge ileri test. KALDI →
+kapanır; bu veride varyantı denenmez. Betimleyici (hükmü değiştirmez): yıllık tablo, IWM kıyası, ortalama
+nakit oranı, yıllık emir sayısı, MOM'un rejim kuralsız hali, iki fikrin yarı yarıya iki alt hesapla birleşimi.
+
+# Ek T sonucu (2026-11-24, SONUÇ GÖRÜLDÜKTEN SONRA yazıldı)
+
+Yukarıdaki Ek T metni değiştirilmedi (bölüm SHA256, LF: 281227721bb3d79be60c9bd335ae9784698d25a8081caa9f73860c80fc1a59a3;
+`lab/liq_t.prereg_sha256`). **Hüküm: MOM KALDI, DIP KALDI.**
+- MOM: A (2016–2020) portföy +300.9%, düşüş −32.4%, SPY +102.0% (T1 ✔ T2 ✔); B (2021–26) +22.0%, düşüş −71.0%,
+  SPY +99.2% (T1 ✘ T2 ✘). Havuz farkı +14.0 / +2.7, birlikte +7.8 [+0.3, +16.8] (T3 ✔). T1 dönem B'de
+  sağlanmadığı için KALDI.
+- DIP: havuz farkı +0.03 / +0.02 (birlikte +0.02 [−0.05, +0.10]); portföy −59.7% / −100% (sabit emir ücreti);
+  T1–T3 ✘.
+Ön kayıt gereği ikisi de kapandı; bu veride varyant denenmez. Geçmiş veri üzerindeki strateji arayışı kapatıldı.
+Ayrıntı: LAB_V3_REPORT.md Ek T.

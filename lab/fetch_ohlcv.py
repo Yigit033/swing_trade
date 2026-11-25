@@ -40,6 +40,9 @@ BENCH = ["SPY", "^VIX", "IWM", "IJR", "MDY"]
 
 
 def universe():
+    override = os.environ.get("LAB_TICKERS")       # hazır hisse listesi (Ek T sürekli kökü); yoksa snapshot adayları
+    if override:
+        return BENCH + [t for t in (ROOT / override).read_text().split() if t not in BENCH]
     recs = json.loads(SNAP.read_text())["records"]
     syms = sorted({r["yfinance_symbol_candidate"] or r["symbol"]
                    for r in recs if r["discovery_status"] == "CANDIDATE"})

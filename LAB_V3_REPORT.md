@@ -11,7 +11,9 @@
 > fiyat 3 $). **Düzeltilmiş veriyle H6S 2021–26'da −30%, hiç kullanılmamış 2016–2020'de −56% (IWM +98%).**
 > Ek A–Q'daki rakamlar düzeltilmemiş evrenle üretildi ve yeniden hesaplanmadı; oradaki olumlu bulgular
 > kanıt sayılmamalı. Gölgedeki iki bilgi sinyali (H4, H5) de düzeltilmiş evrende iki dönemde sınandı ve
-> **KALDI** (Ek S): hiçbiri havuzu anlamlı biçimde yenmiyor, hiçbiri endeksi geçmiyor.
+> **KALDI** (Ek S): hiçbiri havuzu anlamlı biçimde yenmiyor, hiçbiri endeksi geçmiyor. Büyük ve likit hisselerde
+> denenen iki farklı türden fikir (aylık lider rotasyonu ve panik dipleri) de **KALDI** (Ek T). Geçmiş veri
+> üzerindeki strateji arayışı kapatıldı: sınanan hiçbir strateji iki dönemde de endeksi geçemedi.
 
 ## 1. Kısa sonuç
 
@@ -875,4 +877,76 @@ python lab/oos_s.py sec && python lab/oos_s.py earnings      # 2016–2020 veris
 python lab/oos_s.py run                                      # 2016–2020
 LAB_DATA=output/lab_is_split LAB_EVAL_START=2021-01-04 LAB_EVAL_END=2026-11-20 python lab/oos_s.py run
 python lab/oos_s.py verdict                                  # → output/lab_oos/s_verdict.json
+```
+
+## Ek T — Farklı türden iki fikir, büyük ve likit hisselerde: MOM ve DIP (24 Kasım 2026)
+
+Ön kayıt: `lab/PREREGISTRATION.md` Ek T (bölümün LF satır sonlu SHA256'sı
+`281227721bb3d79be60c9bd335ae9784698d25a8081caa9f73860c80fc1a59a3`; iki fikrin büyük hisse havuzundaki hiçbir
+sonucu görülmeden ve veri indirilmeden yazıldı). Kod: [lab/liq_t.py](lab/liq_t.py), kurallar
+[lab/rotation.py](lab/rotation.py) ve `lab/challengers.h2`. Veri: tek sürekli kök `output/lab_liq` — 3.609
+hisse, 2014-10 → 2026-11-20, 1.785 bölünme olayı, 3.604 hisse sayısı serisi (eksiksiz). Havuz L (piyasa değeri
+≥ 10 milyar $, bölünme düzeltmeli) medyan 460 hisse (2016–2020) ve 667 hisse (2021–26). Maliyet 10 bps
+gidiş-dönüş + Midas 1.5$/emir; 10.000$; pozisyon başına %10.
+
+**Hüküm: ikisi de KALDI.**
+
+### MOM — lider rotasyonu (aylık, 12-1 momentum, en çok 10 hisse, yalnız BULL'da alım)
+
+| | A: 2016–2020 | B: 2021–2026 |
+|---|---:|---:|
+| İşlem / ortalama tutuş | 116 / 93 seans | 142 / 84 seans |
+| İşlem başı brüt (medyan) | +18.7% (−0.5%) | +5.0% (−9.0%) |
+| Havuz L'ye göre fark | +14.0 [+1.6, +30.1] | +2.7 [−6.0, +12.7] |
+| **Portföy** | **+300.9%** | **+22.0%** |
+| **Max düşüş** | −32.4% | **−71.0%** |
+| **SPY al-tut** (IWM) | +102.0% (+86.4%) | **+99.2%** (+40.1%) |
+| T1 SPY'ı geçti / T2 düşüş > −35% | ✔ / ✔ | ✘ / ✘ |
+
+| Yıl | 2016 | 2017 | 2018 | 2019 | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| MOM portföyü | +16.5 | +48.5 | −1.0 | +8.8 | +115.1 | **−41.6** | **−24.2** | −1.5 | +86.8 | +44.5 | +3.7 |
+
+- İki dönem birlikte: 258 işlem, havuz farkı +7.8 [+0.3, +16.8] → T3 ✔. T1 ve T2 dönem B'de sağlanmadı → **KALDI**.
+- **Kazanç birkaç dev işlemde.** A'da en iyi 5 işlem (SE +743%, NVDA +458%, TSLA +311%, NIO +151%, XYZ +135%)
+  toplam getirinin %83'ü; B'de en iyi 5 işlem (CVNA +372%, APP +244%, NVDA +170%, RKLB +167%, APP +146%)
+  toplamın %154'ü — geri kalanların toplamı negatif. Medyan işlem iki dönemde de zararda.
+- **2021–22 çöküşü.** Ocak 2021'de alınanlar 2020'nin uçan hisseleriydi (TSLA, NIO, ZM, MRNA, PLUG, ENPH, RUN,
+  DKNG, NET, SE); 2021 sonunda portföyde AMC, GME, LCID, ASAN vardı. Hesap iki yılda yarıdan fazla eridi.
+- Rejim kuralı (yalnız BULL'da alım) A'da getiriyi düşürdü (+301% vs kuralsız +409%), B'de artırdı (+22% vs
+  +2.9%); düşüşü ikisinde de kurtarmadı (−38% ve −68% kuralsız).
+- Duyarlılık: 20 bps +297.7% / +19.6%; 25.000$ +304.4% / +24.5%. Yılda ~36 emir → ücret önemsiz.
+- Yanlılık: evrende sonradan listeden çıkan momentum hisseleri yok → gerçek sonuç daha kötü.
+- **Etiketli gözlem (karar değil):** MOM bu projede havuzu istatistiksel olarak yenen ilk sinyal (birleşik CI alt
+  sınırı +0.3). Ama ~17. hipotez (çoklu test), survivorship lehine çalışıyor ve fark birkaç uç işleme dayanıyor
+  → kanıt sayılmaz. Risk profili (−71%) tek başına elenme nedenidir.
+
+### DIP — panik dipleri (H2 kuralı: Close > SMA200, RSI(2) < 5; SMA5 üstü kapanışta ya da 10. seansta çıkış)
+
+| | A: 2016–2020 | B: 2021–2026 |
+|---|---:|---:|
+| İşlem / kazanma oranı | 7.036 / %64 | 12.198 / %63 |
+| İşlem başı brüt | +0.15% | +0.18% |
+| Havuz L'ye göre fark | +0.03 [−0.04, +0.10] | +0.02 [−0.09, +0.12] |
+| **Portföy (10.000$)** | **−59.7%** | **−100% (hesap tükendi)** |
+| Yıllık emir | ~860 | ~910 |
+| 50.000$ hesapla | +2.7% | −44.5% |
+
+- Sinyalin kendine ait avantajı yok: aynı günlerde rastgele bir büyük hisse de aynı kadar toparlanıyor (fark ≈ 0).
+- Sabit emir ücreti öldürüyor: 1.000$'lık pozisyonda gidiş-dönüş 3$ = %0.30, brüt kazanç %0.15–0.18. Yılda ~900
+  emir ≈ 1.300$ ücret (10.000$'lık hesabın %13'ü).
+- Betimleyici: iki fikir yarı yarıya iki alt hesapta: A +81% (düşüş −41%), B −50% (düşüş −80%).
+
+### Lab v3'ün kapanış sonucu (Ek R + S + T)
+
+Düzeltilmiş veride, iki ayrı dönemde, önceden yazılmış ölçütlerle sınanan altı strateji (H6S, H6SR, H4, H5, MOM,
+DIP) ve önceki eklerdeki fikirlerle birlikte ~17 hipotezin **hiçbiri** iki dönemde de endeksi geçemedi. Tek
+istikrarlı kazanç kaynağı piyasanın kendisi oldu (SPY +102% / +99%; IWM +98% / +47%). Ön kayıtta ilan edildiği
+gibi geçmiş veri üzerindeki strateji arayışı kapatıldı; canlı paper ürün ve gölge ileri testleri aynen sürüyor.
+
+```text
+LAB_DATA=output/lab_liq LAB_OHLCV_START=2014-10-01 LAB_OHLCV_END=2026-11-21 LAB_SPLITS_END=2026-11-26 \
+    LAB_TICKERS=output/lab_liq/tickers.txt python lab/fetch_ohlcv.py
+python lab/liq_t.py shares && python lab/liq_t.py run        # → output/lab_liq/t_result.json
+python -m pytest swing_trader/tests/test_lab_rotation.py
 ```
