@@ -21,10 +21,12 @@ class FakeSrc:
         n = len(days)
         close = 20 + np.linspace(0, 4, n)             # yavaş yükselen, stop'a değmeyen seri
         self.bars = {}
-        for t, mult in (("ABC", 1.0), ("XYZ", 1.5), ("IWM", 10.0)):
+        for t, mult in (("ABC", 1.0), ("XYZ", 1.5), ("IWM", 10.0), ("SPY", 20.0)):
             c = close * mult
             self.bars[t] = pd.DataFrame(dict(Date=pd.to_datetime(days), Open=c * 0.999, High=c * 1.01,
                                              Low=c * 0.99, Close=c, Volume=1e6))
+        self.bars["^VIX"] = pd.DataFrame(dict(Date=pd.to_datetime(days), Open=15.0, High=15.5, Low=14.5,
+                                              Close=15.0, Volume=0.0))
         self.filings = {}
         self.vce = {}                                    # asof → [(ticker, dv20)]
         self.champion = []
@@ -42,6 +44,9 @@ class FakeSrc:
 
     def candidate_universe(self):
         return {"ABC", "XYZ"}
+
+    def mom_universe(self):                              # Ek U: büyük hisse adayları {sembol: piyasa değeri}
+        return {"ABC": 2e10, "XYZ": 3e10}
 
     def earnings_reporters(self, start, end):
         return pd.DataFrame({"Marketcap": [1e9, 5e12]}, index=["ABC", "MEGA"])

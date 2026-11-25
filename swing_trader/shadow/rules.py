@@ -70,6 +70,19 @@ PARAMS_H6SR: Dict = dict(
 )
 PARAMS_H6SR_SHA256 = hashlib.sha256(json.dumps(PARAMS_H6SR, sort_keys=True, default=list).encode()).hexdigest()
 
+# Ek U — MOM "Lider rotasyonu": büyük ve likit hisselerde aylık 12-1 momentum rotasyonu (Ek T kuralı,
+# lab/rotation.py ile birebir). Geçmiş sınavda KALDI (2021–26'da düşüş −71%); kullanıcı kararıyla yalnız
+# gölge ileri testte. Ayrı kilit; diğer kilitler değişmez. Çıkış aylık sıraya bağlı olduğundan EXITS'te yok.
+PARAMS_MOM: Dict = dict(
+    pool="L", price_min=7.0, avgvol63_min=300_000, avgvol63_window=63, avgvol63_min_periods=40,
+    dv20_min=5e6, dv20_window=20, dv20_min_periods=15, cap_min=1e10,
+    decision="last_session_of_month", lookback=252, skip=21, sma=200,
+    max_positions=10, sell_rank=20, buy_regime="BULL", regime_index="SPY",
+    regime_fn="regime_from_spy_close(SPY 1y close, VIX)", entry="next_session_open", exit="next_session_open",
+    stop=None, cost_pct=0.10, fee_per_order=1.5, min_closed=40, min_months=24, max_months=36,
+)
+PARAMS_MOM_SHA256 = hashlib.sha256(json.dumps(PARAMS_MOM, sort_keys=True, default=list).encode()).hexdigest()
+
 # Strateji → (ATR stop katı, en çok seans). None stop = stop yok.
 EXITS: Dict[str, Tuple[Optional[float], int]] = {
     "H4": (C["stop_atr"], C["max_bars"]),
@@ -327,3 +340,73 @@ def h5_reaction_session(ts) -> Optional[date]:
 
 def params_fingerprint() -> str:
     return PARAMS_SHA256
+
+
+# ── MOM: aylık lider rotasyonu (Ek T / Ek U; lab/rotation.mom_trades ile aynı kural) ──────────
+
+def is_month_end_session(d: date) -> bool:
+    """Ayın son seansı mı (sonraki seans başka aydaysa)."""
+    return is_trading_day(d) and next_trading_day(d).month != d.month
+
+
+def last_month_end_session(d: date) -> date:
+    """``d`` dahil geriye doğru ilk ay sonu seansı."""
+    x = last_session_on_or_before(d)
+    while not is_month_end_session(x):
+        x = prev_trading_day(x)
+    return x
+
+
+def mom_facts(frame: pd.DataFrame, i: int, cap: Optional[float]) -> Dict:
+    """Karar günü (hizalı çerçevede konum ``i``) için havuz L üyeliği, trend ve 12-1 skoru.
+
+    lab: havuz = ``pool_mask_large`` (fiyat ≥ 7, ort. hacim 63 > 300K, dolar hacim 20 > 5M, değer ≥ 10 mlr);
+    trend = Close > SMA200; skor = Close[t−21] / Close[t−252] − 1 (eksik bar → hesaplanamaz).
+    """
+    p = PARAMS_MOM
+    c, v = frame["Close"].astype(float), frame["Volume"].astype(float)
+    close = float(c.iloc[i])
+    avgvol = float(v.rolling(p["avgvol63_window"], min_periods=p["avgvol63_min_periods"]).mean().iloc[i])
+    dv = float((c * v).rolling(p["dv20_window"], min_periods=p["dv20_min_periods"]).mean().iloc[i])
+    sma = float(c.rolling(p["sma"]).mean().iloc[i])
+    cap_ok = cap is not None and np.isfinite(cap) and float(cap) >= p["cap_min"]
+    in_pool = bool(np.isfinite(close) and close >= p["price_min"] and np.isfinite(avgvol)
+                   and avgvol > p["avgvol63_min"] and np.isfinite(dv) and dv > p["dv20_min"] and cap_ok)
+    above = bool(np.isfinite(close) and np.isfinite(sma) and close > sma)
+    score = float("nan")
+    if i - p["lookback"] >= 0:
+        a, b = float(c.iloc[i - p["skip"]]), float(c.iloc[i - p["lookback"]])
+        if np.isfinite(a) and np.isfinite(b):
+            score = a / b - 1
+    return dict(in_pool=in_pool, above=above, score=score, close=close, avgvol63=avgvol, dv20=dv, sma200=sma)
+
+
+def mom_decide(facts: Dict[str, Dict], held: Iterable[str], regime: str) -> Dict:
+    """Ay sonu kararı (saf). ``facts[ticker]`` = ``mom_facts`` çıktısı; ``held`` = elde tutulanlar.
+
+    Sat: uygun değil (havuz dışı / SMA200 altı / skor yok) ya da uygunlar içinde sıra > 20.
+    Al: yalnız rejim BULL ise, en yüksek skorlu elde olmayan uygun hisselerle en çok 10 pozisyona tamamla.
+    """
+    p = PARAMS_MOM
+    elig = {t: f["score"] for t, f in facts.items() if f["in_pool"] and f["above"] and np.isfinite(f["score"])}
+    ranked = sorted(elig, key=lambda t: -elig[t])
+    rank = {t: k + 1 for k, t in enumerate(ranked)}
+    sells = []
+    for h in held:
+        if h in rank and rank[h] <= p["sell_rank"]:
+            continue
+        f = facts.get(h)
+        why = "POOL" if (f is None or not f["in_pool"]) else ("TREND" if not f["above"] else
+                                                              ("RANK" if h in rank else "NA"))
+        sells.append((h, why))
+    sold = {h for h, _ in sells}
+    keep = [h for h in held if h not in sold]
+    buys: List[str] = []
+    if str(regime).upper() == p["buy_regime"]:
+        for t in ranked:
+            if len(keep) + len(buys) >= p["max_positions"]:
+                break
+            if t in keep:
+                continue
+            buys.append(t)
+    return dict(sells=sells, buys=buys, rank=rank, eligible=len(ranked))

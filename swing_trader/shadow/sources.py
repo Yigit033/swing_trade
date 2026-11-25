@@ -297,6 +297,37 @@ def live_vce_hits(asof: date) -> Dict:
     return dict(hits=hits, stats=stats)
 
 
+# ── MOM "Lider rotasyonu" (Ek U): büyük hisse adayları ───────────────────────
+
+MOM_FINVIZ_FILTERS = {"Market Cap.": "+Large (over $10bln)", "Price": "Over $7", "Average Volume": "Over 300K"}
+MOM_MIN_UNIVERSE = 400      # 2026-11'de 863 hisse; bunun altı eksik sayfa demektir → karar verilmez
+
+
+def mom_universe() -> Dict[str, float]:
+    """Canlı büyük hisse adayları: {sembol: piyasa değeri $} (havuz L'nin piyasa değeri şartı için).
+
+    Canlı tarayıcının yamalı Finviz sorgu yolu (``SmallCapUniverse._run_finviz_query``; ~45 sayfa, ~80 sn —
+    yalnız ay sonu kararında çağrılır). Sorgu çökerse ya da sonuç ``MOM_MIN_UNIVERSE``'ten azsa {} döner:
+    eksik evrenle karar vermek eldeki hisseleri yanlışlıkla "havuz dışı" diye sattırırdı; koşucu erteler.
+    Fiyat ve hacim şartları koşucuda barlardan yeniden ölçülür; buradaki filtreler yalnız ön eleme.
+    """
+    from ..small_cap.universe import SmallCapUniverse
+
+    u = SmallCapUniverse()
+    df = u._run_finviz_query(dict(MOM_FINVIZ_FILTERS), "MOM LARGE CAP")
+    if df is None or len(df) == 0 or "Market Cap" not in df.columns:
+        return {}
+    out: Dict[str, float] = {}
+    for t, cap in zip(df["Ticker"].astype(str).str.strip().str.upper(), df["Market Cap"]):
+        c = u._parse_market_cap(cap)
+        if c and c > 0:
+            out[t] = float(c)
+    if len(out) < MOM_MIN_UNIVERSE:
+        logger.warning("MOM universe too small (%d < %d) — treated as unavailable", len(out), MOM_MIN_UNIVERSE)
+        return {}
+    return out
+
+
 def champion_trades(since: date) -> List[Dict]:
     """Canlı ürünün paper işlemleri (kapanmış, REJECTED hariç, girişi ``since`` ve sonrası).
 

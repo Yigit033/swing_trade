@@ -706,7 +706,12 @@ export type ShadowStrategyReport = {
     net_ci95?: [number | null, number | null];
     excess_iwm_mean?: number;
     portfolio_10pct: { total_pct: number; max_dd_pct: number; taken: number };
+    /** Kıyas endeksinin al-tut getirisi (alan adı tarihsel; MOM'da SPY — bkz. benchmark). */
     iwm_buy_hold_pct: number | null;
+    /** Değerlendirme maliyeti (% gidiş-dönüş), emir başına sabit ücret ($) ve kıyas endeksi. */
+    cost_pct?: number;
+    fee_per_order?: number;
+    benchmark?: string;
     gate: ShadowGate;
 };
 

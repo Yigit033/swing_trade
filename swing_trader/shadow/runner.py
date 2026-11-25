@@ -1,7 +1,8 @@
-"""Gölge sinyallerin günlük koşusu (H4, H5, H6). Ana ürünün işlemlerine DOKUNMAZ.
+"""Gölge sinyallerin günlük koşusu (H4, H5, H6/H6S/H6SR, MOM). Ana ürünün işlemlerine DOKUNMAZ.
 
-Sıra: yeni H6 sinyalleri → yeni H5 olayları → yeni H4 olayları → bekleyen/açık gölge işlemlerin
-güncellenmesi → rapor + terfi kapısı. Her adım ayrı try/except: biri düşerse diğerleri çalışır.
+Sıra: yeni H6 sinyalleri → yeni H5 olayları → yeni H4 olayları → MOM ay sonu kararı (yalnız ay sonu
+seansı için) → bekleyen/açık gölge işlemlerin güncellenmesi → rapor + terfi kapısı. Her adım ayrı
+try/except: biri düşerse diğerleri çalışır.
 
 Karar zamanı: sinyal ``decided_at`` ile yazılır. Bu zaman girişin açılışından (09:30 ET)
 sonraysa ``late_decision=1`` — bu işlemler terfi değerlendirmesine girmez (Ek C).
@@ -291,10 +292,166 @@ def run_h6s(ledger: ShadowLedger, src, asof: date, now: datetime, res: Dict, nam
     return dict(hits=len(hits), regime=regime, added=added, **counts)
 
 
+# ── MOM "Lider rotasyonu" (Ek U; kural lab/rotation.py ile birebir) ──────────
+
+MOM_HISTORY_DAYS = 430            # 252 seans (12-1 skoru) + SMA200 için takvim günü payı
+MOM_MIN_CURRENT = 0.8             # evrenin en az bu oranında karar günü barı yoksa veri gelmemiştir → ertele
+
+
+def _regime_on(bars: Dict[str, pd.DataFrame], index: str, day: date) -> Optional[Dict]:
+    """Canlı ``regime_from_spy_close`` kuralları, ``index`` kapanışlarıyla, ``day`` itibarıyla
+    (lab/h0_signals.regime_series: son 252 kapanış + o günün VIX'i). ``day`` barı yoksa None."""
+    from ..small_cap.regime_logic import regime_from_spy_close
+
+    def upto(sym):
+        df = bars.get(sym)
+        if df is None or len(df) == 0:
+            return None
+        df = df.dropna(subset=["Close"]).sort_values("Date")
+        df = df[pd.to_datetime(df["Date"]).dt.date.to_numpy() <= day]
+        return df if len(df) else None
+
+    px = upto(index)
+    if px is None or pd.Timestamp(px["Date"].iloc[-1]).date() != day:
+        return None
+    vix = upto("^VIX")
+    v = float(vix["Close"].iloc[-1]) if vix is not None else None
+    return regime_from_spy_close(px["Close"].tail(252).reset_index(drop=True), v)
+
+
+def run_mom(ledger: ShadowLedger, src, asof: date, now: datetime) -> Dict:
+    """Ay sonu seansında rotasyon kararı: satılacaklar işaretlenir, alınacaklar PENDING yazılır.
+
+    Karar günü t = ``asof``'a kadar olan son ay sonu seansı. Daha önce işlenmediyse şimdi işlenir; koşu o
+    sabah kaçtıysa sonraki koşu aynı günü geç işler ve kararlar "geç" işaretlenir (değerlendirme dışı).
+    Evren ya da t barları yoksa ``deferred`` döner → sağlık "eksik", yedek tetikleyiciler yeniden dener.
+    """
+    sha = rules.PARAMS_MOM_SHA256
+    if ledger.get_meta("params_mom_sha256") is None:
+        ledger.set_meta("params_mom_sha256", sha)
+        ledger.set_meta("mom_live_start", asof.isoformat())
+    if ledger.get_meta("params_mom_sha256") != sha:
+        return dict(error="MOM_PARAMS_CHANGED_WITHOUT_PREREGISTRATION")
+    live_start = date.fromisoformat(ledger.get_meta("mom_live_start"))
+    t = rules.last_month_end_session(asof)
+    done = ledger.get_meta("mom_last_rebalance")
+    if t < live_start or (done and str(done) >= t.isoformat()):
+        return dict(rebalance=None, last_rebalance=done)       # bu koşuda karar günü yok
+    uni = src.mom_universe()
+    if not uni:
+        return dict(rebalance=t.isoformat(), deferred="UNIVERSE_UNAVAILABLE")
+    rows = [r for r in ledger.trades("MOM", statuses=("PENDING", "OPEN"))
+            if not (r.get("details") or {}).get("sell_signal_date")]
+    held = [r["ticker"] for r in rows]
+    tickers = set(uni) | set(held)
+    h0 = t - timedelta(days=MOM_HISTORY_DAYS)
+    bars = src.fetch_bars(tickers | {"SPY", "^VIX"}, h0, asof)
+    reg = _regime_on(bars, "SPY", t)
+    if reg is None:
+        return dict(rebalance=t.isoformat(), deferred="SPY_BAR_MISSING", universe=len(uni))
+    regime = str(reg.get("regime", "UNKNOWN")).upper()
+    sessions = rules.sessions_between(h0, t)
+    facts: Dict[str, Dict] = {}
+    current = 0
+    for tk in sorted(tickers):
+        df = bars.get(tk)
+        if df is None or len(df) == 0:
+            continue
+        f = rules.align(df, sessions)
+        facts[tk] = rules.mom_facts(f, len(f) - 1, uni.get(tk))
+        current += int(tk in uni and np.isfinite(facts[tk]["close"]))
+    if current < MOM_MIN_CURRENT * len(uni):
+        return dict(rebalance=t.isoformat(), deferred="NO_CURRENT_BARS", universe=len(uni), current_bar=current)
+    d = rules.mom_decide(facts, held, regime)
+    by_ticker = {r["ticker"]: r for r in rows}
+    for tk, why in d["sells"]:
+        r = by_ticker[tk]
+        ledger.update_trade(r["id"], dict(details=dict(
+            r.get("details") or {}, sell_signal_date=t.isoformat(), sell_reason=why,
+            sell_decided_at=_utc_iso(now), sell_late=_late(now, t))))
+    added = 0
+    for tk in d["buys"]:
+        added += ledger.add_trade(dict(
+            strategy="MOM", ticker=tk, event_date=t.isoformat(), signal_date=t.isoformat(),
+            decided_at=_utc_iso(now), key=float(facts[tk]["score"]), status="PENDING",
+            late_decision=_late(now, t), warmup=0,
+            details=dict(score=round(float(facts[tk]["score"]), 4), rank=d["rank"][tk], regime=regime,
+                         cap=float(uni[tk]) if uni.get(tk) else None)))
+    ledger.set_meta("mom_last_rebalance", t.isoformat())
+    return dict(rebalance=t.isoformat(), regime=regime, universe=len(uni), current_bar=current,
+                eligible=d["eligible"], held=len(held), sells=len(d["sells"]), buys=len(d["buys"]), added=added)
+
+
+def update_mom(ledger: ShadowLedger, src, asof: date) -> Dict:
+    """MOM işlemleri: giriş (sinyalden sonraki ilk açılış), günlük değerleme ve — satış kararı verilmişse —
+    karardan sonraki ilk açılıştan çıkış. Çıkış aylık sıraya bağlı olduğundan ``plan_trade`` kullanılmaz."""
+    active = ledger.trades("MOM", statuses=("PENDING", "OPEN"))
+    if not active:
+        return dict(active=0)
+    first = min(date.fromisoformat(t["signal_date"]) for t in active)
+    bars = src.fetch_bars({t["ticker"] for t in active} | {"SPY"}, first - timedelta(days=7), asof)
+    spy = _frame(bars, "SPY", first, asof)
+    cost = rules.PARAMS_MOM["cost_pct"]
+    counts = dict(active=len(active), opened=0, closed=0, skipped=0, pending=0)
+    for t in active:
+        frame = _frame(bars, t["ticker"], date.fromisoformat(t["signal_date"]), asof)
+        if frame is None or len(frame) < 2:               # giriş günü barı henüz gelmedi
+            counts["pending"] += 1
+            continue
+        idx = list(frame.index.date)                       # idx[0] = karar günü, idx[1] = giriş günü
+        O, C = frame["Open"].to_numpy(dtype=float), frame["Close"].to_numpy(dtype=float)
+        if not np.isfinite(O[1]) or O[1] <= 0:             # lab: açılış barı yoksa alım yapılmaz
+            ledger.update_trade(t["id"], dict(status="SKIPPED", reason="NO_ENTRY_BAR"))
+            counts["skipped"] += 1
+            continue
+        det = dict(t.get("details") or {})
+        o, exit_i = float(O[1]), None
+        if det.get("sell_signal_date"):                    # karardan sonraki ilk açılış barı
+            sell = date.fromisoformat(det["sell_signal_date"])
+            exit_i = next((j for j, d in enumerate(idx) if d > sell and np.isfinite(O[j])), None)
+        counts["opened"] += int(t["status"] == "PENDING")
+        closes = [j for j in range(1, len(idx) if exit_i is None else exit_i) if np.isfinite(C[j])]
+        path = [[idx[j].isoformat(), float(C[j])] for j in closes]
+        upd = dict(entry_date=idx[1].isoformat(), entry_price=round(o, 4))
+        if exit_i is not None:
+            xp = float(O[exit_i])
+            ret = 100.0 * (xp / o - 1)
+            path.append([idx[exit_i].isoformat(), xp])
+            upd.update(status="CLOSED", exit_date=idx[exit_i].isoformat(), exit_price=round(xp, 4),
+                       exit_reason=det.get("sell_reason"), bars=exit_i - 1, mark_price=round(xp, 4),
+                       mark_date=idx[exit_i].isoformat(), ret_pct=round(ret, 4), net_pct=round(ret - cost, 4),
+                       iwm_ret=_index_ret(spy, idx[1], idx[exit_i], "Open"))     # SPY, aynı açılış→açılış
+            if det.get("sell_late"):                       # geç verilen satış kararı → değerlendirme dışı
+                upd["late_decision"] = 1
+            counts["closed"] += 1
+        elif closes:
+            m = closes[-1]
+            upd.update(status="OPEN", bars=m - 1, mark_price=round(float(C[m]), 4), mark_date=idx[m].isoformat(),
+                       ret_pct=round(100.0 * (float(C[m]) / o - 1), 4))
+        else:
+            upd.update(status="OPEN")
+        upd["details"] = dict(det, path=path)
+        ledger.update_trade(t["id"], upd)
+    return counts
+
+
+def _index_ret(frame: Optional[pd.DataFrame], entry: date, exit_: date, exit_field: str = "Close") -> Optional[float]:
+    """Endeksin giriş açılışından çıkış gününün ``exit_field`` fiyatına getirisi (%)."""
+    if frame is None:
+        return None
+    try:
+        a = float(frame.loc[pd.Timestamp(entry), "Open"])
+        b = float(frame.loc[pd.Timestamp(exit_), exit_field])
+        return round(100 * (b / a - 1), 4) if np.isfinite(a) and np.isfinite(b) and a > 0 else None
+    except KeyError:
+        return None
+
+
 # ── Açık işlemlerin güncellenmesi ────────────────────────────────────────────
 
 def update_trades(ledger: ShadowLedger, src, asof: date) -> Dict:
-    active = ledger.trades(statuses=("PENDING", "OPEN"))
+    # MOM'un çıkışı aylık sıraya bağlı (plan_trade ile hesaplanamaz) → update_mom
+    active = [t for t in ledger.trades(statuses=("PENDING", "OPEN")) if t["strategy"] != "MOM"]
     if not active:
         return dict(active=0)
     first = min(date.fromisoformat(t["signal_date"]) for t in active)
@@ -398,6 +555,11 @@ def build_report(ledger: ShadowLedger, src, asof: date) -> Dict:
         dr = date.fromisoformat(h6sr_start)
         strategies["H6SR"] = strategy_report("H6SR", trades, rules.sessions_between(dr, asof), dr, asof,
                                              iwm_bh if dr == live_start else _buy_hold(src, "IWM", dr, asof))
+    mom_start = ledger.get_meta("mom_live_start")
+    if mom_start:                                         # Ek U: lider rotasyonu; kıyas endeksi SPY
+        dm = date.fromisoformat(mom_start)
+        strategies["MOM"] = strategy_report("MOM", trades, rules.sessions_between(dm, asof), dm, asof,
+                                            _buy_hold(src, "SPY", dm, asof))
     champion = None
     if h6_start:
         h6_d = date.fromisoformat(h6_start)
@@ -419,7 +581,7 @@ def build_report(ledger: ShadowLedger, src, asof: date) -> Dict:
             logger.exception("Champion report failed")
     return dict(asof=asof.isoformat(), live_start=live_start.isoformat(),
                 params_sha256=rules.PARAMS_SHA256, params_h6_sha256=rules.PARAMS_H6_SHA256,
-                strategies=strategies, champion=champion)
+                params_mom_sha256=rules.PARAMS_MOM_SHA256, strategies=strategies, champion=champion)
 
 
 def _buy_hold(src, ticker: str, start: date, asof: date) -> Optional[float]:
@@ -441,7 +603,7 @@ def _run_issues(lr: Dict) -> List[str]:
     for k in ("error", "universe_error", "report_error"):
         if lr.get(k):
             issues.append(f"{k}: {lr[k]}")
-    for k in ("H6", "H6S", "H6SR", "H5", "H4", "update"):
+    for k in ("H6", "H6S", "H6SR", "H5", "H4", "MOM", "update"):
         v = lr.get(k)
         if v is None:
             issues.append(f"{k}: MISSING")
@@ -546,8 +708,15 @@ def run_shadow_daily(now: Optional[datetime] = None, ledger: Optional[ShadowLedg
             except Exception as e:
                 logger.exception("Shadow %s failed", name)
                 out[name] = dict(error=str(e))
+    try:                                  # Ek U: aylık lider rotasyonu (yalnız ay sonu seansı için karar)
+        out["MOM"] = run_mom(ledger, src, asof, now)
+    except Exception as e:
+        logger.exception("Shadow MOM failed")
+        out["MOM"] = dict(error=str(e))
     try:
-        out["update"] = update_trades(ledger, src, asof)
+        upd = update_trades(ledger, src, asof)
+        upd["mom"] = update_mom(ledger, src, asof)
+        out["update"] = upd
     except Exception as e:
         logger.exception("Shadow update failed")
         out["update"] = dict(error=str(e))

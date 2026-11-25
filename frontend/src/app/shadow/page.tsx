@@ -1,9 +1,9 @@
 "use client";
 /**
- * GÖLGE SİNYALLER — H4 (içeriden alım), H5 (bilanço sürprizi), H6 (sade VCE) ileri testi.
+ * GÖLGE SİNYALLER — H4 (içeriden alım), H5 (bilanço sürprizi), H6/H6S/H6SR (VCE), MOM (lider rotasyonu) ileri testi.
  *
  * Gerçek para YOK; ana ürünün paper işlemlerinden ayrı defter. Kurallar ve terfi kapısı
- * sonuç görülmeden yazıldı (lab/PREREGISTRATION.md Ek A + Ek C, H6: Ek F). Terfi otomatik değildir.
+ * sonuç görülmeden yazıldı (lab/PREREGISTRATION.md Ek A + Ek C, H6: Ek F, MOM: Ek U). Terfi otomatik değildir.
  */
 import { useEffect, useMemo, useState } from "react";
 import { getShadow, type ShadowChampion, type ShadowData, type ShadowHealth, type ShadowStrategyReport, type ShadowTrade } from "@/lib/api";
@@ -30,6 +30,10 @@ const NAMES: Record<string, { title: string; desc: string }> = {
     H6SR: {
         title: "H6SR · Kazananı koştur (H6S'nin çıkış varyantı)",
         desc: "H6S ile aynı sinyal, aynı piyasa freni ve aynı 2.5×ATR stop. Fark yalnız çıkışta: 8. seans kapanışında kârdaysa satmaz, iz süren stopla (en yüksek kapanış − 2.5×ATR) en çok 40 seans tutar. Düzeltilmiş geçmiş testlerde o da ekside (2016–2020 −%27, 2021–26 −%23; Lab v3 Ek R) — karar bu ileri testte.",
+    },
+    MOM: {
+        title: "MOM · Lider rotasyonu (büyük hisseler, aylık)",
+        desc: "Piyasa değeri 10 milyar $ üstü likit hisselerde ay sonunda karar: son 12 ayın (son ay hariç) en güçlü 10 hissesi tutulur; sırası 20'nin altına düşen ya da 200 günlük ortalamasının altına inen satılır; yeni alım yalnız piyasa yükseliş rejimindeyken. Stop yok. Geçmiş sınavda KALDI: 2016–2020 +%301 ama 2021–26 +%22 ve hesap −%71 eridi (Lab v3 Ek T). Kullanıcı kararıyla yalnız ileri testte; gerçek para adayı değil.",
     },
     H6: {
         title: "H6 · Sade VCE (canlı ürünün rakibi)",
@@ -63,6 +67,10 @@ const REASON_LABEL: Record<string, string> = {
     TIME: "Süre doldu (H4/H5 20, H6/H6S 8 seans; H6SR 8. seansta kârda değildi)",
     TRAIL: "İz süren stop (kazanan geri döndü)",
     TIME_MAX: "En uzun tutuş doldu (40 seans)",
+    RANK: "Rotasyon: sırası 20'nin altına düştü",
+    TREND: "Rotasyon: 200 günlük ortalamanın altına indi",
+    POOL: "Rotasyon: büyük hisse havuzundan çıktı",
+    NA: "Rotasyon: skor hesaplanamadı",
     BEAR_REGIME: "Küçük hisse piyasası ayıda (giriş yok)",
     CAUTION_CAPACITY: "Temkinli piyasa: açık pozisyon sınırı dolu",
 };
@@ -139,6 +147,8 @@ function StrategyCard({ r }: { r: ShadowStrategyReport }) {
     const g = r.gate;
     const color = GATE_COLOR[g.status] || "var(--text-muted)";
     const ci = r.net_ci95 || [null, null];
+    const bench = r.benchmark || "IWM";
+    const bps = Math.round((r.cost_pct ?? 0.5) * 100);
     return (
         <div className="card" style={{ borderLeft: `3px solid ${color}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
@@ -147,17 +157,17 @@ function StrategyCard({ r }: { r: ShadowStrategyReport }) {
             </div>
             <div style={{ color: "var(--text-muted)", fontSize: 12, margin: "6px 0 12px" }}>{meta.desc}</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 12 }}>
-                <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>Net ort. (50 bps)</div>
+                <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>Net ort. ({bps} bps)</div>
                     <div style={{ fontWeight: 700, color: tone(r.net_mean) }}>{pct(r.net_mean)}</div></div>
                 <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>%95 güven aralığı</div>
                     <div style={{ fontWeight: 600 }}>{ci[0] === null ? "—" : `${pct(ci[0])} … ${pct(ci[1])}`}</div></div>
                 <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>Kazanma oranı</div>
                     <div style={{ fontWeight: 600 }}>{r.win_rate === undefined ? "—" : `%${r.win_rate.toFixed(0)}`}</div></div>
-                <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>IWM’e göre (işlem başı)</div>
+                <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>{bench}’e göre (işlem başı)</div>
                     <div style={{ fontWeight: 600, color: tone(r.excess_iwm_mean) }}>{pct(r.excess_iwm_mean)}</div></div>
                 <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>Portföy (%10/işlem)</div>
                     <div style={{ fontWeight: 600, color: tone(r.portfolio_10pct?.total_pct) }}>{pct(r.portfolio_10pct?.total_pct, 1)}</div></div>
-                <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>IWM al-tut</div>
+                <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>{bench} al-tut</div>
                     <div style={{ fontWeight: 600, color: tone(r.iwm_buy_hold_pct) }}>{pct(r.iwm_buy_hold_pct, 1)}</div></div>
             </div>
             <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
@@ -168,7 +178,7 @@ function StrategyCard({ r }: { r: ShadowStrategyReport }) {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 4 }}>
                 <Check ok={g.F1_sample} label={`F1 örneklem: ≥${g.need_months} ay ve ≥${g.need_closed} işlem`} />
                 <Check ok={g.F2_net_ci_gt0} label="F2 net ort. > 0 ve güven aralığı alt sınırı > 0" />
-                <Check ok={g.F3_beats_iwm} label="F3 portföy IWM al-tut'u geçiyor" />
+                <Check ok={g.F3_beats_iwm} label={`F3 portföy ${bench} al-tut'u geçiyor`} />
                 <Check ok={g.F4_maxdd_lt35} label="F4 maks. düşüş < %35" />
             </div>
         </div>
@@ -179,7 +189,7 @@ export default function ShadowPage() {
     const [data, setData] = useState<ShadowData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
-    const [strategy, setStrategy] = useState<"all" | "H5" | "H4" | "H6" | "H6S" | "H6SR">("all");
+    const [strategy, setStrategy] = useState<"all" | "H5" | "H4" | "H6" | "H6S" | "H6SR" | "MOM">("all");
     const [hideSkipped, setHideSkipped] = useState(true);
 
     const load = async () => {
@@ -207,7 +217,7 @@ export default function ShadowPage() {
     if (error) return <div className="card" style={{ color: "var(--danger)" }}>{error}</div>;
     if (!data) return null;
 
-    const ORDER = ["H6S", "H6SR", "H6", "H5", "H4"];
+    const ORDER = ["H6S", "H6SR", "H6", "MOM", "H5", "H4"];
     const strategies = data.report
         ? Object.values(data.report.strategies).sort((a, b) => ORDER.indexOf(a.strategy) - ORDER.indexOf(b.strategy))
         : [];
@@ -220,9 +230,10 @@ export default function ShadowPage() {
                         <Ghost size={22} /> Gölge Sinyaller
                     </h1>
                     <p style={{ color: "var(--text-muted)", margin: "6px 0 0", fontSize: 13, maxWidth: 820 }}>
-                        İki bilgi tabanlı sinyal (H4, H5) ve canlı ürünün VCE varyantları (H6, H6S, H6SR) burada{" "}
-                        <strong>gerçek para olmadan</strong> ileriye doğru izleniyor. Düzeltilmiş geçmiş testlerde (2016–2020 ve
-                        2021–2026) hiçbiri endeksi geçemedi (Lab v3 Ek R ve Ek S); geçerli kanıt yalnız bu ileri testten gelebilir.
+                        İki bilgi tabanlı sinyal (H4, H5), canlı ürünün VCE varyantları (H6, H6S, H6SR) ve büyük hisselerde
+                        aylık lider rotasyonu (MOM) burada <strong>gerçek para olmadan</strong> ileriye doğru izleniyor.
+                        Düzeltilmiş geçmiş testlerde (2016–2020 ve 2021–2026) hiçbiri iki dönemde de endeksi geçemedi
+                        (Lab v3 Ek R, S ve T); geçerli kanıt yalnız bu ileri testten gelebilir.
                         Kurallar ve geçme ölçütleri sonuç görülmeden yazıldı; değişmez. Ana ürünün işlemlerine dokunmaz.
                     </p>
                 </div>
@@ -250,6 +261,21 @@ export default function ShadowPage() {
                                     </div>
                                 );
                             })()}
+                            {(() => {
+                                const m = (data.last_run?.MOM ?? null) as Record<string, unknown> | null;
+                                if (!m) return null;
+                                const bad = "error" in m || "deferred" in m;
+                                return (
+                                    <div style={{ fontSize: 12, marginTop: 4, color: bad ? "var(--danger)" : "var(--text-muted)" }}>
+                                        {m.rebalance
+                                            ? <>MOM ay sonu kararı {String(m.rebalance)}: rejim {String(m.regime ?? "—")} · evren {String(m.universe ?? "—")} hisse ·
+                                                uygun {String(m.eligible ?? "—")} · alım {String(m.buys ?? 0)} · satış {String(m.sells ?? 0)}</>
+                                            : <>MOM: bu koşuda karar günü yok (karar yalnız ayın son seansında){m.last_rebalance ? ` · son karar ${String(m.last_rebalance)}` : ""}</>}
+                                        {"deferred" in m && ` · ertelendi: ${String(m.deferred)}`}
+                                        {"error" in m && ` · hata: ${String(m.error)}`}
+                                    </div>
+                                );
+                            })()}
                             <div style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 4 }}>
                                 Terfi otomatik değildir. “TERFİ ADAYI” yalnız gerçek para tartışmasını açar.
                                 “KALDI” durumunda gölge kapatılır. Geç verilen kararlar (açılıştan sonra) ve ısınma dönemi değerlendirmeye girmez.
@@ -271,7 +297,7 @@ export default function ShadowPage() {
             <div className="card">
                 <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
                     <strong>İşlemler</strong>
-                    {(["all", "H6S", "H6SR", "H6", "H5", "H4"] as const).map(s => (
+                    {(["all", "H6S", "H6SR", "H6", "MOM", "H5", "H4"] as const).map(s => (
                         <button key={s} className={strategy === s ? "btn-primary" : "btn-secondary"}
                             style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setStrategy(s)}>
                             {s === "all" ? "Tümü" : s}
@@ -288,7 +314,7 @@ export default function ShadowPage() {
                         <thead>
                             <tr>
                                 <th>Strateji</th><th>Hisse</th><th>Sinyal</th><th>Durum</th><th>Giriş</th>
-                                <th>Stop</th><th>Çıkış / değerleme</th><th>Getiri</th><th>Net</th><th>IWM</th><th>Not</th>
+                                <th>Stop</th><th>Çıkış / değerleme</th><th>Getiri</th><th>Net</th><th>Endeks</th><th>Not</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -313,6 +339,7 @@ export default function ShadowPage() {
                                           t.warmup ? "ısınma" : null,
                                           t.strategy === "H5" && t.key != null ? `sürpriz %${t.key.toFixed(0)}` : null,
                                           t.strategy === "H4" && t.key != null ? `$${Math.round(t.key / 1000)}K alım` : null,
+                                          t.strategy === "MOM" && t.key != null ? `12 ay skoru %${(t.key * 100).toFixed(0)}` : null,
                                         ].filter(Boolean).join(" · ") || "—"}
                                     </td>
                                 </tr>

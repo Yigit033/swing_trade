@@ -13,7 +13,8 @@
 > kanıt sayılmamalı. Gölgedeki iki bilgi sinyali (H4, H5) de düzeltilmiş evrende iki dönemde sınandı ve
 > **KALDI** (Ek S): hiçbiri havuzu anlamlı biçimde yenmiyor, hiçbiri endeksi geçmiyor. Büyük ve likit hisselerde
 > denenen iki farklı türden fikir (aylık lider rotasyonu ve panik dipleri) de **KALDI** (Ek T). Geçmiş veri
-> üzerindeki strateji arayışı kapatıldı: sınanan hiçbir strateji iki dönemde de endeksi geçemedi.
+> üzerindeki strateji arayışı kapatıldı: sınanan hiçbir strateji iki dönemde de endeksi geçemedi. Lider
+> rotasyonu, kullanıcı kararıyla ve gerçek para olmadan yalnız gölge ileri testte izleniyor (Ek U).
 
 ## 1. Kısa sonuç
 
@@ -950,3 +951,25 @@ LAB_DATA=output/lab_liq LAB_OHLCV_START=2014-10-01 LAB_OHLCV_END=2026-11-21 LAB_
 python lab/liq_t.py shares && python lab/liq_t.py run        # → output/lab_liq/t_result.json
 python -m pytest swing_trader/tests/test_lab_rotation.py
 ```
+
+## Ek U — MOM "lider rotasyonu" gölge ileri testinde (25 Kasım 2026, kullanıcı kararı)
+
+Ön kayıt: `lab/PREREGISTRATION.md` Ek U (bölümün LF satır sonlu SHA256'sı
+`ab00c3248f054df0849b3460119ae5c37379cf6704896c2ba53a8785e62fe5b2`), kilit `PARAMS_MOM` (`ac313589…`).
+MOM geçmiş sınavda KALDI ve Ek T'ye göre kapanması gerekiyordu; kullanıcı kararıyla **yalnız gölge ileri teste**
+alındı (etiketli istisna). Gerçek para yok, canlı paper ürün değişmedi, geçmiş sınavın hükmü değişmedi; MOM
+gerçek para adayı değildir.
+
+- **Kural:** Ek T MOM ile birebir. `swing_trader/shadow/rules.mom_facts` + `mom_decide`, lab kuralıyla
+  (`lab/rotation.mom_trades`) sentetik veride aynı işlemleri üretiyor (üç satış nedeni — sıra, trend, havuz —
+  dahil; `swing_trader/tests/test_shadow_mom.py`).
+- **Canlı akış:** gölge koşusu her sabah çalışır; karar yalnız ayın son seansı için verilir (ertesi sabah,
+  açılıştan önce). Evren Finviz'den (piyasa değeri > 10 milyar $; 2026-11'de 863 hisse, ~80 sn), fiyatlar canlı
+  fetcher'dan. Satılacak hisse işaretlenir ve ertesi açılıştan kapatılır; alınacaklar ertesi açılıştan girer.
+- **Güvenlik payları:** evren 400 hisseden azsa ya da hisselerin %80'inde karar günü barı yoksa karar verilmez
+  (`deferred`) ve yedek tetikleyiciler yeniden dener — eksik evrenle karar, eldeki hisseleri yanlışlıkla
+  sattırırdı. Kaçırılan ay sonu sonraki koşuda geç işlenir ve "geç karar" işaretlenir (değerlendirme dışı).
+- **Kapı:** ≥ 24 ay ve ≥ 40 kapanmış işlem; net ortalama (10 bps) > 0 ve CI alt sınırı > 0; portföy (10 bps +
+  1.5$/emir) > SPY al-tut; max düşüş > −35%. 36. ayda hâlâ aday değilse KALDI. Rapor ve sayfa MOM için SPY'ı
+  kıyas alır; diğer stratejilerin maliyeti, kıyası (IWM) ve kapıları değişmedi.
+- **İlk karar:** 2026-11-30 (Kasım'ın son seansı) → 2026-12-01 açılışı. En erken değerlendirme ~Kasım 2028.

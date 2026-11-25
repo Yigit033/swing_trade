@@ -777,3 +777,37 @@ Yukarıdaki Ek T metni değiştirilmedi (bölüm SHA256, LF: 281227721bb3d79be60
   T1–T3 ✘.
 Ön kayıt gereği ikisi de kapandı; bu veride varyant denenmez. Geçmiş veri üzerindeki strateji arayışı kapatıldı.
 Ayrıntı: LAB_V3_REPORT.md Ek T.
+
+# Ek U — MOM "lider rotasyonu" gölge ileri testi (kullanıcı kararı; Ek T'deki "KALDI → kapanır" sonucunun etiketli istisnası)
+
+**Yazıldığı an: 2026-11-25, Ek T sonucu GÖRÜLDÜKTEN SONRA; ileri testin hiçbir verisi yokken.** MOM geçmiş sınavda
+KALDI (2016–2020 +301% / düşüş −32%; 2021–26 +22% / düşüş −71%, SPY +99%) ve Ek T'ye göre kapanması gerekiyordu.
+Kullanıcı kararıyla (2026-11-25) yalnız **gölge ileri teste** alınır: gerçek para yok, canlı paper ürün değişmez,
+geçmiş sınavın hükmü değişmez. Gerekçe: projede havuzu istatistiksel olarak yenen tek sinyal buydu; değeri ancak
+görülmemiş gelecekte ölçülebilir. MOM gerçek para adayı DEĞİLDİR.
+
+**Kurallar (Ek T MOM ile birebir, donuk; ayrı kilit `PARAMS_MOM`).**
+- Havuz L: o günün fiyatı ≥ 7 $, 63 seans ortalama hacim > 300K, 20 seans ortalama dolar hacim > 5M $, piyasa
+  değeri ≥ 10 milyar $.
+- Karar günü t: her ayın son seansı. İşlem t'den sonraki ilk seansın açılışında.
+- Uygun hisse: t'de havuz L'de, Close_t > SMA200_t, skor hesaplanabiliyor. Skor = Close_{t−21} / Close_{t−252} − 1.
+- Sat: elde tutulan hisse uygun değilse ya da uygunlar içinde skor sırası 20'den büyükse.
+- Al: yalnız rejim BULL ise (canlı `regime_from_spy_close`, SPY 1 yıl + VIX); en yüksek skorlu, elde olmayan
+  uygun hisselerle en çok 10 pozisyona tamamlanır. Stop ve hedef yok.
+- Değerlendirme maliyeti: 10 bps gidiş-dönüş; portföyde ayrıca 1.5$/emir, 10.000$, pozisyon başına %10.
+
+**Canlı uygulamanın lab'dan farkları (kuralı değiştirmez).** Piyasa değeri canlı kaynaktan gelir (Finviz taraması:
+piyasa değeri > 10 milyar $, fiyat > 7 $, ortalama hacim > 300K; lab'da hisse sayısı × fiyattı); fiyat ve hacim
+canlı fetcher'dan (yfinance). Alım kararında ertesi açılış henüz bilinmediği için açılış barı gelmeyen alım
+"atlandı" olur ve yeri bir sonraki ay sonuna kadar boş kalır (lab sıradaki hisseyi alırdı). Evren ya da ay sonu
+barları alınamazsa karar ertelenir ve yedek tetikleyiciler yeniden dener; kaçırılan ay sonu sonradan işlenir ve
+alım/satım "geç karar" işaretlenir (değerlendirmeye girmez).
+
+**Kapı (Ek C düzeni; otomatik terfi yok).** F1: ≥ 24 ay VE ≥ 40 uygun kapanmış işlem. F2: işlem başı net ortalama
+(10 bps) > 0 VE giriş günü kümeli bootstrap %95 CI alt sınırı > 0. F3: portföy (%10/pozisyon, 10 bps + 1.5$/emir)
+toplamı > aynı dönemde SPY al-tut. F4: max düşüş > −35%. Durum: F1'e kadar TOPLANIYOR; sonra F2–F4 hepsi →
+TERFİ ADAYI; net ortalama ≤ 0 → KALDI; 36. ayda hâlâ aday değilse KALDI; aksi halde BELİRSİZ. "TERFİ ADAYI" yalnız
+tartışmayı açar; geçmiş sınavdaki −71% düşüş o tartışmada kullanıcıya birlikte sunulur.
+
+**Başlangıç.** İlk karar günü gölge koşusunun MOM'u ilk çalıştırdığı günden sonraki ilk ay sonu seansıdır
+(2026-11-30 → 2026-12-01 açılışı). H4/H5/H6/H6S/H6SR kilitleri ve kapıları değişmez.

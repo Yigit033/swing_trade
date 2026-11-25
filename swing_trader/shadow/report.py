@@ -1,4 +1,4 @@
-"""Gölge ileri test raporu + ön kayıtlı terfi kapısı (PREREGISTRATION Ek C, H6: Ek F). SAF fonksiyonlar."""
+"""Gölge ileri test raporu + ön kayıtlı terfi kapısı (PREREGISTRATION Ek C, H6: Ek F, MOM: Ek U). SAF fonksiyonlar."""
 from __future__ import annotations
 
 from datetime import date
@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from .rules import PARAMS, PARAMS_H6, PARAMS_H6S, PARAMS_H6SR
+from .rules import PARAMS, PARAMS_H6, PARAMS_H6S, PARAMS_H6SR, PARAMS_MOM
 
 COST = PARAMS["common"]["cost_pct"]
 GATE = {
@@ -16,7 +16,14 @@ GATE = {
     "H6": dict(min_closed=PARAMS_H6["min_closed"], min_months=6, max_months=12),
     "H6S": dict(min_closed=PARAMS_H6S["min_closed"], min_months=6, max_months=12),
     "H6SR": dict(min_closed=PARAMS_H6SR["min_closed"], min_months=6, max_months=12),
+    "MOM": dict(min_closed=PARAMS_MOM["min_closed"], min_months=PARAMS_MOM["min_months"],
+                max_months=PARAMS_MOM["max_months"]),
 }
+# Stratejiye özel değerlendirme (Ek U): MOM büyük ve likit hisselerde → 10 bps + 1.5$/emir, kıyas SPY.
+# Diğerleri ön kayıtlarındaki gibi: 50 bps, sabit ücret yok, kıyas IWM.
+COST_BY = {"MOM": PARAMS_MOM["cost_pct"]}
+FEE_BY = {"MOM": PARAMS_MOM["fee_per_order"]}
+BENCHMARK_BY = {"MOM": PARAMS_MOM["regime_index"]}
 
 
 def boot_ci(df: pd.DataFrame, col: str, n: int = 2000, seed: int = 7):
@@ -32,10 +39,11 @@ def boot_ci(df: pd.DataFrame, col: str, n: int = 2000, seed: int = 7):
 
 
 def portfolio(trades: List[Dict], sessions: List[date], frac: float = 0.10, cost: float = COST,
-              cap0: float = 10_000.0) -> Dict:
+              cap0: float = 10_000.0, fee: float = 0.0) -> Dict:
     """%10/işlem, nakit sınırlı, günlük değerleme (lab/evaluate.portfolio ile aynı mantık).
 
     Her işlemin ``details.path`` alanı [(gün, kapanış), …] günlük değerleme serisidir.
+    ``fee``: emir başına sabit $ (alışta ve satışta ayrı; lab/swing_o.portfolio ile aynı hesap).
     """
     if not sessions:
         return dict(total_pct=0.0, max_dd_pct=0.0, taken=0)
@@ -51,7 +59,7 @@ def portfolio(trades: List[Dict], sessions: List[date], frac: float = 0.10, cost
         keep = []
         for p in pos:
             if p["exit_date"] == ds:
-                cash += p["sh"] * p["exit_price"] * (1 - cost / 200)
+                cash += p["sh"] * p["exit_price"] * (1 - cost / 200) - fee
             else:
                 keep.append(p)
         pos = keep
@@ -61,14 +69,14 @@ def portfolio(trades: List[Dict], sessions: List[date], frac: float = 0.10, cost
             if alloc > cash:
                 continue
             e = float(t["entry_price"])
-            sh = alloc / (e * (1 + cost / 200))
+            sh = (alloc - fee) / (e * (1 + cost / 200))
             cash -= alloc
             taken += 1
             path = {str(k)[:10]: float(v) for k, v in ((t.get("details") or {}).get("path") or [])}
             ex_d = str(t.get("exit_date") or "")[:10] or None
             ex_p = float(t["exit_price"]) if t.get("exit_price") is not None else None
             if ex_d == ds:
-                cash += sh * ex_p * (1 - cost / 200)
+                cash += sh * ex_p * (1 - cost / 200) - fee
             else:
                 pos.append(dict(sh=sh, path=path, last=e, exit_date=ex_d, exit_price=ex_p))
         for p in pos:
@@ -87,6 +95,7 @@ def months_between(a: date, b: date) -> float:
 def strategy_report(name: str, trades: List[Dict], sessions: List[date], live_start: date,
                     asof: date, iwm_bh_pct: Optional[float]) -> Dict:
     rows = [t for t in trades if t["strategy"] == name]
+    cost, fee = COST_BY.get(name, COST), FEE_BY.get(name, 0.0)
     counts = pd.Series([t["status"] for t in rows]).value_counts().to_dict() if rows else {}
     closed = [t for t in rows if t["status"] == "CLOSED"]
     eligible = [t for t in closed if not t.get("warmup") and not t.get("late_decision")]
@@ -94,9 +103,10 @@ def strategy_report(name: str, trades: List[Dict], sessions: List[date], live_st
     out = dict(strategy=name, counts=counts, closed=len(closed), eligible_closed=len(eligible),
                late_decisions=sum(1 for t in rows if t.get("late_decision")),
                warmup=sum(1 for t in rows if t.get("warmup")),
-               months_live=round(months_between(live_start, asof), 2))
+               months_live=round(months_between(live_start, asof), 2),
+               cost_pct=cost, fee_per_order=fee, benchmark=BENCHMARK_BY.get(name, "IWM"))
     if len(df):
-        df["net"] = df["ret_pct"].astype(float) - COST
+        df["net"] = df["ret_pct"].astype(float) - cost
         df["excess_iwm"] = df["ret_pct"].astype(float) - df["iwm_ret"].astype(float)
         lo, hi = boot_ci(df, "net")
         out.update(net_mean=round(float(df.net.mean()), 3), net_median=round(float(df.net.median()), 3),
@@ -104,7 +114,7 @@ def strategy_report(name: str, trades: List[Dict], sessions: List[date], live_st
                    net_ci95=[None if lo is None else round(lo, 3), None if hi is None else round(hi, 3)],
                    excess_iwm_mean=round(float(df.excess_iwm.mean()), 3))
     port = portfolio([t for t in rows if t["status"] in ("OPEN", "CLOSED")
-                      and not t.get("warmup") and not t.get("late_decision")], sessions)
+                      and not t.get("warmup") and not t.get("late_decision")], sessions, cost=cost, fee=fee)
     out["portfolio_10pct"] = port
     out["iwm_buy_hold_pct"] = None if iwm_bh_pct is None else round(iwm_bh_pct, 2)
     out["gate"] = gate(name, out)

@@ -1,5 +1,6 @@
 """
-Gölge sinyaller (H4 içeriden alım, H5 bilanço sürprizi) — ileri test, GERÇEK PARA YOK.
+Gölge sinyaller (H4 içeriden alım, H5 bilanço sürprizi, H6/H6S/H6SR VCE, MOM lider rotasyonu) —
+ileri test, GERÇEK PARA YOK.
 
 GET  /api/shadow            → son rapor (terfi kapısı durumu) + işlem listesi + koşu sağlığı
 POST /api/shadow/daily-run  → günlük gölge koşusu (cron; X-Cron-Secret).
@@ -7,7 +8,7 @@ POST /api/shadow/daily-run  → günlük gölge koşusu (cron; X-Cron-Secret).
                               (yedek tetikleyiciler — GitHub cron'u + Daily Run zinciri).
 
 Ana ürünün paper işlemlerinden, kapasitesinden ve raporlarından tamamen ayrıdır
-(shadow_* tabloları). Kurallar: lab/PREREGISTRATION.md Ek A + Ek C.
+(shadow_* tabloları). Kurallar: lab/PREREGISTRATION.md Ek A + Ek C (H6: Ek F, H6S: Ek J, H6SR: Ek Q, MOM: Ek U).
 """
 import hmac
 import logging
