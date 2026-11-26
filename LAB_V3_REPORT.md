@@ -973,3 +973,105 @@ gerçek para adayı değildir.
   1.5$/emir) > SPY al-tut; max düşüş > −35%. 36. ayda hâlâ aday değilse KALDI. Rapor ve sayfa MOM için SPY'ı
   kıyas alır; diğer stratejilerin maliyeti, kıyası (IWM) ve kapıları değişmedi.
 - **İlk karar:** 2026-11-30 (Kasım'ın son seansı) → 2026-12-01 açılışı. En erken değerlendirme ~Kasım 2028.
+
+## Ek V — PRO: kazanan swing trader'ların yayımlanmış yöntemi, tek paket (26 Kasım 2026, kullanıcı kararı)
+
+Ön kayıt: `lab/PREREGISTRATION.md` Ek V (bölümün LF satır sonlu SHA256'sı
+`c482e3da361748a2272bb3e37c47b1f1e45e7e2312ba851386ae6871a17c7a2a`; kural setinin hiçbir sonucu görülmeden ve
+bilanço verisi indirilmeden yazıldı). Ek T'de kapatılan geçmiş veri arayışının kullanıcı kararıyla açılmış etiketli
+istisnasıdır (~18. hipotez). Kod: [lab/pro_v.py](lab/pro_v.py), kurallar [lab/pro_rules.py](lab/pro_rules.py),
+testler `swing_trader/tests/test_lab_pro.py` (19 test; vektörel VCE tetiği üretimdeki `check_vce_breakout` ile
+3.000+ pencerede birebir). Fiyat verisi Ek T'nin kökü (`output/lab_liq`); büyüme verisi SEC `companyfacts.zip`
+(2.827 hissede çeyreklik satış + net kâr; NVDA, AAPL, TSLA rakamları şirket açıklamalarıyla doğrulandı).
+
+**Paket.** Havuz G (fiyat ≥ 10 $, piyasa değeri ≥ 1 mlr $, dolar hacim > 10M $; medyan 1.065 / 1.415 hisse) ∧
+büyüme (son çeyrek satışı yıllık ≥ %25 artmış, net kâr artmış; ilk dosyalanan değer, dosya tarihinden sonra) ∧
+lider (Minervini trend şablonu + 12 aylık getiri havuzun en iyi %20'si) ∧ ürünün VCE kırılımı ∧ piyasa BULL.
+Giriş ertesi açılış; stop = sinyal günü dibi, en çok %8; çıkış = kapanış SMA50 altına inince ertesi açılış (süre
+sınırı yok); boyut = %1 risk, en çok %25, iki zarardan sonra %0.5. Maliyet 20 bps + Midas 1.5$/emir; 10.000$.
+
+**Hüküm: KALDI** (iki dönemde de SPY'ın gerisinde).
+
+| | A: 2016–2020 | B: 2021–2026 |
+|---|---:|---:|
+| Sinyal düzeyi işlem / portföyün aldığı | 104 / 87 | 161 / 152 |
+| Kazanma oranı | %25.0 | %16.1 |
+| Ortalama kazanç / ortalama kayıp | +15.2% / −4.2% | +40.3% / −5.3% |
+| İşlem başı brüt (medyan net) | +0.68% (−3.0%) | +2.05% (−4.5%) |
+| Havuz G'ye göre fark | +0.83 [−1.05, +2.91] | +2.32 [−1.21, +6.99] |
+| **Portföy** | **+6.4%** | **+52.2%** |
+| **Max düşüş** | −14.7% | −26.2% |
+| **SPY al-tut** (IWM) | **+102.0%** (+86.4%) | **+99.2%** (+40.1%) |
+| Ortalama nakit oranı | %75 | %74 |
+| V1 SPY'ı geçti / V2 düşüş > −35% | ✘ / ✔ | ✘ / ✔ |
+
+| Yıl | 2016 | 2017 | 2018 | 2019 | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| PRO portföyü | −2.9 | +0.2 | −2.0 | +14.0 | −2.2 | −3.0 | −3.9 | +4.6 | −5.0 | +20.6 | +36.0 |
+
+- İki dönem birlikte: 265 işlem, havuz farkı +1.74 [−0.69, +4.62] → V3 ✘. V0 ✔ (≥ 60 işlem), V2 ✔, V1 ✘ → **KALDI**.
+- **Ne oldu:** yöntem tarif edildiği gibi davrandı — çok sayıda küçük zarar (stop çıkışları ortalama −4.3% / −5.4%),
+  az sayıda büyük kazanç (iz süren çıkışlar ortalama +11% / +32%, ~50 seans). Hesap iki dönemde de artıda kaldı ve
+  düşüş sınırı aşılmadı (projede kırılım ailesinde ilk). Ama kazanç endeksin çok altında: paranın dörtte üçü nakitte
+  bekledi ve kâr birkaç işleme bağlı — en iyi 3 işlem çıkarılınca ortalama işlem iki dönemde de zararda (−0.64% /
+  −1.43%); B'nin kazancı 2025–26'daki üç işlemden (MXL +219%, WDC +200%, MU +137%), A'nınki 2019'dan.
+- Duyarlılık (hüküm değiştirmez): 10 bps +7.9% / +55.4%; 50 bps −3.7% / +42.9%; 25.000$ +8.0% / +56.1%.
+- Büyüme verisi kapsamı: lider + kırılım + BULL sinyallerinin %77'sinde (489/633) ve %75'inde (709/947) veri vardı;
+  şartı %21 / %22'si sağladı. Verisi olmayanlar (çoğu çeyreklik XBRL dosyalamayan yabancı şirket) reddedildi.
+
+**Betimleyici kıyaslar (hüküm değil; ön kayıtta "hangi parça ne katıyor" için ilan edildi, sonradan seçilemez).**
+
+| Paketten çıkarılan / değiştirilen | A portföy (düşüş) | B portföy (düşüş) | Havuz farkı A / B |
+|---|---:|---:|---:|
+| — (PRO) | +6.4% (−14.7) | +52.2% (−26.2) | +0.83 / +2.32 |
+| Büyüme şartı yok | +13.0% (−38.4) | **−58.9%** (−67.7) | −0.03 / −0.10 |
+| Lider şartı yok | +36.4% (−21.4) | +64.0% (−22.8) | +2.84 [+0.31, +6.07] / +2.38 [+0.50, +4.47] |
+| Piyasa şartı yok | +11.3% (−15.2) | +48.4% (−32.9) | +0.33 / +2.87 |
+| Çıkış 8. seans kapanışı | +9.4% (−6.6) | −9.6% (−17.8) | +1.19 / +0.70 |
+| Sabit %10 boyut | +0.6% (−12.1) | +19.8% (−26.1) | aynı işlemler |
+
+- **Büyüme şartı** seçimi sıfırdan artıya çeviren tek parça: şart olmadan aynı kırılımların havuza göre farkı ≈ 0
+  ve hesap B'de −59%. (Projede fiyat dışı bilginin kırılım sinyaline değer kattığı ilk gözlem.)
+- **Lider şartı** (trend şablonu + göreli güç) bu veride değer katmadı; onsuz sonuç daha iyi ve havuz farkı iki
+  dönemde ayrı ayrı sıfırın üstünde. Bu, beş betimleyici kıyastan biri olarak sonradan görülen bir sonuçtur
+  (çoklu karşılaştırma); yine de iki dönemde SPY'ın gerisinde (+36% vs +102%, +64% vs +99%). Kanıt sayılmaz.
+- **Kazananı tutma** B'de belirleyici (8 seansta satınca −9.6%); **değişken boyut** iki dönemde de katkı sağladı.
+- Yanlılık: survivorship lehte (evren 2026'da listede olanlar); gün içi giriş sınanamadı.
+
+**Sonuç.** Kazanan swing trader'ların yayımlanmış yöntemi, mekanik uygulandığında hesabı korudu ve az da olsa
+büyüttü, ama endeksi iki dönemde de geçemedi. Ön kayıt gereği kapandı. Ek T'nin kapanış sonucu değişmedi: ~18
+hipotezin hiçbiri iki dönemde de endeksi geçmedi.
+
+```text
+python lab/pro_v.py facts     # companyfacts.zip → output/lab_liq/sec_facts/quarters.parquet (tek süreç; bellek)
+python lab/pro_v.py run       # → output/lab_liq/v_result.json, v_trades_PRO_{A,B}.parquet
+python -m pytest swing_trader/tests/test_lab_pro.py
+```
+
+## Ek W — GRW "büyüme + kırılım" gölge ileri testinde (26 Kasım 2026, kullanıcı kararı)
+
+Ön kayıt: `lab/PREREGISTRATION.md` Ek W (bölüm SHA256, LF:
+`bed4ddd646a464d03db16a62c1ccee68be5e61623c57a370c34e6929142e5de6`; ileri testin hiçbir verisi yokken yazıldı).
+Ek V'deki "KALDI → kapanır" sonucunun etiketli istisnasıdır: Ek V'nin ön kayıtlı paketi kaldı; "lider şartsız"
+kıyası sonuç görüldükten sonra seçildi ve endeksi iki dönemde de geçemedi. **Kanıt değildir; gerçek para adayı
+değildir.** Yalnız ileriye doğru izlenir; canlı paper ürün ve diğer gölge kilitleri değişmedi.
+
+- **Kural (donuk, `PARAMS_GRW` kilidi `ca1d88da…c7198`):** havuz G (fiyat ≥ 10 $, piyasa değeri ≥ 1 mlr $, dolar
+  hacim > 10M $) ∧ VCE kırılımı ∧ büyüme (son çeyrek satışı yıllık ≥ %25, net kâr artmış; SEC, dosya tarihi <
+  sinyal günü) ∧ SPY rejimi BULL. Giriş ertesi açılış; stop = sinyal günü dibi, en çok %8; çıkış = Close < SMA50 →
+  ertesi açılış; süre sınırı yok. Boyut %1 risk ÷ stop uzaklığı, en çok %25, iki zarardan sonra %0.5.
+  Değerlendirme: 20 bps + 1.5$/emir, kıyas SPY.
+- **Kod:** `swing_trader/shadow/growth.py` (SEC kayıtlarından çeyrek tablosu ve büyüme şartı; lab ile birebir),
+  `rules.py` (`grw_pool`, `grw_plan`), `sources.py` (`grw_hits`: Finviz ön elemesi + canlı barlar + üretimin
+  `check_vce_breakout` fonksiyonu; `sec_growth_facts`: SEC `companyconcept`), `runner.py` (`run_grw`; açık
+  işlemler ortak `update_trades` içinde `grw_plan` ile), `report.py` (risk tabanlı boyut, kapı ≥ 24 ay ve ≥ 60
+  işlem, 36. ayda karar).
+- **Parite:** `swing_trader/tests/test_shadow_grw.py` (22 test) — büyüme tablosu ve günlük şart lab ile aynı
+  (rastgele kayıt setleri), `grw_plan` lab işlemleriyle aynı giriş/stop/çıkış (STOP ve TRAIL), rapor portföyü
+  lab'ın risk tabanlı portföyüyle aynı sonuç. Canlı SEC uç noktası ile lab'ın toplu dosyası NVDA, TSLA, CROX,
+  ANET, MXL için aynı çeyrek tablosunu ve aynı günlük şartı verdi.
+- **Canlı deneme (yerel defter, üretime dokunmadan):** 2026-11-25 için 138 aday, 137 güncel bar, VCE 0 → kayıt yok
+  (27 sn). Zorlanmış adaylar ve BULL ile: NVDA alındı (satış +%106), CROX büyüme şartından elendi (+%4.6), ASML'de
+  çeyreklik SEC verisi yok → ret. Gerçek SPY rejimi o gün BEAR olduğundan rejim düzelene kadar GRW alım yapmaz.
+- **Canlı ile lab farkları:** aday listesi Finviz'den, piyasa değeri Finviz'den; portföy değerlemesi gölge raporu
+  düzeninde (aynı günün çıkışları girişlerden önce nakde döner). Elenen kırılımlar nedenleriyle kaydedilir.

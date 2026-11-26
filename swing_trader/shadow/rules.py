@@ -83,6 +83,23 @@ PARAMS_MOM: Dict = dict(
 )
 PARAMS_MOM_SHA256 = hashlib.sha256(json.dumps(PARAMS_MOM, sort_keys=True, default=list).encode()).hexdigest()
 
+# Ek W — GRW "Büyüme + kırılım": Ek V'nin "lider şartsız" kıyası (lab/pro_rules.py ile birebir). Ön kayıtlı
+# paket (PRO) geçmiş sınavda KALDI; bu varyant sonuç görüldükten sonra seçildi ve endeksi geçemedi →
+# kullanıcı kararıyla yalnız gölge ileri testte. Ayrı kilit; diğer kilitler değişmez. Çıkış SMA50'ye bağlı
+# olduğundan EXITS'te yok (``grw_plan``).
+PARAMS_GRW: Dict = dict(
+    pool="G", price_min=10.0, avgvol63_min=300_000, avgvol63_window=63, avgvol63_min_periods=40,
+    dv20_min=1e7, dv20_window=20, dv20_min_periods=15, cap_min=1e9,
+    trigger="signals.check_vce_breakout", growth_source="SEC XBRL (first filed value, filed < signal day)",
+    min_sales_growth=0.25, profit_rule="ni_q > ni_q_minus_4", max_stale_days=200, yoy_days=(350, 380),
+    buy_regime="BULL", regime_index="SPY", regime_fn="regime_from_spy_close(SPY 1y close, VIX)",
+    entry="next_session_open", max_stop=0.08, stop="max(signal_low, entry * (1 - max_stop))",
+    exit="close_below_sma_then_next_open", sma=50, max_sessions=None,
+    risk=0.01, risk_cold=0.005, cold_streak=2, max_frac=0.25,
+    cost_pct=0.20, fee_per_order=1.5, min_closed=60, min_months=24, max_months=36,
+)
+PARAMS_GRW_SHA256 = hashlib.sha256(json.dumps(PARAMS_GRW, sort_keys=True, default=list).encode()).hexdigest()
+
 # Strateji → (ATR stop katı, en çok seans). None stop = stop yok.
 EXITS: Dict[str, Tuple[Optional[float], int]] = {
     "H4": (C["stop_atr"], C["max_bars"]),
@@ -410,3 +427,69 @@ def mom_decide(facts: Dict[str, Dict], held: Iterable[str], regime: str) -> Dict
                 continue
             buys.append(t)
     return dict(sells=sells, buys=buys, rank=rank, eligible=len(ranked))
+
+
+# ── GRW: büyüme + kırılım (Ek V / Ek W; lab/pro_rules.pro_trades ile aynı kural) ───────────────
+
+def grw_pool(df: pd.DataFrame, cap: Optional[float]) -> Tuple[bool, Dict]:
+    """Havuz G üyeliği, çerçevenin SON barı itibarıyla (fiyat ≥ 10, ort. hacim 63 > 300K, dolar hacim 20 > 10M,
+    piyasa değeri ≥ 1 mlr). ``df``: canlı barlar (bugüne göre düzeltilmiş = o günün gerçek fiyatı)."""
+    p = PARAMS_GRW
+    c, v = df["Close"].astype(float), df["Volume"].astype(float)
+    close = float(c.iloc[-1])
+    avgvol = float(v.rolling(p["avgvol63_window"], min_periods=p["avgvol63_min_periods"]).mean().iloc[-1])
+    dv = float((c * v).rolling(p["dv20_window"], min_periods=p["dv20_min_periods"]).mean().iloc[-1])
+    cap_ok = cap is not None and np.isfinite(cap) and float(cap) >= p["cap_min"]
+    ok = bool(np.isfinite(close) and close >= p["price_min"] and np.isfinite(avgvol) and avgvol > p["avgvol63_min"]
+              and np.isfinite(dv) and dv > p["dv20_min"] and cap_ok)
+    return ok, dict(close=close, avgvol63=avgvol, dv20=dv, cap=None if cap is None else float(cap))
+
+
+def grw_plan(frame: pd.DataFrame, signal_day: date) -> Dict:
+    """Sinyal barı ``signal_day`` → giriş / stop / çıkış (hizalanmış çerçeve; lab ``_walk_trail``).
+
+    Giriş t+1 açılışı; stop = max(Low_t, (1 − 0.08) × giriş), giriş ≤ Low_t → işlem yok. Her gün sırayla:
+    dün Close < SMA50 idiyse açılışta sat (TRAIL) → Low ≤ stop ise min(Open, stop) (STOP) → bugün
+    Close < SMA50 ise yarın açılışta satılacak. Süre sınırı yok. Dönüş alanları ``plan_trade`` ile aynı.
+    """
+    p = PARAMS_GRW
+    idx = list(frame.index.date)
+    if signal_day not in idx:
+        return dict(status="SKIPPED", reason="NO_SIGNAL_BAR")
+    i = idx.index(signal_day)
+    if i + 1 >= len(idx):
+        return dict(status="PENDING")
+    O, L, Cl = (frame[k].to_numpy(dtype=float) for k in ("Open", "Low", "Close"))
+    S = frame["Close"].astype(float).rolling(p["sma"]).mean().to_numpy()
+    ie = i + 1
+    o = O[ie]
+    if not np.isfinite(o) or o <= 0:
+        return dict(status="SKIPPED", reason="NO_ENTRY_BAR")
+    if not np.isfinite(L[i]) or o <= L[i]:
+        return dict(status="SKIPPED", reason="GAP_BELOW_STOP")
+    stop = float(max(L[i], (1 - p["max_stop"]) * o))
+    xi, xp, why, sell_next = None, None, "OPEN", False
+    for k in range(ie, len(idx)):
+        if not np.isfinite(Cl[k]):
+            continue                                                   # bar yok: bekle
+        if sell_next and np.isfinite(O[k]):
+            xi, xp, why = k, float(O[k]), "TRAIL"
+            break
+        if L[k] <= stop:
+            xi, xp, why = k, float(min(O[k], stop)), "STOP"
+            break
+        if np.isfinite(S[k]) and Cl[k] < S[k]:
+            sell_next = True
+    if xi is None:                                                     # hâlâ açık: son kapanışla değerle
+        xi = len(idx) - 1
+        while xi > ie and not np.isfinite(Cl[xi]):
+            xi -= 1
+        xp = float(Cl[xi])
+    out = dict(atr=None, entry_day=idx[ie], entry_price=float(o), stop=stop, bars=xi - i, exit_reason=why,
+               mark_price=xp, mark_day=idx[xi], ret_pct=100.0 * (xp / o - 1),
+               at_open=bool(why == "TRAIL" or (why == "STOP" and xp == O[xi] and xi > ie)),
+               sell_pending=bool(why == "OPEN" and sell_next))
+    out["status"] = "OPEN" if why == "OPEN" else "CLOSED"
+    if out["status"] == "CLOSED":
+        out.update(exit_day=idx[xi], exit_price=xp)
+    return out

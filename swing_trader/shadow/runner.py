@@ -1,8 +1,8 @@
-"""Gölge sinyallerin günlük koşusu (H4, H5, H6/H6S/H6SR, MOM). Ana ürünün işlemlerine DOKUNMAZ.
+"""Gölge sinyallerin günlük koşusu (H4, H5, H6/H6S/H6SR, MOM, GRW). Ana ürünün işlemlerine DOKUNMAZ.
 
 Sıra: yeni H6 sinyalleri → yeni H5 olayları → yeni H4 olayları → MOM ay sonu kararı (yalnız ay sonu
-seansı için) → bekleyen/açık gölge işlemlerin güncellenmesi → rapor + terfi kapısı. Her adım ayrı
-try/except: biri düşerse diğerleri çalışır.
+seansı için) → GRW büyüme + kırılım → bekleyen/açık gölge işlemlerin güncellenmesi → rapor + terfi kapısı.
+Her adım ayrı try/except: biri düşerse diğerleri çalışır.
 
 Karar zamanı: sinyal ``decided_at`` ile yazılır. Bu zaman girişin açılışından (09:30 ET)
 sonraysa ``late_decision=1`` — bu işlemler terfi değerlendirmesine girmez (Ek C).
@@ -435,6 +435,63 @@ def update_mom(ledger: ShadowLedger, src, asof: date) -> Dict:
     return counts
 
 
+# ── GRW "Büyüme + kırılım" (Ek W; kural lab/pro_rules.py "lider şartsız" kıyası ile birebir) ──
+
+def run_grw(ledger: ShadowLedger, src, asof: date, now: datetime) -> Dict:
+    """Havuz G'de VCE kırılımı + SEC büyüme şartı + SPY rejimi BULL → PENDING; elenenler nedeniyle SKIPPED.
+
+    Finviz, SPY barı ya da SEC'e ulaşılamazsa ``deferred`` döner (sağlık "eksik" → yedek tetikleyiciler yeniden
+    dener; yazılan kayıtlar idempotent). Rejim BULL değilken SEC'e hiç gidilmez (alım zaten yok).
+    """
+    p = rules.PARAMS_GRW
+    sha = rules.PARAMS_GRW_SHA256
+    if ledger.get_meta("params_grw_sha256") is None:
+        ledger.set_meta("params_grw_sha256", sha)
+        ledger.set_meta("grw_live_start", asof.isoformat())
+    if ledger.get_meta("params_grw_sha256") != sha:
+        return dict(error="GRW_PARAMS_CHANGED_WITHOUT_PREREGISTRATION")
+    res = src.grw_hits(asof)
+    stats = dict(res.get("stats") or {})
+    if stats.get("error"):
+        return dict(deferred=stats.pop("error"), **stats)
+    hits = sorted(res.get("hits") or [], key=lambda h: -float(h.get("key") or 0))
+    if not hits:
+        return dict(hits=0, added=0, **stats)
+    reg = _regime_on(src.fetch_bars({"SPY", "^VIX"}, asof - timedelta(days=400), asof), "SPY", asof)
+    if reg is None:
+        return dict(hits=len(hits), deferred="SPY_BAR_MISSING", **stats)
+    regime = str(reg.get("regime", "UNKNOWN")).upper()
+    busy = {t["ticker"] for t in ledger.trades("GRW", statuses=("PENDING", "OPEN"))}
+    added, counts = 0, {}
+    for h in hits:
+        why, g = None, {}
+        if regime != p["buy_regime"]:
+            why = "NOT_BULL"
+        elif h["ticker"] in busy:
+            why = "TICKER_BUSY"
+        else:
+            try:
+                g = src.growth_check(h["ticker"], asof)
+            except Exception as e:                        # SEC'e ulaşılamadı → yanlış "veri yok" yazma, ertele
+                logger.warning("GRW growth check failed for %s: %s", h["ticker"], e)
+                return dict(hits=len(hits), regime=regime, added=added, deferred="SEC_UNAVAILABLE", **stats, **counts)
+            if not g.get("known"):
+                why = "NO_GROWTH_DATA"
+            elif not g.get("ok"):
+                why = "GROWTH_FAIL"
+        n = ledger.add_trade(dict(
+            strategy="GRW", ticker=h["ticker"], event_date=asof.isoformat(), signal_date=asof.isoformat(),
+            decided_at=_utc_iso(now), key=float(h.get("key") or 0), status="SKIPPED" if why else "PENDING",
+            reason=why, late_decision=_late(now, asof), warmup=0,
+            details=dict(regime=regime, cap=float(h["cap"]), close=float(h["close"]), signal_low=float(h["low"]),
+                         ret_12m=float(h.get("key") or 0), growth=g or None)))
+        added += n
+        if n and not why:
+            busy.add(h["ticker"])
+        counts[why or "PENDING"] = counts.get(why or "PENDING", 0) + 1
+    return dict(hits=len(hits), regime=regime, added=added, **stats, **counts)
+
+
 def _index_ret(frame: Optional[pd.DataFrame], entry: date, exit_: date, exit_field: str = "Close") -> Optional[float]:
     """Endeksin giriş açılışından çıkış gününün ``exit_field`` fiyatına getirisi (%)."""
     if frame is None:
@@ -456,8 +513,9 @@ def update_trades(ledger: ShadowLedger, src, asof: date) -> Dict:
         return dict(active=0)
     first = min(date.fromisoformat(t["signal_date"]) for t in active)
     start = _start_before(first)
-    bars = src.fetch_bars({t["ticker"] for t in active} | {"IWM"}, start, asof)
+    bars = src.fetch_bars({t["ticker"] for t in active} | {"IWM", "SPY"}, start, asof)
     iwm = _frame(bars, "IWM", start, asof)
+    spy = _frame(bars, "SPY", start, asof)                # GRW'nin kıyas endeksi (Ek W)
     all_rows = ledger.trades(statuses=("OPEN", "CLOSED"))
     busy: Dict[tuple, List[tuple]] = {}
     for t in all_rows:
@@ -470,7 +528,9 @@ def update_trades(ledger: ShadowLedger, src, asof: date) -> Dict:
         if frame is None:
             counts["pending"] += 1
             continue
-        plan = rules.plan_trade(frame, date.fromisoformat(t["signal_date"]), t["strategy"])
+        grw = t["strategy"] == "GRW"                      # çıkışı SMA50'ye bağlı → kendi planı (Ek W)
+        plan = (rules.grw_plan(frame, date.fromisoformat(t["signal_date"])) if grw
+                else rules.plan_trade(frame, date.fromisoformat(t["signal_date"]), t["strategy"]))
         if plan["status"] == "PENDING":
             counts["pending"] += 1
             continue
@@ -490,7 +550,7 @@ def update_trades(ledger: ShadowLedger, src, asof: date) -> Dict:
             counts["opened"] += 1
         path = _path(frame, plan)
         upd = dict(entry_date=entry, entry_price=round(plan["entry_price"], 4),
-                   atr=None if plan["atr"] is None else round(plan["atr"], 4),
+                   atr=None if plan.get("atr") is None else round(plan["atr"], 4),
                    stop=None if plan["stop"] is None else round(plan["stop"], 4),       # H6: stop yok
                    bars=plan["bars"], mark_price=round(plan["mark_price"], 4),
                    mark_date=plan["mark_day"].isoformat(), ret_pct=round(plan["ret_pct"], 4),
@@ -498,8 +558,11 @@ def update_trades(ledger: ShadowLedger, src, asof: date) -> Dict:
         if plan["status"] == "CLOSED":
             upd.update(status="CLOSED", exit_date=plan["exit_day"].isoformat(),
                        exit_price=round(plan["exit_price"], 4), exit_reason=plan["exit_reason"],
-                       net_pct=round(plan["ret_pct"] - rules.C["cost_pct"], 4),
-                       iwm_ret=_iwm_ret(iwm, plan["entry_day"], plan["exit_day"]))
+                       net_pct=round(plan["ret_pct"] - (rules.PARAMS_GRW["cost_pct"] if grw
+                                                        else rules.C["cost_pct"]), 4),
+                       iwm_ret=(_index_ret(spy, plan["entry_day"], plan["exit_day"],
+                                           "Open" if plan["at_open"] else "Close")
+                                if grw else _iwm_ret(iwm, plan["entry_day"], plan["exit_day"])))
             counts["closed"] += 1
         else:
             upd.update(status="OPEN")
@@ -560,6 +623,11 @@ def build_report(ledger: ShadowLedger, src, asof: date) -> Dict:
         dm = date.fromisoformat(mom_start)
         strategies["MOM"] = strategy_report("MOM", trades, rules.sessions_between(dm, asof), dm, asof,
                                             _buy_hold(src, "SPY", dm, asof))
+    grw_start = ledger.get_meta("grw_live_start")
+    if grw_start:                                         # Ek W: büyüme + kırılım; kıyas endeksi SPY
+        dg = date.fromisoformat(grw_start)
+        strategies["GRW"] = strategy_report("GRW", trades, rules.sessions_between(dg, asof), dg, asof,
+                                            _buy_hold(src, "SPY", dg, asof))
     champion = None
     if h6_start:
         h6_d = date.fromisoformat(h6_start)
@@ -581,7 +649,8 @@ def build_report(ledger: ShadowLedger, src, asof: date) -> Dict:
             logger.exception("Champion report failed")
     return dict(asof=asof.isoformat(), live_start=live_start.isoformat(),
                 params_sha256=rules.PARAMS_SHA256, params_h6_sha256=rules.PARAMS_H6_SHA256,
-                params_mom_sha256=rules.PARAMS_MOM_SHA256, strategies=strategies, champion=champion)
+                params_mom_sha256=rules.PARAMS_MOM_SHA256, params_grw_sha256=rules.PARAMS_GRW_SHA256,
+                strategies=strategies, champion=champion)
 
 
 def _buy_hold(src, ticker: str, start: date, asof: date) -> Optional[float]:
@@ -603,7 +672,7 @@ def _run_issues(lr: Dict) -> List[str]:
     for k in ("error", "universe_error", "report_error"):
         if lr.get(k):
             issues.append(f"{k}: {lr[k]}")
-    for k in ("H6", "H6S", "H6SR", "H5", "H4", "MOM", "update"):
+    for k in ("H6", "H6S", "H6SR", "H5", "H4", "MOM", "GRW", "update"):
         v = lr.get(k)
         if v is None:
             issues.append(f"{k}: MISSING")
@@ -713,6 +782,11 @@ def run_shadow_daily(now: Optional[datetime] = None, ledger: Optional[ShadowLedg
     except Exception as e:
         logger.exception("Shadow MOM failed")
         out["MOM"] = dict(error=str(e))
+    try:                                  # Ek W: büyüme + kırılım (havuz G, SEC büyüme verisi, SPY rejimi)
+        out["GRW"] = run_grw(ledger, src, asof, now)
+    except Exception as e:
+        logger.exception("Shadow GRW failed")
+        out["GRW"] = dict(error=str(e))
     try:
         upd = update_trades(ledger, src, asof)
         upd["mom"] = update_mom(ledger, src, asof)

@@ -811,3 +811,139 @@ tartışmayı açar; geçmiş sınavdaki −71% düşüş o tartışmada kullan�
 
 **Başlangıç.** İlk karar günü gölge koşusunun MOM'u ilk çalıştırdığı günden sonraki ilk ay sonu seansıdır
 (2026-11-30 → 2026-12-01 açılışı). H4/H5/H6/H6S/H6SR kilitleri ve kapıları değişmez.
+
+# Ek V — PRO: büyüyen lider hisse + kırılım + dar stop + kazananı süresiz tutma + değişken boyut
+
+**Yazıldığı an: 2026-11-26, Ek R, S ve T sonuçlarından SONRA; bu kural setinin hiçbir sonucu görülmeden ve
+bilanço (satış/kâr) verisi indirilmeden.** Görülenler: Ek R–T'nin tamamı (özellikle havuz L'de MOM işlemleri:
+kazancın birkaç dev işlemde toplandığı, 2021–22'de −71% düşüş; H6S ve H6SR sonuçları). Genel piyasa bilgisi
+(veriden değil): büyüme liderleri 2016–2020 ve 2023–2025'te çok iyi, 2021–22'de çok kötüydü; bu bilgi kuralların
+seçimini (rejim şartı, stop) etkilemiş olabilir.
+
+**Gerekçe (kullanıcı kararı, 2026-11-26; Ek T'deki "geçmiş veri arayışı kapatıldı" sonucunun etiketli istisnası).**
+Kullanıcı kazanan swing trader'ların nasıl kazandığını sordu. Yayımlanmış yöntemlerinin (O'Neil, Minervini;
+Kullamägi) üründen farkı beş başlıkta toplandı: lider/büyüyen hisse seçimi, dar stop, kazananı süresiz tutma,
+değişken boyut, düşük maliyet. Bunlar TEK paket, TEK parametre setiyle sınanır; tarama yok. Parametreler bu
+yöntemlerin yayımlanmış standart değerleridir, bu veride ayarlanmadı. Bu, projenin ~18. hipotezidir (çoklu test):
+GEÇTİ sonucu bile kanıt sayılmaz, yalnız ileri test hakkı verir. Gün içi (kırılım anında) giriş günlük veriyle
+sınanamaz; giriş ertesi açılıştandır.
+
+**Evren ve veri.** Kök `output/lab_liq` (Ek T ile aynı fiyat, bölünme ve hisse sayısı verisi; yeniden indirilmez).
+Havuz G (o günün gerçek değerleriyle, bölünme düzeltmeli): fiyat ≥ 10 $, 63 seans ortalama hacim > 300K, 20 seans
+ortalama dolar hacim > 10M $, piyasa değeri ≥ 1 milyar $ (tavan yok, ülke filtresi yok; kıyas ETF'leri hariç).
+İki dönem ayrı ayrı, her biri 10.000$'dan: **A = 2016-01-04 → 2020-12-31, B = 2021-01-04 → 2026-11-20.**
+
+**Büyüme verisi.** SEC'in toplu XBRL dosyası (`companyfacts.zip`), hisse → CIK eşlemesi SEC `company_tickers.json`
+(güncel). Çeyreklik satış ve net kâr şöyle kurulur:
+- Satış etiketi (aynı dönem için birden çok etiket varsa en büyük değer): `Revenues`,
+  `RevenueFromContractWithCustomerExcludingAssessedTax`, `RevenueFromContractWithCustomerIncludingAssessedTax`,
+  `SalesRevenueNet`, `SalesRevenueGoodsNet`, `RevenuesNetOfInterestExpense`. Net kâr: `NetIncomeLoss`, yoksa
+  `ProfitLoss`. Birim USD.
+- Her (başlangıç, bitiş) dönemi için İLK dosyalanan değer ve o dosyanın tarihi kullanılır (sonradan düzeltilmiş
+  değer kullanılmaz). Çeyrek = süresi 80–100 gün olan dönem. Yıl sonu çeyreği ayrıca raporlanmadıysa:
+  yıllık (350–380 gün) − aynı başlangıçlı dokuz aylık (260–285 gün); bilinme tarihi ikisinin geç olanı.
+- Değer, dosyalama tarihinden SONRAKİ ilk seanstan itibaren bilinir sayılır (dosya tarihi < sinyal günü t).
+
+**Büyüme şartı (t günü).** Q = t'den önce bilinen, hem satışı hem net kârı olan en yeni çeyrek; Q'nun dönem sonu
+t'den en çok 200 gün önce. Q−4 = dönem sonu Q'dan 350–380 gün önce olan çeyrek, t'den önce biliniyor.
+Şart: Satış(Q) / Satış(Q−4) − 1 ≥ **%25**, Satış(Q−4) > 0 VE NetKâr(Q) > NetKâr(Q−4). Veri eksikse hisse UYGUN
+DEĞİL (bilinmiyorsa ret; çeyreklik XBRL dosyalamayan yabancı şirketler bu yüzden dışarıda kalır).
+
+**Lider şartı (t günü; Minervini "trend şablonu", yayımlandığı gibi).** Close > SMA150 ve Close > SMA200;
+SMA150 > SMA200; SMA200_t > SMA200_{t−21}; SMA50 > SMA150; Close > SMA50; Close ≥ 1.30 × 252 seansın en düşük
+Low'u; Close ≥ 0.75 × 252 seansın en yüksek High'ı; göreli güç: Close_t / Close_{t−252} − 1 değerinin t günü
+havuz G üyeleri içindeki yüzdelik sırası ≥ **80**.
+
+**Tetik (t günü).** Ürünün VCE kırılımı, aynen (`signals.check_vce_breakout` sert kapıları): ATR%(14)_{t−1} <
+0.8 × ortalama ATR%(t−20 … t−6); Close_t > önceki 20 seansın en yüksek High'ı; Close_t > Close_{t−1};
+Close_t > SMA50; Hacim_t ≥ 1.5 × 50 seans ortalama hacim (t dahil). Vektörel uygulama üretim fonksiyonuyla parite
+testine tabidir.
+
+**Piyasa şartı.** Yeni alım yalnız sistemin piyasa rejimi t'de BULL ise (canlı `regime_from_spy_close`, SPY 1 yıl +
+VIX; Ek T ile aynı). Eldekiler kendi çıkış kuralına kadar tutulur.
+
+**Giriş ve çıkış.** Sinyal = t'de havuz G ∧ büyüme ∧ lider ∧ tetik ∧ piyasa. Giriş t+1 açılışı (açılış barı yoksa
+işlem yok). Hisse başına tek açık pozisyon.
+- Stop = max(Low_t, 0.92 × giriş). Giriş ≤ Low_t ise işlem yok. Giriş günü dahil her gün: Low ≤ stop → min(Open, stop).
+- İz süren çıkış: Close < SMA50 olan ilk günün ERTESİ açılışında satış. Süre sınırı ve kâr hedefi yok.
+- Dönem sonunda açık pozisyon son seansın kapanışıyla kapatılır.
+
+**Boyut ve portföy.** 10.000$. İşlem başına risk = özsermayenin %1'i (önceki gün kapanış özsermayesi):
+pozisyon = min(%25 × özsermaye, %1 × özsermaye ÷ stop uzaklığı), stop uzaklığı = (giriş − stop) / giriş. Son 2
+kapanan işlem de (maliyet sonrası) zarardaysa risk %0.5'e iner, ilk kârlı kapanışta %1'e döner. Nakit yetmezse
+işlem atlanır; borç yok. Aynı gün birden çok sinyalde öncelik 12 aylık getirisi yüksek olanındır.
+**Maliyet (birincil): 20 bps gidiş-dönüş + Midas 1.5$/emir.** Duyarlılık: 10 ve 50 bps; 25.000$ hesap.
+
+**Ölçütler (her dönemde ayrı).**
+
+| # | Ölçüt |
+|---|---|
+| V0 | Yeterlilik: her dönemde ≥ 60 sinyal düzeyi işlem |
+| V1 | Para: portföy toplam getirisi > SPY al-tut (dönem başından önceki son kapanış → dönemin son seansı), **iki dönemde de** |
+| V2 | Risk: portföy max düşüşü > −35%, iki dönemde de |
+| V3 | Seçim: havuz G'ye göre fark (aynı giriş açılışı ve aynı çıkış zamanlaması, t günü havuz G üyelerinin eşit ağırlıklı getirisi) iki dönemde de > 0 VE iki dönem birlikte giriş günü kümeli bootstrap %95 CI alt sınırı > 0 |
+
+**Hüküm (önceden sabit).** GEÇTİ: V0–V3 hepsi. KISMEN: V0 ve V1 sağlanır ama V2 veya V3 sağlanmaz. KALDI: V1
+herhangi bir dönemde sağlanmaz. V0 sağlanmazsa "yetersiz veri" (şartlar gevşetilmez).
+
+**Sonuca göre (önceden sabit).** GEÇTİ ya da KISMEN → yalnız donmuş kurallarla gölge ileri test; ürünün ana
+stratejisi olması ayrı bir kullanıcı kararıdır ve ileri test sonucunu bekler. KALDI ya da yetersiz veri → kapanır;
+bu veride varyantı denenmez. Betimleyici (hükmü değiştirmez; hangi parçanın ne kattığını göstermek için):
+büyüme şartsız, lider şartsız, piyasa şartsız, iz süren çıkış yerine 8. seans kapanışı, değişken boyut yerine sabit
+%10; yıllık tablo; en iyi 5 işlemin payı; büyüme verisi kapsama oranı; IWM kıyası.
+
+**Bilinen yanlılıklar.** Survivorship (evren 2026'da listede olanlar; hisse → CIK eşlemesi güncel) → mutlak getiri
+iyimser. Dosyalama tarihi basın açıklamasından geç olduğundan büyüme bilgisi gerçekte olduğundan geç kullanılır
+(temkinli yön). Günlük barda stop, stop fiyatından (boşlukta açılıştan) gerçekleşmiş sayılır.
+
+# Ek V sonucu (2026-11-26, SONUÇ GÖRÜLDÜKTEN SONRA yazıldı)
+
+Yukarıdaki Ek V metni değiştirilmedi (bölüm SHA256, LF: c482e3da361748a2272bb3e37c47b1f1e45e7e2312ba851386ae6871a17c7a2a;
+`lab/pro_v.prereg_sha256`). **Hüküm: KALDI.**
+- A (2016–2020): 104 işlem, portföy +6.4%, düşüş −14.7%, SPY +102.0% (V1 ✘, V2 ✔). B (2021–26): 161 işlem, portföy
+  +52.2%, düşüş −26.2%, SPY +99.2% (V1 ✘, V2 ✔). Havuz G farkı +0.83 / +2.32, birlikte +1.74 [−0.69, +4.62] (V3 ✘).
+- Hesap iki dönemde de artıda ve düşüş sınırın içinde kaldı, ama endeksin çok gerisinde: paranın ~%75'i nakitte
+  bekledi; kazanma oranı %25 / %16; en iyi 3 işlem çıkarılınca ortalama işlem iki dönemde de zararda.
+Ön kayıt gereği kapandı; bu veride varyantı denenmez. Betimleyici kıyaslar (büyüme şartsız, lider şartsız, …)
+hüküm değildir ve sonradan seçilemez. Ayrıntı: LAB_V3_REPORT.md Ek V.
+
+# Ek W — GRW "büyüme + kırılım" gölge ileri testi (kullanıcı kararı; Ek V'deki "KALDI → kapanır" sonucunun etiketli istisnası)
+
+**Yazıldığı an: 2026-11-26, Ek V sonucu GÖRÜLDÜKTEN SONRA; ileri testin hiçbir verisi yokken.** Ek V'nin ön
+kayıtlı paketi (PRO) KALDI. Betimleyici kıyaslarından biri — paketten lider şartı çıkarılmış hali — iki dönemde
++36.4% / +64.0% (düşüş −21.4 / −22.8; SPY +102.0 / +99.2) verdi ve havuz farkı iki dönemde ayrı ayrı sıfırın
+üstündeydi (+2.84 [+0.31, +6.07] / +2.38 [+0.50, +4.47]). Bu, beş kıyastan sonuç görüldükten sonra seçilmiştir
+(çoklu karşılaştırma) ve endeksi iki dönemde de geçememiştir: **kanıt değildir, gerçek para adayı DEĞİLDİR.**
+Kullanıcı kararıyla (2026-11-26) yalnız **gölge ileri teste** alınır; canlı paper ürün ve geçmiş sınavın hükmü
+değişmez. Gerekçe: fiyat dışı bir bilginin (satış ve kâr büyümesi) kırılım sinyaline değer kattığı projedeki ilk
+gözlem; değeri ancak görülmemiş gelecekte ölçülebilir.
+
+**Kurallar (Ek V'nin "lider şartsız" kıyası ile birebir, donuk; ayrı kilit `PARAMS_GRW`).**
+- Havuz G: o günün fiyatı ≥ 10 $, 63 seans ortalama hacim > 300K, 20 seans ortalama dolar hacim > 10M $, piyasa
+  değeri ≥ 1 milyar $.
+- Tetik (t): ürünün VCE kırılımı (`signals.check_vce_breakout` sert kapıları).
+- Büyüme (t): Ek V "Büyüme verisi" ve "Büyüme şartı" aynen — SEC XBRL, dönemi ilk dosyalayan belgedeki değer,
+  dosya tarihi < t; son çeyrek satışı yıllık ≥ %25 artmış VE net kâr yıl önceki çeyrekten yüksek; çeyrek en çok
+  200 gün eski; veri yoksa ret.
+- Piyasa: yalnız rejim BULL ise alım (canlı `regime_from_spy_close`, SPY 1 yıl + VIX).
+- Giriş t+1 açılışı; hissede açık GRW pozisyonu varken yeni sinyal alınmaz. Stop = max(Low_t, 0.92 × giriş);
+  giriş ≤ Low_t ise işlem yok. Çıkış: Low ≤ stop → min(Open, stop); Close < SMA50 → ertesi açılış. Süre sınırı yok.
+- Değerlendirme maliyeti: 20 bps gidiş-dönüş; portföyde ayrıca 1.5$/emir, 10.000$; boyut = %1 risk ÷ stop
+  uzaklığı, en çok %25, son 2 kapanan işlem zarardaysa risk %0.5.
+
+**Canlı uygulamanın lab'dan farkları (kuralı değiştirmez).** Aday listesi Finviz taramasından gelir (piyasa değeri
+> 300 mn $, fiyat > 10 $, ortalama hacim > 300K, 20 günlük yeni zirve, fiyat SMA50 üstünde, gün artıda — VCE'nin
+zorunlu kıldığı şartların üst kümesi); havuz ve tetik şartları canlı barlardan yeniden ölçülür, piyasa değeri
+Finviz'den (lab'da hisse sayısı × fiyattı). Büyüme verisi SEC'in etiket bazlı uç noktasından (`companyconcept`)
+alınır; lab'daki toplu dosyayla aynı kayıtlar. Finviz, SPY barı ya da SEC'e ulaşılamazsa karar ertelenir ve yedek
+tetikleyiciler yeniden dener; girişin açılışından sonra verilen kararlar "geç" işaretlenir (değerlendirmeye
+girmez). Elenen kırılımlar nedenleriyle kaydedilir (NOT_BULL, NO_GROWTH_DATA, GROWTH_FAIL, TICKER_BUSY).
+Portföy değerlemesi gölge raporunun düzenindedir (aynı günün çıkışları girişlerden önce nakde döner).
+
+**Kapı (Ek C düzeni; otomatik terfi yok).** F1: ≥ 24 ay VE ≥ 60 uygun kapanmış işlem. F2: işlem başı net ortalama
+(20 bps) > 0 VE giriş günü kümeli bootstrap %95 CI alt sınırı > 0. F3: portföy (yukarıdaki boyut, 20 bps +
+1.5$/emir) toplamı > aynı dönemde SPY al-tut. F4: max düşüş > −35%. Durum: F1'e kadar TOPLANIYOR; sonra F2–F4
+hepsi → TERFİ ADAYI; net ortalama ≤ 0 → KALDI; 36. ayda hâlâ aday değilse KALDI; aksi halde BELİRSİZ. "TERFİ ADAYI"
+yalnız tartışmayı açar; geçmiş sınavda endeksin gerisinde kaldığı o tartışmada kullanıcıya birlikte sunulur.
+
+**Başlangıç.** Gölge koşusunun GRW'yi ilk çalıştırdığı seans. H4/H5/H6/H6S/H6SR/MOM kilitleri ve kapıları değişmez.

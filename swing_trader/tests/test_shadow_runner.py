@@ -30,6 +30,18 @@ class FakeSrc:
         self.filings = {}
         self.vce = {}                                    # asof → [(ticker, dv20)]
         self.champion = []
+        self.grw = {}                                    # Ek W: asof → [dict(ticker, cap, close, low, dv20, key)]
+        self.growth = {}                                 # Ek W: sembol → growth_check sonucu
+        self.growth_calls = []
+
+    def grw_hits(self, asof):
+        hits = self.grw.get(asof, [])
+        return dict(hits=[dict(h) for h in hits], stats=dict(candidates=len(hits), fetched=len(hits),
+                                                           current_bar=len(hits), vce=len(hits), in_pool=len(hits)))
+
+    def growth_check(self, ticker, day):
+        self.growth_calls.append((ticker, day))
+        return dict(self.growth.get(ticker, dict(known=False, ok=False)))
 
     def live_vce_hits(self, asof):
         return dict(hits=[dict(ticker=t, dv20=v, close=1.0) for t, v in self.vce.get(asof, [])],

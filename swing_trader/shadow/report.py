@@ -1,4 +1,6 @@
-"""Gölge ileri test raporu + ön kayıtlı terfi kapısı (PREREGISTRATION Ek C, H6: Ek F, MOM: Ek U). SAF fonksiyonlar."""
+"""Gölge ileri test raporu + ön kayıtlı terfi kapısı (PREREGISTRATION Ek C, H6: Ek F, MOM: Ek U, GRW: Ek W).
+
+SAF fonksiyonlar."""
 from __future__ import annotations
 
 from datetime import date
@@ -7,7 +9,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from .rules import PARAMS, PARAMS_H6, PARAMS_H6S, PARAMS_H6SR, PARAMS_MOM
+from .rules import PARAMS, PARAMS_GRW, PARAMS_H6, PARAMS_H6S, PARAMS_H6SR, PARAMS_MOM
 
 COST = PARAMS["common"]["cost_pct"]
 GATE = {
@@ -18,12 +20,17 @@ GATE = {
     "H6SR": dict(min_closed=PARAMS_H6SR["min_closed"], min_months=6, max_months=12),
     "MOM": dict(min_closed=PARAMS_MOM["min_closed"], min_months=PARAMS_MOM["min_months"],
                 max_months=PARAMS_MOM["max_months"]),
+    "GRW": dict(min_closed=PARAMS_GRW["min_closed"], min_months=PARAMS_GRW["min_months"],
+                max_months=PARAMS_GRW["max_months"]),
 }
 # Stratejiye özel değerlendirme (Ek U): MOM büyük ve likit hisselerde → 10 bps + 1.5$/emir, kıyas SPY.
 # Diğerleri ön kayıtlarındaki gibi: 50 bps, sabit ücret yok, kıyas IWM.
-COST_BY = {"MOM": PARAMS_MOM["cost_pct"]}
-FEE_BY = {"MOM": PARAMS_MOM["fee_per_order"]}
-BENCHMARK_BY = {"MOM": PARAMS_MOM["regime_index"]}
+COST_BY = {"MOM": PARAMS_MOM["cost_pct"], "GRW": PARAMS_GRW["cost_pct"]}
+FEE_BY = {"MOM": PARAMS_MOM["fee_per_order"], "GRW": PARAMS_GRW["fee_per_order"]}
+BENCHMARK_BY = {"MOM": PARAMS_MOM["regime_index"], "GRW": PARAMS_GRW["regime_index"]}
+# Ek W: GRW boyutu sabit %10 değil — işlem başına risk ÷ stop uzaklığı, tavanlı; kayıp serisinde risk yarıya iner.
+SIZING_BY = {"GRW": dict(risk=PARAMS_GRW["risk"], cold=PARAMS_GRW["risk_cold"], streak=PARAMS_GRW["cold_streak"],
+                         max_frac=PARAMS_GRW["max_frac"])}
 
 
 def boot_ci(df: pd.DataFrame, col: str, n: int = 2000, seed: int = 7):
@@ -39,11 +46,14 @@ def boot_ci(df: pd.DataFrame, col: str, n: int = 2000, seed: int = 7):
 
 
 def portfolio(trades: List[Dict], sessions: List[date], frac: float = 0.10, cost: float = COST,
-              cap0: float = 10_000.0, fee: float = 0.0) -> Dict:
+              cap0: float = 10_000.0, fee: float = 0.0, sizing: Optional[Dict] = None) -> Dict:
     """%10/işlem, nakit sınırlı, günlük değerleme (lab/evaluate.portfolio ile aynı mantık).
 
     Her işlemin ``details.path`` alanı [(gün, kapanış), …] günlük değerleme serisidir.
     ``fee``: emir başına sabit $ (alışta ve satışta ayrı; lab/swing_o.portfolio ile aynı hesap).
+    ``sizing`` (Ek W, lab/pro_rules.portfolio_risk): pozisyon = min(max_frac × özsermaye, risk × özsermaye ÷
+    stop uzaklığı); son ``streak`` kapanan işlem de maliyet sonrası zarardaysa risk ``cold``. Stop'u olmayan
+    işlem sabit ``frac`` ile alınır.
     """
     if not sessions:
         return dict(total_pct=0.0, max_dd_pct=0.0, taken=0)
@@ -53,22 +63,31 @@ def portfolio(trades: List[Dict], sessions: List[date], frac: float = 0.10, cost
             by_entry.setdefault(str(t["entry_date"])[:10], []).append(t)
     for v in by_entry.values():
         v.sort(key=lambda t: -(t.get("key") or 0))
-    cash, pos, curve, taken = cap0, [], [], 0
+    cash, pos, curve, taken, closed = cap0, [], [], 0, []
+
+    def net_pct(e, x, alloc):                             # lab: getiri − maliyet − iki emir ücretinin payı
+        return 100.0 * (x / e - 1) - cost - 200.0 * fee / alloc
+
     for d in sessions:
         ds = d.isoformat()
         keep = []
         for p in pos:
             if p["exit_date"] == ds:
                 cash += p["sh"] * p["exit_price"] * (1 - cost / 200) - fee
+                closed.append(net_pct(p["entry"], p["exit_price"], p["alloc"]))
             else:
                 keep.append(p)
         pos = keep
         eq_open = cash + sum(p["sh"] * p["last"] for p in pos)
         for t in by_entry.get(ds, []):
-            alloc = frac * eq_open
-            if alloc > cash:
-                continue
             e = float(t["entry_price"])
+            alloc = frac * eq_open
+            if sizing and t.get("stop") is not None and e > float(t["stop"]):
+                cold = len(closed) >= sizing["streak"] and all(x < 0 for x in closed[-sizing["streak"]:])
+                r = sizing["cold"] if cold else sizing["risk"]
+                alloc = min(sizing["max_frac"] * eq_open, r * eq_open / ((e - float(t["stop"])) / e))
+            if alloc > cash or alloc <= 2 * fee:
+                continue
             sh = (alloc - fee) / (e * (1 + cost / 200))
             cash -= alloc
             taken += 1
@@ -77,8 +96,9 @@ def portfolio(trades: List[Dict], sessions: List[date], frac: float = 0.10, cost
             ex_p = float(t["exit_price"]) if t.get("exit_price") is not None else None
             if ex_d == ds:
                 cash += sh * ex_p * (1 - cost / 200) - fee
+                closed.append(net_pct(e, ex_p, alloc))
             else:
-                pos.append(dict(sh=sh, path=path, last=e, exit_date=ex_d, exit_price=ex_p))
+                pos.append(dict(sh=sh, path=path, last=e, exit_date=ex_d, exit_price=ex_p, entry=e, alloc=alloc))
         for p in pos:
             if ds in p["path"]:
                 p["last"] = p["path"][ds]
@@ -114,8 +134,11 @@ def strategy_report(name: str, trades: List[Dict], sessions: List[date], live_st
                    net_ci95=[None if lo is None else round(lo, 3), None if hi is None else round(hi, 3)],
                    excess_iwm_mean=round(float(df.excess_iwm.mean()), 3))
     port = portfolio([t for t in rows if t["status"] in ("OPEN", "CLOSED")
-                      and not t.get("warmup") and not t.get("late_decision")], sessions, cost=cost, fee=fee)
-    out["portfolio_10pct"] = port
+                      and not t.get("warmup") and not t.get("late_decision")], sessions, cost=cost, fee=fee,
+                     sizing=SIZING_BY.get(name))
+    out["portfolio_10pct"] = port                          # GRW'de boyut risk tabanlı (bkz. out["sizing"])
+    if name in SIZING_BY:
+        out["sizing"] = dict(SIZING_BY[name])
     out["iwm_buy_hold_pct"] = None if iwm_bh_pct is None else round(iwm_bh_pct, 2)
     out["gate"] = gate(name, out)
     return out

@@ -11,6 +11,7 @@ bilgi içermez; ``SEC_USER_AGENT`` ortam değişkeniyle değiştirilebilir.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -326,6 +327,121 @@ def mom_universe() -> Dict[str, float]:
         logger.warning("MOM universe too small (%d < %d) — treated as unavailable", len(out), MOM_MIN_UNIVERSE)
         return {}
     return out
+
+
+# ── GRW "Büyüme + kırılım" (Ek W): kırılım adayları + SEC büyüme verisi ───────
+
+# VCE'nin zorunlu kıldığı şartların üst kümesi (yeni 20 günlük zirve, SMA50 üstü, gün artıda) + havuz G ön elemesi.
+# Kesin şartlar (fiyat ≥ 10, hacimler, piyasa değeri ≥ 1 mlr, VCE) koşucuda barlardan yeniden ölçülür.
+GRW_FINVIZ_FILTERS = {"Market Cap.": "+Small (over $300mln)", "Price": "Over $10", "Average Volume": "Over 300K",
+                      "50-Day Simple Moving Average": "Price above SMA50", "20-Day High/Low": "New High",
+                      "Change": "Up"}
+SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+SEC_CONCEPT_URL = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik:010d}/us-gaap/{tag}.json"
+_cik_cache: Dict[str, int] = {}
+
+
+def grw_hits(asof: date) -> Dict:
+    """Havuz G'de VCE kırılımı veren hisseler: {hits: [{ticker, cap, close, low, dv20, key}], stats}.
+
+    Finviz ön elemesi → canlı 6 aylık barlar → son bar ``asof`` → havuz G (``rules.grw_pool``) VE
+    ``check_vce_breakout``. ``key`` = 12 aylık getiri (aynı gün öncelik sırası; hesaplanamıyorsa 0 — lab ile aynı).
+    Sorgu çökerse ``stats.error`` = UNIVERSE_UNAVAILABLE (boş sonuç ayrı şeydir: o gün kırılım yoktur).
+    """
+    from ..data.fetcher import DataFetcher
+    from ..small_cap.signals import SmallCapSignals
+    from ..small_cap.universe import SmallCapUniverse
+    from . import rules
+
+    u = SmallCapUniverse()
+    u._last_query_errors = []
+    df = u._run_finviz_query(dict(GRW_FINVIZ_FILTERS), "GRW BREAKOUT")
+    stats = dict(candidates=0, fetched=0, current_bar=0, vce=0, in_pool=0)
+    if u._last_query_errors:
+        return dict(hits=[], stats=dict(stats, error="UNIVERSE_UNAVAILABLE"))
+    if df is None or len(df) == 0:
+        return dict(hits=[], stats=stats)
+    caps: Dict[str, float] = {}
+    if "Market Cap" in df.columns:
+        for t, cap in zip(df["Ticker"].astype(str).str.strip().str.upper(), df["Market Cap"]):
+            c = u._parse_market_cap(cap)
+            if c and c >= rules.PARAMS_GRW["cap_min"]:
+                caps[t] = float(c)
+    stats["candidates"] = len(caps)
+    if not caps:
+        return dict(hits=[], stats=stats)
+    data = DataFetcher().fetch_multiple_stocks_batch(sorted(caps), period="6mo")
+    stats["fetched"] = len(data)
+    sig = SmallCapSignals()
+    hits = []
+    for t, bars in data.items():
+        if bars is None or len(bars) < 55:
+            continue
+        dcol = bars["Date"] if "Date" in bars.columns else pd.Series(bars.index)
+        if pd.Timestamp(dcol.iloc[-1]).date() != asof:           # bayat/eksik son bar → bu koşuda karar yok
+            continue
+        stats["current_bar"] += 1
+        if not sig.check_vce_breakout(bars)[0]:
+            continue
+        stats["vce"] += 1
+        ok, facts = rules.grw_pool(bars, caps.get(t))
+        if not ok:
+            continue
+        stats["in_pool"] += 1
+        hits.append(dict(ticker=t, cap=caps[t], close=facts["close"], low=float(bars["Low"].iloc[-1]),
+                         dv20=facts["dv20"], key=0.0))
+    if hits:                                                     # öncelik: Close_t / Close_{t−252} − 1
+        year = fetch_bars({h["ticker"] for h in hits}, date.fromordinal(asof.toordinal() - 420), asof)
+        for h in hits:
+            b = year.get(h["ticker"])
+            if b is None or len(b) == 0:
+                continue
+            c = b.dropna(subset=["Close"]).sort_values("Date")["Close"].astype(float)
+            if len(c) > 252 and c.iloc[-253] > 0:
+                h["key"] = float(c.iloc[-1] / c.iloc[-253] - 1)
+    return dict(hits=hits, stats=stats)
+
+
+def _sec_cik(ticker: str) -> Optional[int]:
+    if not _cik_cache:
+        rows = json.loads(_sec_get(SEC_TICKERS_URL).decode("utf-8"))
+        _cik_cache.update({str(v["ticker"]).upper(): int(v["cik_str"]) for v in rows.values()})
+    return _cik_cache.get(str(ticker).upper())
+
+
+def sec_growth_facts(ticker: str) -> Optional[Dict]:
+    """Hissenin satış ve net kâr XBRL kayıtları, lab'ın companyfacts biçiminde ({"facts": {"us-gaap": {...}}}).
+
+    Etiket bazlı uç nokta (küçük yanıtlar; toplu dosyayla aynı kayıtlar). CIK bulunamazsa None; şirket bir etiketi
+    hiç kullanmadıysa SEC 404 döner → o etiket boş sayılır. Ağ hatası yükselir (koşucu kararı erteler).
+    """
+    from .growth import NI_TAGS, REV_TAGS
+
+    cik = _sec_cik(ticker)
+    if cik is None:
+        return None
+    gaap: Dict[str, Dict] = {}
+    for tag in REV_TAGS + NI_TAGS:
+        try:
+            raw = _sec_get(SEC_CONCEPT_URL.format(cik=cik, tag=tag))
+        except HTTPError as e:
+            if e.code == 404:
+                continue
+            raise
+        if len(raw) > 5_000_000:                                 # _sec_get üst sınırı: kesik JSON'u veri sayma
+            raise RuntimeError(f"SEC response too large for {ticker} {tag}")
+        gaap[tag] = {"units": json.loads(raw.decode("utf-8")).get("units") or {}}
+    return {"facts": {"us-gaap": gaap}}
+
+
+def growth_check(ticker: str, day: date) -> Dict:
+    """Ek V büyüme şartı, ``day`` (sinyal günü) itibarıyla: {known, ok, quarter_end, sales_growth_pct, …}."""
+    from . import growth
+
+    facts = sec_growth_facts(ticker)
+    if facts is None:
+        return dict(known=False, ok=False, no_cik=True)
+    return growth.growth_on(growth.quarters_table(facts), day)
 
 
 def champion_trades(since: date) -> List[Dict]:

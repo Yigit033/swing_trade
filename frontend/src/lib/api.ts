@@ -712,6 +712,7 @@ export type ShadowStrategyReport = {
     cost_pct?: number;
     fee_per_order?: number;
     benchmark?: string;
+    sizing?: { risk: number; cold: number; streak: number; max_frac: number };   // GRW: risk tabanlı boyut (Ek W)
     gate: ShadowGate;
 };
 
