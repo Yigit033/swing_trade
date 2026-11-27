@@ -234,92 +234,104 @@ def _run_auto_scan_once() -> str:
     logger.info("Auto-scan complete: %d signal(s) at/above min_quality=%s", len(signals), us.min_quality)
 
     tracker = get_paper_tracker()
-    if us.strategy == "H6S":
+    if us.strategy == "GRW":
         try:
-            _auto_track_h6s(tracker, us)
+            _auto_track_grw(tracker, us)
         except Exception:
-            logger.exception("Auto-scan H6S failed")       # eski kurallar yine çalışsın
+            logger.exception("Auto-scan GRW failed")       # eski kurallar yine çalışsın
     if us.strategy == "LEGACY" or us.legacy_control:
         _auto_track_legacy(tracker, settings, us, result, signals)
     return "ran"
 
 
-def _auto_track_h6s(tracker, us) -> dict:
-    """H6S "Profesyonel VCE" otomatik girişi (Lab v3 Ek J2; gölge H6S ile aynı fonksiyonlar).
+def _auto_track_grw(tracker, us) -> dict:
+    """GRW "büyüme + kırılım" otomatik girişi (Lab v3 Ek W; gölge GRW ile aynı fonksiyonlar ve sıra).
 
-    Canlı evren + sert filtreler + bilanço + VCE (``live_vce_hits``) → küçük hisse (IWM) rejimi:
-    BEAR giriş yok, CAUTION en çok 1 açık H6S pozisyonu → dolar hacim sırasıyla, pozisyon başına
-    hesabın ``h6s_position_pct``'si, nakit sınırı (kaldıraç yok). Kendi sanal hesabı ('H6S').
+    Havuz G'de VCE kırılımı (``grw_hits``) → SPY rejimi BULL → SEC büyüme şartı → 12 aylık getiri sırasıyla.
+    Boyut = min(%25 × hesap, risk × hesap ÷ stop uzaklığı); risk %1, son 2 kapanan GRW işlemi zarardaysa %0.5.
+    Stop = max(kırılım gününün dibi, giriş − %8) açılışta kesinleşir; adet sinyal günü kapanışıyla hesaplanır
+    (emir açılıştan önce girilebilsin diye — lab açılış fiyatıyla boyutlar). Nakit sınırı, kaldıraç yok.
+    Kendi sanal hesabı ('GRW'): başlangıç + kapanmış GRW işlemlerinin maliyet ve ücret sonrası sonucu.
     """
-    from swing_trader.shadow import sources as src
-    from swing_trader.shadow.rules import PARAMS_H6S
-    from swing_trader.shadow.runner import _small_cap_regime
-
-    asof = last_completed_session()
-    res = src.live_vce_hits(asof)
-    hits = sorted(res.get("hits") or [], key=lambda h: -float(h["dv20"]))
-    out = dict(asof=asof.isoformat(), hits=len(hits), universe_source=(res.get("stats") or {}).get("universe_source"))
-    if not hits:
-        logger.info("Auto-scan H6S: no VCE hits (%s)", out)
-        return out
-    reg = _small_cap_regime(src, asof)
-    if reg is None:
-        logger.warning("Auto-scan H6S: IWM bar for %s not available yet — deferred to next run", asof)
-        return dict(out, deferred="IWM_BAR_MISSING")
-    regime = str(reg.get("regime", "UNKNOWN")).upper()
-    out["regime"] = regime
-    if regime == "BEAR" and PARAMS_H6S["bear_block"]:
-        logger.info("Auto-scan H6S: small-cap regime BEAR — %d hit(s), no entries", len(hits))
-        return out
     from swing_trader.paper_trading.costs import account_equity, commission_usd, round_trip_cost_pct
     from swing_trader.paper_trading.risk_rules import loss_streak_active
     from swing_trader.paper_trading.storage import strategy_of
+    from swing_trader.shadow import sources as src
+    from swing_trader.shadow.rules import PARAMS_GRW as p
+    from swing_trader.shadow.runner import _regime_on
+
+    asof = last_completed_session()
+    res = src.grw_hits(asof)
+    stats = dict(res.get("stats") or {})
+    out = dict(asof=asof.isoformat(), **{k: v for k, v in stats.items() if k != "error"})
+    if stats.get("error"):
+        logger.warning("Auto-scan GRW: %s — deferred to next run", stats["error"])
+        return dict(out, deferred=stats["error"])
+    hits = sorted(res.get("hits") or [], key=lambda h: -float(h.get("key") or 0))
+    out["hits"] = len(hits)
+    if not hits:
+        logger.info("Auto-scan GRW: no breakout in the pool (%s)", out)
+        return out
+    reg = _regime_on(src.fetch_bars({"SPY", "^VIX"}, asof - timedelta(days=400), asof), "SPY", asof)
+    if reg is None:
+        logger.warning("Auto-scan GRW: SPY bar for %s not available yet — deferred to next run", asof)
+        return dict(out, deferred="SPY_BAR_MISSING")
+    regime = str(reg.get("regime", "UNKNOWN")).upper()
+    out["regime"] = regime
+    if regime != p["buy_regime"]:
+        logger.info("Auto-scan GRW: SPY regime %s — %d hit(s), no entries", regime, len(hits))
+        return out
     start = float(us.portfolio_value)
-    pct = float(us.h6s_position_pct)
     try:
         closed = [t for t in (tracker.storage.get_closed_trades(limit=100_000, user_id=None) or [])
-                  if t.get("user_id") is None and strategy_of(t) == "H6S"]
-        # Ek M: hesap bileşik — başlangıç + kapanmış H6S işlemlerinin maliyet+ücret sonrası sonucu
+                  if t.get("user_id") is None and strategy_of(t) == "GRW"]
         account = account_equity(start, closed, round_trip_cost_pct(), commission_usd())
-        # Ek L2: kayıp serisi freni — son 3 kapanış hepsi zararlıysa yarım boyut (ölçüldü, eklendi)
-        brake = bool(us.h6s_loss_streak_brake) and loss_streak_active(closed)
+        cold = loss_streak_active(closed, streak=int(p["cold_streak"]), cost=float(p["cost_pct"]))
     except Exception:
-        # Geçmiş okunamazsa temkinli taraf: başlangıç tutarı + (fren açıksa) yarım boyut
-        logger.exception("Auto-scan H6S: closed trades unavailable — start equity, loss-streak brake assumed ON")
-        account, brake = start, bool(us.h6s_loss_streak_brake)
-    if brake:
-        pct /= 2
-    out["loss_streak_brake"] = brake
-    out["equity"] = account
-    active = tracker.storage.count_active_trades_for_owner(None, strategy="H6S")
-    held = tracker.storage.active_notional_for_owner(None, strategy="H6S")
+        # Geçmiş okunamazsa temkinli taraf: başlangıç tutarı + yarım risk
+        logger.exception("Auto-scan GRW: closed trades unavailable — start equity, half risk assumed")
+        account, cold = start, True
+    risk = float(p["risk_cold"] if cold else p["risk"])
+    out.update(equity=account, risk_pct=round(100 * risk, 2))
+    held = tracker.storage.active_notional_for_owner(None, strategy="GRW")
     added, skipped = [], []
     for h in hits:
-        if regime == "CAUTION" and active >= PARAMS_H6S["caution_max_concurrent"]:
-            skipped.append((h["ticker"], "CAUTION_CAPACITY"))
+        ticker, price, low = h["ticker"], float(h["close"]), float(h["low"])
+        if tracker.storage.check_duplicate(ticker, user_id=None, strategy="GRW"):
+            skipped.append((ticker, "TICKER_BUSY"))
             continue
-        price = float(h["close"])
-        size = int(pct * account / price) if price > 0 else 0
+        try:
+            g = src.growth_check(ticker, asof)
+        except Exception as e:                    # SEC'e ulaşılamadı → yanlış "veri yok" deme, sonraki koşuya bırak
+            logger.warning("Auto-scan GRW: growth check failed for %s: %s — deferred", ticker, e)
+            return dict(out, added=added, skipped=skipped, deferred="SEC_UNAVAILABLE")
+        if not g.get("known") or not g.get("ok"):
+            skipped.append((ticker, "GROWTH_FAIL" if g.get("known") else "NO_GROWTH_DATA"))
+            continue
+        stop_dist = (price - max(low, (1 - p["max_stop"]) * price)) / price if price > 0 else 0.0
+        if stop_dist <= 0:
+            skipped.append((ticker, "NO_STOP_DISTANCE"))
+            continue
+        size = int(min(p["max_frac"] * account, risk * account / stop_dist) / price)
         need = size * price
         if size < 1 or held + need > account:
-            skipped.append((h["ticker"], "NO_CASH"))
+            skipped.append((ticker, "NO_CASH"))
             continue
         tid = tracker.add_trade_from_signal(dict(
-            ticker=h["ticker"], entry_price=price, date=asof.isoformat(), position_size=size,
-            atr14=h.get("atr14"), strategy="H6S", regime=regime), None)
+            ticker=ticker, entry_price=price, date=asof.isoformat(), position_size=size, signal_low=low,
+            strategy="GRW", regime=regime), None)
         if tid > 0:
-            added.append(h["ticker"])
-            active += 1
+            added.append(ticker)
             held += need
         else:
-            skipped.append((h["ticker"], {-1: "DUPLICATE", -3: "ENTRY_WINDOW"}.get(tid, "NOT_CREATED")))
-    logger.info("Auto-scan H6S (%s, streak brake %s): %d added %s, skipped %s, held $%.0f of $%.0f",
-                regime, brake, len(added), added, skipped, held, account)
+            skipped.append((ticker, {-1: "TICKER_BUSY", -3: "ENTRY_WINDOW"}.get(tid, "NOT_CREATED")))
+    logger.info("Auto-scan GRW (%s, risk %.2f%%): %d added %s, skipped %s, held $%.0f of $%.0f",
+                regime, 100 * risk, len(added), added, skipped, held, account)
     return dict(out, added=added, skipped=skipped)
 
 
 def _auto_track_legacy(tracker, settings, us, result, signals) -> None:
-    """Eski kurallar — H6S ana stratejiyken ayrı sanal hesapla KONTROL GRUBU ('LEGACY')."""
+    """Eski kurallar — GRW ana stratejiyken ayrı sanal hesapla KONTROL GRUBU ('LEGACY')."""
     if not signals:
         return
     regime = str(result.get("market_regime") or "UNKNOWN").upper()

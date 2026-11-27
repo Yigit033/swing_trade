@@ -191,7 +191,7 @@ def test_midas_orders_buy_sell_hold():
                  entry_price=5.0, position_size=10, stop_loss=4.0),
             dict(id=5, ticker='TODAY', status='OPEN', strategy='H6S', entry_date='2026-11-12T14:30:00Z',
                  entry_price=40.0, position_size=25, stop_loss=36.0, atr=1.6)]
-    o = build_orders(rows, _d(2026, 11, 23), 10000.0)                     # Pazartesi
+    o = build_orders(rows, _d(2026, 11, 23), 10000.0, strategy="H6S")                     # Pazartesi
     assert o['session'] == '2026-11-23'
     assert o['buy'] == [dict(ticker='NEW', shares=50, est_price=20.0, est_cost=1000.0, stop_distance=2.5,
                              est_stop=17.5, buy_day='2026-11-23', sell_day='2026-12-03', overdue=False, trade_id=1)]
@@ -209,8 +209,8 @@ def test_midas_orders_show_loss_streak_brake():
     from api.routers.orders import build_orders
     losers = [dict(id=10 + i, ticker=f"L{i}", status="STOPPED", strategy="H6S", exit_date=f"2026-11-1{i}",
                    realized_pnl_pct=-2.0) for i in range(3)]
-    assert build_orders(losers, _d(2026, 11, 23), 10000.0)["loss_streak_brake"] is True
-    assert build_orders(losers[:2], _d(2026, 11, 23), 10000.0)["loss_streak_brake"] is False
+    assert build_orders(losers, _d(2026, 11, 23), 10000.0, strategy="H6S")["loss_streak_brake"] is True
+    assert build_orders(losers[:2], _d(2026, 11, 23), 10000.0, strategy="H6S")["loss_streak_brake"] is False
 
 
 def test_net_of_cost_includes_fixed_midas_fee():
@@ -240,7 +240,43 @@ def test_midas_orders_use_compounded_equity():
                  signal_price=20.0, entry_price=20.0, position_size=50, atr=1.0),
             dict(id=3, ticker="OLDW", status="TIMEOUT", strategy=None, exit_date="2026-11-18",
                  entry_price=10.0, position_size=100, realized_pnl=900.0, realized_pnl_pct=90.0)]
-    o = build_orders(rows, _d(2026, 11, 23), 10000.0, 0.20, 1.5)
+    o = build_orders(rows, _d(2026, 11, 23), 10000.0, 0.20, 1.5, strategy="H6S")
     assert o["start"] == 10000.0 and o["account"] == 10000 + 500 - 2 - 3      # LEGACY kârı H6S hesabına girmez
     assert o["free"] == 10495.0 - 1000.0 and o["idle_pct"] == round(100 * 9495 / 10495, 1)
     assert o["fee_per_order"] == 1.5
+
+
+def test_midas_orders_grw_buy_sell_hold():
+    """Ana kural GRW: AL (dip ve stop kuralıyla), SAT (kapanış 50 günlük ortalamanın altında → açılışta), TUT."""
+    import json as _json
+    from datetime import date as _d
+    from api.routers.orders import build_orders
+    rows = [dict(id=1, ticker='NEW', status='PENDING', strategy='GRW', entry_date='2026-11-20 16:40',
+                 signal_price=50.0, entry_price=50.0, position_size=25, initial_stop=44.0, stop_loss=46.0),
+            dict(id=2, ticker='OUT', status='OPEN', strategy='GRW', entry_date='2026-10-13T13:30:00Z',
+                 entry_price=30.0, position_size=40, stop_loss=28.5,
+                 execution_state=_json.dumps(dict(version=1, sell_next=True))),
+            dict(id=3, ticker='KEEP', status='OPEN', strategy='GRW', entry_date='2026-11-10T14:30:00Z',
+                 entry_price=20.0, position_size=60, stop_loss=18.4, execution_state=_json.dumps(dict(version=1))),
+            dict(id=4, ticker='H6', status='OPEN', strategy='H6S', entry_date='2026-11-20T14:30:00Z',
+                 entry_price=10.0, position_size=100, stop_loss=9.0, atr=0.4)]
+    o = build_orders(rows, _d(2026, 11, 23), 10000.0)                     # varsayılan plan: GRW
+    assert (o['strategy'], o['max_stop_pct'], o['risk_pct'], o['sma']) == ('GRW', 8.0, 1.0, 50)
+    assert o['buy'] == [dict(ticker='NEW', shares=25, est_price=50.0, est_cost=1250.0, buy_day='2026-11-23',
+                             overdue=False, trade_id=1, signal_low=44.0, est_stop=46.0, stop_distance=4.0,
+                             sell_day=None)]
+    assert [(r['ticker'], r['sell_day']) for r in o['sell']] == [('OUT', '2026-11-23')]
+    assert [(r['ticker'], r['sell_day'], r['stop']) for r in o['hold']] == [('KEEP', None, 18.4)]
+    assert o['held'] == 1250 + 1200 + 1200 and o['free'] == 10000 - 3650  # H6S pozisyonu GRW hesabına girmez
+    old = build_orders(rows, _d(2026, 11, 23), 10000.0, strategy="H6S")   # kapanana kadar ayrı blokta
+    assert [r['ticker'] for r in old['hold']] == ['H6'] and old['hold_sessions'] == 8
+
+
+def test_midas_orders_grw_half_risk_after_two_losses():
+    from datetime import date as _d
+    from api.routers.orders import build_orders
+    losers = [dict(id=10 + i, ticker=f"L{i}", status="STOPPED", strategy="GRW", exit_date=f"2026-11-1{i}",
+                   realized_pnl_pct=-2.0) for i in range(2)]
+    o = build_orders(losers, _d(2026, 11, 23), 10000.0)
+    assert o["loss_streak_brake"] is True and o["risk_pct"] == 0.5
+    assert build_orders(losers[:1], _d(2026, 11, 23), 10000.0)["risk_pct"] == 1.0

@@ -159,6 +159,7 @@ def confirm_entry_levels(open_price: float, signal_price: float, atr: float, swi
 
 
 # PENDING: if still unresolved after this many calendar days, auto-REJECT (data gaps / user never opened UI)
+GRW_HISTORY_DAYS = 120          # 50 seanslık ortalama için girişten önce çekilen takvim günü
 MAX_STALE_PENDING_CALENDAR_DAYS = 14
 
 
@@ -205,7 +206,8 @@ class PaperTradeTracker:
         self, 
         ticker: str, 
         start_date: str, 
-        end_date: str = None
+        end_date: str = None,
+        auto_adjust: bool = True,
     ) -> Optional[pd.DataFrame]:
         """
         Fetch price history for a ticker.
@@ -232,12 +234,14 @@ class PaperTradeTracker:
 
             end_date_adj = end_dt.strftime('%Y-%m-%d')
 
-            df = stock.history(start=start_date, end=end_date_adj)
+            # auto_adjust=False (GRW): temettüye göre geriye dönük düzeltme YOK. Aylarca tutulan pozisyonda
+            # düzeltilmiş fiyat her temettüde eski barları değiştirir → işlenmiş barların parmak izi bozulur.
+            df = stock.history(start=start_date, end=end_date_adj, auto_adjust=auto_adjust)
 
             # Fallback: if start/end approach returns empty, use period
             if df is None or len(df) == 0:
                 logger.warning(f"No data with start/end for {ticker}, trying period='1mo'")
-                df = stock.history(period='1mo')
+                df = stock.history(period='1mo', auto_adjust=auto_adjust)
 
             if df is not None and len(df) > 0:
                 df = df.reset_index()
@@ -345,7 +349,11 @@ class PaperTradeTracker:
         if trade.get('status') != 'OPEN':
             return trade
         today = datetime.now(tz=_NYSE_TZ).strftime('%Y-%m-%d')
-        history = self.fetch_price_history(trade['ticker'], trade['entry_date'][:10], today)
+        start = trade['entry_date'][:10]
+        grw = str(trade.get('strategy') or '').upper() == 'GRW'
+        if grw:      # çıkış kuralı 50 günlük ortalamaya bakar → girişten önceki barlar da gerekir
+            start = (datetime.strptime(start, '%Y-%m-%d') - timedelta(days=GRW_HISTORY_DAYS)).strftime('%Y-%m-%d')
+        history = self.fetch_price_history(trade['ticker'], start, today, auto_adjust=not grw)
         if history is None or len(history) == 0:
             trade['execution_warning'] = 'REVIEW_REQUIRED: PRICE_HISTORY_UNAVAILABLE'
             # No fabricated exits, marks or checkpoint advance on missing data.
@@ -418,6 +426,8 @@ class PaperTradeTracker:
         strategy = str(signal.get('strategy') or 'LEGACY').upper()
         if strategy == 'H6S':
             return self._add_h6s_trade(signal, signal_price, signal_date_str, user_id)
+        if strategy == 'GRW':
+            return self._add_grw_trade(signal, signal_price, signal_date_str, user_id)
 
         # Calculate ATR for trailing stop
         atr = 0
@@ -523,6 +533,38 @@ class PaperTradeTracker:
         }
         return self.storage.add_trade(trade, user_id)
 
+    def _add_grw_trade(self, signal: Dict, signal_price: float, signal_date_str: str,
+                       user_id: Optional[str]) -> int:
+        """GRW (Lab v3 Ek W) PENDING kaydı: hedef ve süre sınırı yok; stop açılışta kesinleşir.
+
+        PENDING iken ``initial_stop`` = kırılım gününün dibi (stopun tabanı; açılış bunun altındaysa işlem
+        yok), ``stop_loss`` = sinyal kapanışına göre tahmin. Açılış onayında ikisi de kesin stop olur.
+        """
+        from ..shadow.rules import PARAMS_GRW
+        low = float(signal.get('signal_low') or 0)
+        if not 0 < low < signal_price:
+            logger.warning("%s: GRW signal without a usable signal-day low — not created", signal['ticker'])
+            return 0
+        if self.storage.check_duplicate(signal['ticker'], user_id=user_id, strategy='GRW'):
+            return -1
+        est = round(max(low, (1 - PARAMS_GRW['max_stop']) * signal_price), 2)
+        trade = {
+            'ticker': signal['ticker'],
+            'entry_date': signal_date_str[:10] + ' ' + datetime.now(tz=_NYSE_TZ).strftime('%H:%M'),
+            'entry_price': signal_price, 'signal_price': signal_price,
+            'stop_loss': est, 'initial_stop': round(low, 4), 'trailing_stop': est,
+            'target': 0.0, 'target_2': 0.0,                  # GRW: hedef yok
+            'swing_type': 'A', 'quality_score': 0,
+            'position_size': int(signal.get('position_size') or 0),
+            'max_hold_days': 0,                              # süre sınırı yok
+            'atr': 0.0, 'status': 'PENDING', 'strategy': 'GRW',
+            'notes': (f"GRW PENDING — ertesi açılışta girilir. Açılış ${low:.2f} ya da altındaysa işlem yok. "
+                      f"Stop = max(${low:.2f}, açılış − %{PARAMS_GRW['max_stop'] * 100:.0f}); kapanış "
+                      f"{PARAMS_GRW['sma']} günlük ortalamanın altına inince ertesi açılışta satış. "
+                      f"SPY rejimi: {signal.get('regime', '?')}"),
+        }
+        return self.storage.add_trade(trade, user_id)
+
     def confirm_pending_trades(self, user_id: Optional[str] = None) -> List[Dict]:
         """
         Confirm PENDING trades at next-day Open price.
@@ -559,7 +601,9 @@ class PaperTradeTracker:
                 fetch_start = (signal_dt - timedelta(days=10)).strftime('%Y-%m-%d')
                 end_cap = max(signal_dt + timedelta(days=15), today_d)
                 fetch_end = end_cap.strftime('%Y-%m-%d')
-                price_data = self.fetch_price_history(ticker, fetch_start, fetch_end)
+                price_data = self.fetch_price_history(
+                    ticker, fetch_start, fetch_end,
+                    auto_adjust=str(trade.get('strategy') or '').upper() != 'GRW')
                 
                 if price_data is None or len(price_data) == 0:
                     if stale:
@@ -631,6 +675,33 @@ class PaperTradeTracker:
                         'notes': (f"H6S: açılış ${open_price:.2f} (gap {gap_pct:+.1f}%, filtre yok), stop "
                                   f"${stop_loss:.2f} ({PARAMS_H6S['stop_atr']}×ATR), "
                                   f"{PARAMS_H6S['hold_sessions']}. seans kapanışında çıkış"),
+                    }, user_id)
+                    trade['confirm_status'] = 'confirmed' if ok else 'concurrent_update'
+                    trade['entry_price'], trade['gap_pct'] = open_price, gap_pct
+                    results.append(trade)
+                    continue
+
+                if str(trade.get('strategy') or '').upper() == 'GRW':
+                    from ..shadow.rules import PARAMS_GRW
+                    low = float(trade.get('initial_stop') or 0)          # PENDING: kırılım gününün dibi
+                    entry_px = round(open_price, 2)
+                    stop_loss = round(max(low, (1 - PARAMS_GRW['max_stop']) * open_price), 2)
+                    if low <= 0 or open_price <= low or stop_loss >= entry_px:
+                        self.storage.close_trade(
+                            trade_id, signal_price, entry_date, 'REJECTED',
+                            f"REJECTED: GRW — açılış ${open_price:.2f}, kırılım gününün dibi ${low:.2f} "
+                            f"(açılış dibin üstünde değil; işlem yok)", user_id)
+                        trade['confirm_status'] = 'rejected'
+                        trade['reject_reason'] = 'GAP_BELOW_STOP'
+                        results.append(trade)
+                        continue
+                    ok = self.storage.update_trade(trade_id, {
+                        'status': 'OPEN', 'entry_price': entry_px, 'entry_date': entry_date,
+                        'stop_loss': stop_loss, 'initial_stop': stop_loss, 'trailing_stop': stop_loss,
+                        'initial_risk': round((entry_px - stop_loss) * trade['position_size'], 8),
+                        'notes': (f"GRW: açılış ${open_price:.2f} (gap {gap_pct:+.1f}%), stop ${stop_loss:.2f} "
+                                  f"(kırılım gününün dibi, en çok %{PARAMS_GRW['max_stop'] * 100:.0f}); kapanış "
+                                  f"{PARAMS_GRW['sma']} günlük ortalamanın altına inince ertesi açılışta satış"),
                     }, user_id)
                     trade['confirm_status'] = 'confirmed' if ok else 'concurrent_update'
                     trade['entry_price'], trade['gap_pct'] = open_price, gap_pct

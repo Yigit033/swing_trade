@@ -396,3 +396,122 @@ def test_strategies_have_separate_duplicates_and_cash(tmp_path):
     assert store.check_duplicate('BBB', strategy='LEGACY') and not store.check_duplicate('BBB', strategy='H6S')
     assert store.active_notional_for_owner(None, strategy='H6S') == 1000.
     assert store.count_active_trades_for_owner(None, strategy='LEGACY') == 1
+
+
+# ── GRW "büyüme + kırılım" canlı paper ana kuralı (2026-11-28, Lab v3 Ek W) ──
+
+def _grw_tape(after):
+    """55 seans düz 100 (50 günlük ortalama için) + giriş sonrası barlar. Dönüş: (günler, bant, giriş tarihi)."""
+    days = _h6s_days(55 + len(after), start="2026-06-01")
+    rows = [(d, 100, 100, 100, 100) for d in days[:55]] + [(d, *v) for d, v in zip(days[55:], after)]
+    return days, bars(rows), f"{days[55]}T13:30:00Z"
+
+
+def _grw_trade(entry_date, **changes):
+    return trade(strategy='GRW', entry_date=entry_date, entry_price=100., initial_stop=92., stop_loss=92.,
+                 target=0., target_2=0., max_hold_days=0, atr=0., **changes)
+
+
+def test_grw_sells_at_next_open_after_close_below_50_day_average():
+    from swing_trader.paper_trading.execution import TREND_SMA
+    from swing_trader.shadow.rules import PARAMS_GRW
+    assert TREND_SMA == PARAMS_GRW["sma"]
+    after = [(100, 103, 99, 102), (102, 105, 101, 104), (104, 104, 95, 96), (97, 99, 96, 98), (98, 99, 97, 98)]
+    days, tape, entry = _grw_tape(after)
+    upd, (status, *_r) = evaluate(_grw_trade(entry), tape[tape.Date <= date.fromisoformat(days[57])], .33)
+    assert status == 'OPEN' and json.loads(upd['execution_state'])['sell_next'] is True   # 96 < ortalama → yarın sat
+    upd, (status, xp, xd, reason, stop) = evaluate(_grw_trade(entry), tape, .33)
+    assert (status, xp, stop) == ('TRAILED', 97., 92.) and xd.startswith(days[58])        # ertesi açılış fiyatı
+    assert xd.endswith('13:30:00Z') and 'partial_exit_price' not in upd
+
+
+def test_grw_has_no_time_limit_or_target_and_stop_fills_at_stop_or_gap():
+    up = [(100 + i, 102 + i, 99 + i, 101 + i) for i in range(30)]                         # 30 seans yükseliş
+    days, tape, entry = _grw_tape(up)
+    upd, (status, *_r) = evaluate(_grw_trade(entry), tape, .33)
+    assert status == 'OPEN' and 'sell_next' not in json.loads(upd['execution_state'])
+    _, tape, entry = _grw_tape([(100, 101, 99, 100), (100, 100, 91, 99)])
+    assert evaluate(_grw_trade(entry), tape, .33)[1][:2] == ('STOPPED', 92.)              # gün içi: stop fiyatı
+    _, tape, entry = _grw_tape([(100, 101, 99, 100), (88, 90, 87, 89)])
+    assert evaluate(_grw_trade(entry), tape, .33)[1][:2] == ('STOPPED', 88.)              # boşluk: açılış fiyatı
+
+
+def test_grw_exit_needs_history_before_entry():
+    days = _h6s_days(3, start="2026-08-17")
+    tape = bars([(d, 100, 101, 99, 100) for d in days])
+    upd, result = evaluate(_grw_trade(f"{days[0]}T13:30:00Z"), tape, .33)
+    assert upd == {} and result[0] == 'OPEN' and 'SMA50_HISTORY_MISSING' in result[3]
+
+
+def test_grw_pending_confirm_sets_stop_from_breakout_low_or_rejects(tmp_path):
+    store = PaperTradeStorage(str(tmp_path / 'grw.db'))
+    tracker = PaperTradeTracker(store)
+    sig = dict(entry_price=50., date='2026-10-01', position_size=20, signal_low=48., strategy='GRW', regime='BULL')
+    with patch('swing_trader.utils.market_calendar.entry_window_open', return_value=True):
+        ok = tracker.add_trade_from_signal(dict(sig, ticker='GGG'))
+        gap = tracker.add_trade_from_signal(dict(sig, ticker='GAP'))
+        assert tracker.add_trade_from_signal(dict(sig, ticker='GGG')) == -1               # hisse başına tek pozisyon
+        assert tracker.add_trade_from_signal(dict(sig, ticker='NOLOW', signal_low=0)) == 0
+    row = store.get_trade_by_id(ok)
+    assert (row['status'], row['strategy'], row['max_hold_days'], row['target']) == ('PENDING', 'GRW', 0, 0.)
+    assert (row['initial_stop'], row['stop_loss']) == (48., 48.)                          # max(48, 50 × 0.92 = 46)
+    tapes = {'GGG': bars([('2026-10-01', 50, 51, 48, 50), ('2026-10-02', 53, 54, 52, 53)]),
+             'GAP': bars([('2026-10-01', 50, 51, 48, 50), ('2026-10-02', 47.5, 48, 47, 47.5)])}
+    with patch.object(tracker, 'fetch_price_history', side_effect=lambda t, *a, **k: tapes[t]) as fetch:
+        tracker.confirm_pending_trades()
+    assert all(c.kwargs['auto_adjust'] is False for c in fetch.call_args_list)            # ham fiyat (temettü düzeltmesiz)
+    row = store.get_trade_by_id(ok)
+    assert (row['status'], row['entry_price'], row['stop_loss'], row['initial_stop']) == ('OPEN', 53., 48.76, 48.76)
+    assert store.get_trade_by_id(gap)['status'] == 'REJECTED'                             # açılış dibin altında
+
+
+def test_grw_status_update_fetches_unadjusted_history_before_entry(tmp_path):
+    store = PaperTradeStorage(str(tmp_path / 'grw2.db'))
+    tracker = PaperTradeTracker(store)
+    days, tape, entry = _grw_tape([(100, 103, 99, 102), (102, 105, 101, 104)])
+    tid = store.add_trade(dict(ticker='GGG', entry_date=entry, entry_price=100., stop_loss=92., initial_stop=92.,
+                               trailing_stop=92., target=0., target_2=0., swing_type='A', status='OPEN',
+                               position_size=10, max_hold_days=0, atr=0., strategy='GRW'))
+    with patch.object(tracker, 'fetch_price_history', return_value=tape) as fetch:
+        out = tracker.update_trade_status(store.get_trade_by_id(tid))
+    start = fetch.call_args.args[1]
+    assert (date.fromisoformat(days[55]) - date.fromisoformat(start)).days == 120
+    assert fetch.call_args.kwargs['auto_adjust'] is False
+    assert out['status'] == 'OPEN' and out['current_price'] == 104.
+
+
+def test_grw_live_exit_matches_shadow_rule_on_random_paths():
+    """Canlı çıkış motoru (evaluate) = gölge/lab kuralı (grw_plan): aynı çıkış günü, nedeni ve fiyatı."""
+    import numpy as np
+    from swing_trader.shadow.rules import grw_plan
+    rng = np.random.default_rng(11)
+    seen = set()
+    for _ in range(60):
+        n = 45
+        days = _h6s_days(55 + n, start="2026-05-04")
+        rows = [(d, 100., 100., 100., 100.) for d in days[:54]] + [(days[54], 100., 101., 97., 100.)]   # sinyal günü
+        c = 100.
+        for d in days[55:]:
+            o = round(c * (1 + rng.normal(0, 0.012)), 2)
+            c = round(o * (1 + rng.normal(0.0005, 0.022)), 2)
+            hi = round(max(o, c) * (1 + abs(rng.normal(0, 0.006))), 2)
+            lo = round(min(o, c) * (1 - abs(rng.normal(0, 0.006))), 2)
+            rows.append((d, o, hi, lo, c))
+        tape = bars(rows)
+        frame = tape.set_index(pd.to_datetime(tape.Date))
+        plan = grw_plan(frame, date.fromisoformat(days[54]))
+        if plan["status"] == "SKIPPED":                                   # açılış dibin altında: canlıda REJECTED
+            assert rows[55][1] <= 97.
+            continue
+        entry = rows[55][1]
+        stop = round(plan["stop"], 2)
+        t = trade(strategy='GRW', entry_date=f"{days[55]}T13:30:00Z", entry_price=entry, initial_stop=stop,
+                  stop_loss=stop, target=0., target_2=0., max_hold_days=0, atr=0.)
+        _, (status, xp, xd, _reason, _stop) = evaluate(t, tape, .33)
+        want = {"STOP": "STOPPED", "TRAIL": "TRAILED", "OPEN": "OPEN"}[plan["exit_reason"]]
+        assert status == want
+        seen.add(status)
+        if status != "OPEN":
+            assert xd.startswith(plan["exit_day"].isoformat()) and xp == pytest.approx(plan["exit_price"], abs=0.011)
+            assert xd.endswith("13:30:00Z") == plan["at_open"]            # açılışta mı çıkıldı
+    assert {"STOPPED", "TRAILED"} <= seen

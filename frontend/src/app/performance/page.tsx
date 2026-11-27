@@ -8,6 +8,7 @@ import {
     LineChart, Line, CartesianGrid, Cell, ReferenceLine,
 } from "recharts";
 import { Award, TrendingUp, TrendingDown, Target, Trash2, Percent } from "lucide-react";
+import { StrategyBadge } from "@/components/StrategyBadge";
 
 function MetricCard({ label, value, color = "#3b82f6", icon: Icon, sub }: {
     label: string; value: string; color?: string; icon?: React.ElementType; sub?: string;
@@ -67,7 +68,7 @@ const CumTooltip = ({ active, payload, label }: any) => {
 const fmtSigned = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
 
 export default function PerformancePage() {
-    const [view, setView] = useState<StrategyView>("H6S");
+    const [view, setView] = useState<StrategyView>("GRW");
     const { data, isLoading, isError, refetch } = usePerformance(view);
     const { invalidatePerformance } = useInvalidateQueries();
     const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -129,7 +130,7 @@ export default function PerformancePage() {
             <h1 className="page-title gradient-text">Performance Analytics</h1>
             <p className="page-subtitle">Grafikler ve en iyi/kötü işlem, API’nin son 30 kapanış kaydı içindeki gerçekleşmiş işlemlerle sınırlıdır.</p>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
-                {([["H6S", "H6S · Profesyonel VCE (ana strateji)"], ["LEGACY", "Eski kurallar (kontrol grubu)"], ["ALL", "Tümü"]] as const).map(([k, label]) => (
+                {([["GRW", "GRW · Büyüme + kırılım (ana strateji)"], ["LEGACY", "Eski kurallar (kontrol grubu)"], ["H6S", "H6S (eski ana kural)"], ["ALL", "Tümü"]] as const).map(([k, label]) => (
                     <button key={k} className={view === k ? "btn-primary" : "btn-secondary"}
                         style={{ padding: "4px 12px", fontSize: 12 }} onClick={() => setView(k)}>{label}</button>
                 ))}
@@ -257,7 +258,7 @@ export default function PerformancePage() {
                                                                 win ? "badge-green" : "badge-red";
                                         return (
                                             <tr key={t.id}>
-                                                <td><strong>{t.ticker}</strong>{String(t.strategy || "").toUpperCase() === "H6S" ? <span className="badge badge-green" style={{ marginLeft: 6, fontSize: "0.65rem" }} title="H6S Profesyonel VCE (ana strateji)">H6S</span> : <span className="badge badge-yellow" style={{ marginLeft: 6, fontSize: "0.65rem" }} title="Eski kurallar (kontrol grubu / manuel)">Eski</span>}</td>
+                                                <td><strong>{t.ticker}</strong><StrategyBadge strategy={t.strategy} /></td>
                                                 <td><TypeBadge type={t.swing_type} /></td>
                                                 <td style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{fmtDate(t.entry_date)}</td>
                                                 <td style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{fmtDate(t.exit_date)}</td>

@@ -80,14 +80,14 @@ def _enrich_open_trades(open_trades: list) -> list:
 
 @router.get("")
 def get_performance(user_id: Optional[str] = Depends(get_current_user_id),
-                    strategy: Optional[str] = Query(None, description="H6S | LEGACY | ALL (varsayılan: tümü)")):
+                    strategy: Optional[str] = Query(None, description="GRW | LEGACY | H6S | ALL (varsayılan: tümü)")):
     from swing_trader.paper_trading.storage import strategy_of
     storage = get_paper_storage()
     all_trades   = storage.get_all_trades(user_id)  or []
 
     closed_trades  = storage.get_closed_trades(limit=1000, user_id=user_id)
     want = (strategy or "ALL").upper()
-    if want != "ALL":   # 2026-11-22: H6S ana strateji, LEGACY kontrol grubu — ayrı hesaplar
+    if want != "ALL":   # her strateji ayrı sanal hesap: GRW ana kural (2026-11-28), LEGACY kontrol grubu, H6S eski ana kural
         all_trades = [t for t in all_trades if strategy_of(t) == want]
         closed_trades = [t for t in (closed_trades or []) if strategy_of(t) == want]
     open_trades    = [t for t in all_trades if t.get("status") == "OPEN"]

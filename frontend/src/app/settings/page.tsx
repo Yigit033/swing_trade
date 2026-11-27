@@ -1561,31 +1561,16 @@ export default function SettingsPage() {
                     min={1}
                 />
                 <FieldBool
-                    label="Ana strateji: H6S Profesyonel VCE"
-                    hint="Açık: otomatik girişler H6S kurallarıyla (VCE + küçük hisse piyasa freni + 2.5×ATR stop + 8. seans çıkışı). Kapalı: eski kurallara tek adımda dönüş. Not: bu kurallar geçmiş testlerde para kazandırmadı (2016–2020: −%56; 2021–26 düzeltilmiş veriyle: −%30 — Lab v3 Ek R); karar ileri testte."
-                    value={nstr(["auto_scan", "strategy"], "H6S") === "H6S"}
-                    onChange={(v) => sstr(["auto_scan", "strategy"], v ? "H6S" : "LEGACY")}
+                    label="Ana strateji: GRW büyüme + kırılım"
+                    hint="Açık: otomatik girişler büyüme + kırılım kuralıyla: fiyatı 10 $, piyasa değeri 1 milyar $ üstü hisselerde kırılım; yalnız satışı en az %25 büyüyen ve kârı artan şirketlerde ve piyasa yükselişteyken. Stop kırılım gününün dibi (en çok %8); kapanış 50 günlük ortalamanın altına inince ertesi açılışta satış; işlem başına %1 risk. Kuralın ayarı yoktur. Kapalı: eski kurallara tek adımda dönüş. Not: geçmiş testte hesabı büyüttü (+%36 / +%64) ama endeksin gerisinde kaldı (+%102 / +%99) — Lab v3 Ek V, W, X; karar ileri testte."
+                    value={nstr(["auto_scan", "strategy"], "GRW") === "GRW"}
+                    onChange={(v) => sstr(["auto_scan", "strategy"], v ? "GRW" : "LEGACY")}
                 />
                 <FieldBool
                     label="Eski kurallar kontrol grubu olarak devam etsin"
-                    hint="Eski kurallar ayrı sanal hesapla açmaya devam eder; Performans sayfasında H6S ile yan yana kıyaslanır."
+                    hint="Eski kurallar ayrı sanal hesapla açmaya devam eder; Performans sayfasında ana strateji ile yan yana kıyaslanır."
                     value={nb(["auto_scan", "legacy_control"], true)}
                     onChange={(v) => sb(["auto_scan", "legacy_control"], v)}
-                />
-                <FieldBool
-                    label="H6S kayıp serisi freni"
-                    hint="Son 3 kapanmış H6S işleminin hepsi zararlıysa yeni pozisyon yarım boyut; ilk kârlı kapanışta tam boyuta döner. (Bu kuralı destekleyen eski geçmiş test rakamları veri kusuru nedeniyle geçersiz — Lab v3 Ek R.)"
-                    value={nb(["auto_scan", "h6s_loss_streak_brake"], true)}
-                    onChange={(v) => sb(["auto_scan", "h6s_loss_streak_brake"], v)}
-                />
-                <FieldNum
-                    label="H6S pozisyon büyüklüğü (hesabın oranı)"
-                    hint="Kullanıcı kararı (Lab v3 Ek O2): 0.15 = her işleme hesabın %15'i (en çok 6 eşzamanlı pozisyon, kaldıraçsız). Düzeltilmiş geçmiş testlerde büyük pozisyon zararı büyüttü (2016–2020: %10 ile −%50, %15 ile −%56; 2021–26: −%13 ve −%30 — Lab v3 Ek R)."
-                    value={nn(["auto_scan", "h6s_position_pct"], 0.15)}
-                    onChange={(v) => sn(["auto_scan", "h6s_position_pct"], v)}
-                    step={0.01}
-                    min={0.01}
-                    max={0.5}
                 />
             </Section>
 

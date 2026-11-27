@@ -17,6 +17,7 @@ NY = ZoneInfo("America/New_York")
 VERSION = 1
 TRAIL_ATR_MULT = 3.0
 TRAIL_ACTIVATE_ATR = 1.5
+TREND_SMA = 50          # GRW çıkışı: kapanış bu ortalamanın altına inince ertesi açılışta satış (PARAMS_GRW["sma"])
 
 
 def timestamp(value):
@@ -63,6 +64,8 @@ def evaluate(trade, history, fraction):
     if trade.get('status', 'OPEN') not in ('OPEN',):
         return {}, (trade.get('status'), trade.get('exit_price') or 0,
                     trade.get('exit_date') or '', '', trade.get('trailing_stop') or trade['stop_loss'])
+    # GRW (Lab v3 Ek W): sabit stop + kapanış 50 günlük ortalamanın altına inince ertesi açılışta satış.
+    trend_hold = str(trade.get('strategy') or '').upper() == 'GRW'
     try:
         entry_dt = timestamp(trade['entry_date'])
         if entry_dt.time().replace(tzinfo=None) != time(9, 30):
@@ -94,6 +97,10 @@ def evaluate(trade, history, fraction):
             return review('INVALID_QUANTITY_OR_FRACTION')
         frame = history.copy()
         frame['Date'] = pd.to_datetime(frame['Date']).dt.date
+        sma = {}
+        if trend_hold:      # ortalama girişten önceki barlarla hesaplanır; pozisyona yalnız giriş sonrası işlenir
+            full = frame.sort_values('Date')
+            sma = dict(zip(full.Date, full.Close.astype(float).rolling(TREND_SMA).mean()))
         frame = frame[frame.Date >= entry_dt.date()]
         if frame.empty:
             return review('ENTRY_BAR_MISSING')
@@ -112,6 +119,8 @@ def evaluate(trade, history, fraction):
             o, h, low, cl = values
             if not low <= min(o, cl) <= max(o, cl) <= h:
                 return review('INVALID_OHLC_ENVELOPE')
+            if trend_hold and not math.isfinite(sma.get(row.Date, math.nan)):
+                return review('SMA50_HISTORY_MISSING')
             fingerprints[row.Date.isoformat()] = hashlib.sha256(json.dumps(values).encode()).hexdigest()
         if any(fingerprints.get(d) != h for d, h in state['processed'].items()):
             return review('PROCESSED_HISTORY_CHANGED_OR_MISSING')
@@ -145,8 +154,13 @@ def evaluate(trade, history, fraction):
         state['bars'] += 1
         state['processed'][key] = fingerprints[key]
         stop = state['stop']
+        if trend_hold and state.get('sell_next'):
+            # Lab sırası (pro_rules._walk_trail): dünkü kapanış ortalamanın altındaysa önce açılışta satış.
+            status, exit_price = 'TRAILED', round(o, 2)
+            exit_date = event_time(day, True)
+            reason = f'GRW: previous close below the {TREND_SMA}-day average — sold at the open'
         # Prior-bar stop has priority over EVERY target on an ambiguous bar.
-        if low <= stop:
+        elif low <= stop:
             status = 'TRAILED' if stop > initial and stop != state.get('manual_stop') else 'STOPPED'
             exit_price = round(min(o, stop), 2)
             exit_date = event_time(day, o <= stop)
@@ -156,6 +170,9 @@ def evaluate(trade, history, fraction):
                 status, exit_price = 'TIMEOUT', close
                 exit_date = event_time(day)
                 reason = 'H6S: fixed hold — close of the last session (no targets, no trailing)'
+        elif trend_hold:
+            if close < sma[day]:
+                state['sell_next'] = True                      # yarın açılışta satılacak (Emirler sayfası: SAT)
         else:
             if not state['partial'] and high >= state['target']:
                 if state['target_2'] > state['target'] * 1.01:

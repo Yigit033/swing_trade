@@ -111,7 +111,7 @@ export interface Trade {
     realized_pnl_pct?: number;
     net_pnl?: number;       // maliyet sonrası (yalnız /api/performance)
     net_pnl_pct?: number;
-    strategy?: string | null;   // 'H6S' | 'LEGACY' (boş = eski kurallar)
+    strategy?: string | null;   // 'GRW' (ana kural) | 'H6S' (eski ana kural) | 'LEGACY' (boş = eski kurallar)
     notes?: string;
     trailing_stop?: number;
     initial_stop?: number;
@@ -277,8 +277,8 @@ export const confirmTrade = (id: number) =>
     api.post(`/api/pending/${id}/confirm`).then((r) => r.data);
 
 // Performance
-// strategy: "H6S" (ana strateji) | "LEGACY" (eski kurallar, kontrol grubu) | "ALL"
-export type StrategyView = "H6S" | "LEGACY" | "ALL";
+// strategy: "GRW" (ana strateji) | "LEGACY" (eski kurallar, kontrol grubu) | "H6S" (eski ana kural) | "ALL"
+export type StrategyView = "GRW" | "H6S" | "LEGACY" | "ALL";
 export const getPerformance = (strategy: StrategyView = "ALL") =>
     api.get("/api/performance", { params: strategy === "ALL" ? {} : { strategy } }).then((r) => r.data);
 
@@ -376,12 +376,11 @@ export interface RegimeData {
     live?: boolean;
     /** Otomatik alım şu an açık mı (canlı auto-scan kurallarıyla aynı). */
     entries?: {
-        strategy: string;                  // "H6S" | "LEGACY"
-        index: string;                     // freni belirleyen endeks: "IWM" | "SPY"
+        strategy: string;                  // "GRW" | "LEGACY"
+        index: string;                     // freni belirleyen endeks ("SPY")
         regime: string | null;
         status: "BLOCKED" | "LIMITED" | "OPEN" | "UNKNOWN";
         max_open?: number;
-        asof?: string;
         auto_scan_enabled?: boolean;
     } | null;
 }
@@ -788,14 +787,20 @@ export type ShadowData = {
 export const getShadow = () =>
     api.get<ShadowData>("/api/shadow", { timeout: 60000 }).then((r) => r.data);
 
-// ── Midas Emirleri (H6S): bugün açılışta AL / kapanışta SAT / TUT ──
+// ── Midas Emirleri: ana kural GRW (büyüme + kırılım) — açılışta AL / açılışta SAT / TUT ──
+// H6S alanları (stop_distance = k×ATR, sell_day = 8. seans, hold_sessions, stop_atr) yalnız legacy_h6s bloğunda dolu.
 export type OrderBuy = { ticker: string; shares: number; est_price: number; est_cost: number; stop_distance: number;
-    est_stop: number; buy_day: string; sell_day: string; overdue: boolean; trade_id?: number };
+    est_stop: number; buy_day: string; sell_day: string | null; overdue: boolean; trade_id?: number;
+    /** GRW: kırılım gününün dibi — açılış bunun altındaysa alınmaz; stop = max(dip, alış − %8) */
+    signal_low?: number };
 export type OrderPos = { ticker: string; shares: number; entry_price: number; stop: number; entry_day: string;
-    sell_day: string; current_price?: number | null; overdue: boolean; trade_id?: number };
-export type OrdersData = { session: string; account: number; held: number; free: number; hold_sessions: number;
+    sell_day: string | null; current_price?: number | null; overdue: boolean; trade_id?: number };
+export type OrdersPlan = { strategy?: string; session: string; account: number; held: number; free: number;
     loss_streak_brake?: boolean;
     /** Ek M: başlangıç tutarı; account = bileşik özsermaye (başlangıç + kapanmış net) */
     start?: number; idle_pct?: number; fee_per_order?: number;
-    stop_atr: number; buy: OrderBuy[]; sell: OrderPos[]; hold: OrderPos[] };
+    /** GRW */ max_stop_pct?: number; risk_pct?: number; sma?: number;
+    /** H6S */ hold_sessions?: number; stop_atr?: number;
+    buy: OrderBuy[]; sell: OrderPos[]; hold: OrderPos[] };
+export type OrdersData = OrdersPlan & { legacy_h6s?: OrdersPlan | null };
 export const getOrders = () => api.get<OrdersData>("/api/orders").then((r) => r.data);

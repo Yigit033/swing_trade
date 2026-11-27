@@ -28,7 +28,7 @@ export const queryKeys = {
 };
 
 // Performance: shared by Dashboard & Performance pages
-export function usePerformance(strategy: StrategyView = "H6S") {
+export function usePerformance(strategy: StrategyView = "GRW") {
     return useQuery<PerformanceData>({
         queryKey: [...queryKeys.performance, strategy],
         queryFn: () => getPerformance(strategy) as Promise<PerformanceData>,

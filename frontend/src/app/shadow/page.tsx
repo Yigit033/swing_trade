@@ -25,7 +25,7 @@ const NAMES: Record<string, { title: string; desc: string }> = {
         desc: "30 günde ≥2 yönetici/direktör, ≥100K$ açık piyasa alımı (SEC Form 4) → ertesi açılış, 2.5×ATR stop, 20 seans. Düzeltilmiş geçmiş testlerde rastgele hisseden anlamlı biçimde iyi değil; portföy 2016–2020 +%16 (endeks +%102), 2021–26 −%12 (Lab v3 Ek S).",
     },
     H6S: {
-        title: "H6S · Profesyonel VCE (canlı paper ürün)",
+        title: "H6S · Profesyonel VCE (eski canlı kural)",
         desc: "H6 sinyalleri + küçük hisse (IWM) piyasa freni (ayı piyasasında giriş yok, temkinli piyasada en çok 1) + 2.5×ATR felaket stop'u → ertesi açılış, 8. seans kapanışı. Geçmiş testlerde para kazandırmadı: hiç kullanılmamış 2016–2020 yıllarında hesap −%56 (endeks +%98); 2021–26'daki eski +%66 sonucu bir veri kusurundan geliyordu, düzeltilince −%30 (Lab v3 Ek R). Gerçek para adayı değil; karar bu ileri testte.",
     },
     H6SR: {
@@ -37,7 +37,7 @@ const NAMES: Record<string, { title: string; desc: string }> = {
         desc: "Piyasa değeri 10 milyar $ üstü likit hisselerde ay sonunda karar: son 12 ayın (son ay hariç) en güçlü 10 hissesi tutulur; sırası 20'nin altına düşen ya da 200 günlük ortalamasının altına inen satılır; yeni alım yalnız piyasa yükseliş rejimindeyken. Stop yok. Geçmiş sınavda KALDI: 2016–2020 +%301 ama 2021–26 +%22 ve hesap −%71 eridi (Lab v3 Ek T). Kullanıcı kararıyla yalnız ileri testte; gerçek para adayı değil.",
     },
     GRW: {
-        title: "GRW · Büyüme + kırılım (büyüyen şirketlerde VCE)",
+        title: "GRW · Büyüme + kırılım (canlı paper ürün)",
         desc: "Fiyatı 10 $, piyasa değeri 1 milyar $ üstü likit hisselerde VCE kırılımı; yalnız son çeyrek satışı geçen yıla göre en az %25 artmış ve net kârı da artmış şirketlerde (SEC bilançoları) ve piyasa yükseliş rejimindeyken → ertesi açılış. Stop kırılım gününün dibi (en çok %8); kapanış 50 günlük ortalamanın altına inince ertesi açılışta satılır, süre sınırı yok. Boyut: işlem başına hesabın %1'i riske atılır, pozisyon en çok %25. Geçmiş ölçümde hesabı büyüttü ama endeksin gerisinde kaldı (2016–2020 +%36, endeks +%102; 2021–26 +%64, endeks +%99) ve bu kural sonuçlar görüldükten sonra seçildi (Lab v3 Ek V). Kullanıcı kararıyla yalnız ileri testte; gerçek para adayı değil.",
     },
     H6: {
@@ -239,8 +239,8 @@ export default function ShadowPage() {
                         <Ghost size={22} /> Gölge Sinyaller
                     </h1>
                     <p style={{ color: "var(--text-muted)", margin: "6px 0 0", fontSize: 13, maxWidth: 820 }}>
-                        İki bilgi tabanlı sinyal (H4, H5), canlı ürünün VCE varyantları (H6, H6S, H6SR), büyük hisselerde
-                        aylık lider rotasyonu (MOM) ve büyüyen şirketlerde kırılım (GRW) burada <strong>gerçek para
+                        İki bilgi tabanlı sinyal (H4, H5), VCE varyantları (H6, H6S, H6SR), büyük hisselerde
+                        aylık lider rotasyonu (MOM) ve canlı ürünün kuralı olan büyüyen şirketlerde kırılım (GRW) burada <strong>gerçek para
                         olmadan</strong> ileriye doğru izleniyor.
                         Düzeltilmiş geçmiş testlerde (2016–2020 ve 2021–2026) hiçbiri iki dönemde de endeksi geçemedi
                         (Lab v3 Ek R, S, T ve V); geçerli kanıt yalnız bu ileri testten gelebilir.

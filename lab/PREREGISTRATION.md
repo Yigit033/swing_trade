@@ -947,3 +947,108 @@ hepsi → TERFİ ADAYI; net ortalama ≤ 0 → KALDI; 36. ayda hâlâ aday deği
 yalnız tartışmayı açar; geçmiş sınavda endeksin gerisinde kaldığı o tartışmada kullanıcıya birlikte sunulur.
 
 **Başlangıç.** Gölge koşusunun GRW'yi ilk çalıştırdığı seans. H4/H5/H6/H6S/H6SR/MOM kilitleri ve kapıları değişmez.
+
+# Ek X — TRD: büyüyen şirket + yükselen eğilim, haftalık karar (kırılım kalıbı yok)
+
+**Yazıldığı an: 2026-11-28, Ek R–W sonuçlarından SONRA; bu kural setinin hiçbir sonucu görülmeden.** Görülenler:
+Ek R–W'nin tamamı. Özellikle Ek V'nin betimleyici kıyasları: büyüme şartı çıkarılınca havuz farkı sıfıra iniyor
+(+13.0% / −58.9%); lider şartı değer katmıyor; "büyüme + kırılım" hesabı iki dönemde de büyütüyor (+36.4% / +64.0%)
+ama SPY'ın (+102.0% / +99.2%) gerisinde ve paranın ~%75'i boşta. Ek T: büyük hisselerde aylık 12-1 momentum
+rotasyonu 2016–2020 +301%, 2021–26 +22% ve düşüş −71%. 2026-11-28'de 1.834 küçük/orta hissede son 10 seansın VCE
+sayımı (toplam 5 isabet) ve "3 ayda %30 düşmüş hisse" haftalık kontrolü (betimleyici; bu kuralın girdisi değil).
+Genel piyasa bilgisi (veriden değil): büyüme hisseleri 2016–2020 ve 2023–2025'te çok iyi, 2021–22'de çok kötüydü.
+
+**Gerekçe (kullanıcı kararı, 2026-11-28; Ek T ve Ek V'deki "kapanır" sonuçlarının etiketli istisnası).** Kullanıcı
+ürünün tek grafik kalıbına (VCE) bağımlılığını sorun olarak gördü ve "radikal karar" istedi. Önerilen ve kabul
+edilen ilke: önce şirket, sonra grafik — yalnız büyüyen şirketler alınır; kırılım/sıkışma kalıbı şart değildir,
+yükselen eğilim yeter. Bu, projenin ~19. hipotezidir ve **kirlenmiş bir sınavdır**: iki dönem de daha önce
+kullanıldı ve büyüme şartının bu veride işe yaradığı görüldü. GEÇTİ sonucu bile kanıt değildir; geçerli kanıt
+yalnız ileri testten gelir. TEK kural, TEK parametre seti; tarama yok. Parametreler Ek V'den aynen (büyüme
+tanımı, havuz, %8 stop, %1 risk, maliyet) ya da yayımlanmış standart değerlerdir (50 ve 200 günlük ortalama,
+haftalık karar); bu veride ayarlanmadı.
+
+**Evren ve veri.** Ek V ile aynı: kök `output/lab_liq` (yeniden indirilmez), havuz G (fiyat ≥ 10 $, 63 seans
+ortalama hacim > 300K, 20 seans ortalama dolar hacim > 10M $, piyasa değeri ≥ 1 milyar $; kıyas ETF'leri hariç),
+büyüme verisi `sec_facts/quarters.parquet` (Ek V'de kurulan tablo). İki dönem ayrı ayrı, her biri 10.000$'dan:
+**A = 2016-01-04 → 2020-12-31, B = 2021-01-04 → 2026-11-20.**
+
+**Uygunluk (t günü).** Havuz G ∧ büyüme şartı (Ek V ile aynı fonksiyon: son bilinen çeyrekte satış yıllık ≥ %25,
+net kâr artmış, veri ≤ 200 gün; bilinmiyorsa ret) ∧ eğilim: **Close_t > SMA50_t VE SMA50_t > SMA200_t.**
+
+**Karar günü.** Her haftanın son seansı (bir sonraki seans başka bir ISO haftasındaysa). Emirler bir sonraki
+seansın açılışında gerçekleşir. Karar günleri arasında yalnız stop çalışır.
+
+**Satış.**
+- Stop = 0.92 × giriş fiyatı (sabit %8). Giriş günü dahil her gün: Low ≤ stop → min(Open, stop).
+- Karar günü t'de eldeki hissede Close_t < SMA50_t → bir sonraki açılışta satış (açılış barı yoksa bar gelene
+  kadar beklenir). Süre sınırı ve kâr hedefi yok; büyüme şartının sonradan bozulması tek başına satış sebebi değil.
+- Dönem sonunda açık pozisyon son seansın kapanışıyla kapatılır.
+
+**Alım.** Karar günü t'de piyasa rejimi BULL ise (canlı `regime_from_spy_close`, SPY 1 yıl + VIX; Ek V ile aynı):
+adaylar = t'de uygun olup elde olmayan hisseler; sıra = 12 aylık getiri (Close_t / Close_{t−252} − 1; hesaplanamıyorsa
+0) büyükten küçüğe. Bir sonraki açılışta sırayla alınır; açılış barı yoksa o aday atlanır. Rejim BULL değilse yeni
+alım yok; eldekiler kendi satış kuralına kadar tutulur. Satılan hisse sonraki karar günlerinde uygunsa yeniden
+alınabilir (bekleme süresi yok). Hisse başına tek açık pozisyon.
+
+**Boyut ve portföy.** 10.000$. Ek V formülü aynen: pozisyon = min(%25 × özsermaye, risk × özsermaye ÷ 0.08),
+risk = %1 (→ pozisyon özsermayenin %12.5'i, en çok 8 hisse); özsermaye = önceki gün kapanış değeri, o günün
+açılış satışları işlendikten sonra. Son 2 kapanan işlem de (maliyet sonrası) zarardaysa risk %0.5 (→ %6.25),
+ilk kârlı kapanışta %1'e döner. Nakit yetmezse aday atlanır; borç yok.
+**Maliyet (birincil): 20 bps gidiş-dönüş + Midas 1.5$/emir.** Duyarlılık: 10 ve 50 bps; 25.000$ hesap.
+
+**Ölçütler (her dönemde ayrı).**
+
+| # | Ölçüt |
+|---|---|
+| X0 | Yeterlilik: her dönemde ≥ 60 portföy işlemi |
+| X1 | Para: portföy toplam getirisi > SPY al-tut (dönem başından önceki son kapanış → dönemin son seansı), **iki dönemde de** |
+| X2 | Risk: portföy max düşüşü > −35%, iki dönemde de |
+| X3 | Seçim: portföy işlemlerinin havuz G'ye göre farkı (aynı giriş açılışı ve aynı çıkış zamanlaması, karar günü havuz G üyelerinin eşit ağırlıklı getirisi) iki dönemde de > 0 VE iki dönem birlikte giriş günü kümeli bootstrap %95 CI alt sınırı > 0 |
+
+**Hüküm (önceden sabit).** GEÇTİ: X0–X3 hepsi. KISMEN: X0 ve X1 sağlanır ama X2 veya X3 sağlanmaz. KALDI: X1
+herhangi bir dönemde sağlanmaz. X0 sağlanmazsa "yetersiz veri" (şartlar gevşetilmez).
+
+**Sonuca göre (önceden sabit; kullanıcı kararı 2026-11-28).** Kullanıcı canlı SANAL (paper) ürünün ana kuralının
+H6S'den alınmasına karar verdi (H6S iki dönemde de kaldı, Ek R). X0, X1 ve X2 üçü de sağlanırsa (GEÇTİ, ya da X2'si
+sağlanan KISMEN) canlı sanal ana kural TRD olur ve TRD gölge ileri teste eklenir. Aksi halde (KALDI, yetersiz veri
+ya da X2'si sağlanmayan KISMEN) TRD kapanır, bu veride varyantı denenmez ve canlı sanal ana kural "büyüme + kırılım"
+(GRW, Ek W'nin donmuş kuralı) olur. Her iki durumda da hiçbir kural gerçek para adayı sayılmaz; bu ancak ileri test
+kapısından sonra ayrı bir karardır. Betimleyici (hükmü ve canlı seçimi DEĞİŞTİRMEZ): büyüme şartsız (havuz G ∧
+eğilim), piyasa şartsız, sıra 12 aylık getiri yerine satış büyümesi; yıllık tablo; en iyi 5 işlemin payı; boşta
+nakit oranı; yıllık emir sayısı; IWM kıyası.
+
+**Bilinen yanlılıklar.** Kirlenme (yukarıda). Survivorship (evren 2026'da listede olanlar; hisse → CIK eşlemesi
+güncel) → mutlak getiri iyimser. Dosyalama tarihi basın açıklamasından geç olduğundan büyüme bilgisi gerçekte
+olduğundan geç kullanılır (temkinli yön). Günlük barda stop, stop fiyatından (boşlukta açılıştan) gerçekleşmiş
+sayılır. Haftalık karar + ertesi açılış, elle (Midas) uygulanabilir bir tempodur; gün içi giriş sınanmaz.
+
+# Ek X sonucu (2026-11-28, SONUÇ GÖRÜLDÜKTEN SONRA yazıldı)
+
+**Hüküm: KALDI** (X1 iki dönemde de sağlanmadı; X2 dönem B'de sağlanmadı). Ön kayıt bölüm SHA256
+`22856e87eeb941b4f88de64f0a34475017b5a76a4f73b7b0590a31cc29e94b7d`; koşu `python lab/trend_x.py run`,
+çıktı `output/lab_liq/x_result.json`.
+
+| | A 2016–2020 | B 2021–2026 |
+|---|---|---|
+| Portföy | **+44.3%** | **−68.2%** |
+| Max düşüş | −25.7% | **−76.8%** |
+| SPY al-tut (IWM) | +102.0% (+86.4%) | +99.2% (+40.1%) |
+| İşlem / kazanma | 314 / %33.4 | 578 / %18.2 |
+| Ort. kazanç / kayıp | +20.9% / −6.8% | +29.9% / −7.7% |
+| Stop ile çıkan | 143 / 314 | 412 / 578 |
+| Havuz farkı [CI] | +1.18 [−0.68, +3.18] | −0.99 [−2.97, +1.21] |
+| Boşta nakit | %31 | %37 |
+
+İki dönem birlikte n = 892, havuz farkı −0.23 [−1.70, +1.42]. X0 ✔, X1 ✘, X2 ✘, X3 ✘. Duyarlılık (10 bps / 50 bps /
+25.000$): A +52.7 / +49.8 / +48.1; B −67.4 / −71.0 / −61.4. Betimleyici (hükmü değiştirmez): büyüme şartsız
+−20.6% / −81.8%; piyasa şartsız +48.7% (düşüş −37.4) / −62.6%; satış büyümesi sırası +44.7% / −53.7%.
+
+**Okuma.** Nakit sorunu çözüldü (boşta %75 → %31–37) ama para gelmedi: sıra 12 aylık getiriye göre olduğundan
+kural en oynak hisseleri seçti ve sabit %8 stop dönem B'de işlemlerin %71'inde çalıştı (işlemlerin %43'ü ilk 5
+seansta kapandı). Kırılım şartını kaldırmak "büyüme"nin seçim avantajını da götürdü (havuz farkı ≈ 0). Büyüme şartı
+yine en az kötü parça (büyüme şartsız sürüm iki dönemde de daha kötü).
+
+**Sonuç (önceden sabit kural uygulandı).** TRD kapanır; bu veride varyantı denenmez (stop genişletme, farklı sıra
+ya da farklı ortalama denemek = sonradan seçme). Kullanıcı kararı (2026-11-28) gereği canlı SANAL ürünün ana kuralı
+H6S'den "büyüme + kırılım"a (GRW, Ek W'nin donmuş kuralı) geçer. GRW gerçek para adayı değildir; kanıt yalnız
+gölge ileri testten gelebilir.

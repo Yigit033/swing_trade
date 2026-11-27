@@ -12,32 +12,22 @@ from api.deps import get_regime_storage, get_config
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/regime", tags=["regime"])
 
-_small_cap_cache: dict = {}          # {seans: rejim} — IWM kapanışı seans içinde değişmez
 
-
-def entry_status(strategy: str, small_cap_regime: Optional[str], market_regime: Optional[str],
-                 loop_policy) -> dict:
+def entry_status(strategy: str, market_regime: Optional[str], loop_policy) -> dict:
     """Otomatik alım şu an açık mı? Canlı auto-scan ile AYNI kurallar (saf fonksiyon).
 
-    H6S: küçük hisse (IWM) rejimi — BEAR giriş yok, CAUTION en çok N açık pozisyon
-    (``api.auto_scan._auto_track_h6s``). Eski kurallar: tarama (SPY) rejimi +
-    ``auto_entry_capacity``. status: BLOCKED | LIMITED | OPEN | UNKNOWN (rejim okunamadı).
+    GRW (ana kural): yalnız SPY rejimi BULL iken alım (``api.auto_scan._auto_track_grw``); BEAR, CAUTION ya da
+    UNKNOWN → BLOCKED. Eski kurallar: tarama (SPY) rejimi + ``auto_entry_capacity``.
+    status: BLOCKED | LIMITED | OPEN.
     """
-    from swing_trader.shadow.rules import PARAMS_H6S
+    from swing_trader.shadow.rules import PARAMS_GRW
     from swing_trader.small_cap.thresholds import auto_entry_capacity
 
     strategy = str(strategy or "LEGACY").upper()
-    if strategy == "H6S":
-        if not small_cap_regime:
-            return dict(strategy="H6S", index="IWM", regime=None, status="UNKNOWN")
-        regime = str(small_cap_regime).upper()
-        out = dict(strategy="H6S", index="IWM", regime=regime, status="OPEN")
-        if regime == "BEAR" and PARAMS_H6S["bear_block"]:
-            out["status"] = "BLOCKED"
-        elif regime == "CAUTION":
-            out.update(status="LIMITED", max_open=int(PARAMS_H6S["caution_max_concurrent"]))
-        return out
     regime = str(market_regime or "UNKNOWN").upper()
+    if strategy == "GRW":
+        ok = regime == PARAMS_GRW["buy_regime"]
+        return dict(strategy="GRW", index="SPY", regime=regime, status="OPEN" if ok else "BLOCKED")
     out = dict(strategy="LEGACY", index="SPY", regime=regime, status="OPEN")
     cap = auto_entry_capacity(regime, loop_policy, 0)
     if cap == 0 and regime == "BEAR":
@@ -47,34 +37,14 @@ def entry_status(strategy: str, small_cap_regime: Optional[str], market_regime: 
     return out
 
 
-def _small_cap_regime_now() -> tuple:
-    """(seans, rejim | None) — auto-scan'in kullanacağı küçük hisse rejimi; veri yoksa None."""
-    from swing_trader.shadow import sources as src
-    from swing_trader.shadow.runner import _small_cap_regime
-    from swing_trader.utils.market_calendar import last_completed_session
-
-    asof = last_completed_session()
-    if asof not in _small_cap_cache:
-        reg = _small_cap_regime(src, asof)
-        if reg is None:
-            return asof, None
-        _small_cap_cache.clear()
-        _small_cap_cache[asof] = str(reg.get("regime", "UNKNOWN")).upper()
-    return asof, _small_cap_cache[asof]
-
-
 def _entries(market_regime: Optional[str]) -> Optional[dict]:
     """Ana sayfadaki "alım açık mı" satırı. Hata rejim yanıtını bozmasın → None."""
     try:
         from swing_trader.small_cap.settings_config import load_settings
 
         settings = load_settings()
-        strategy = str(settings.auto_scan.strategy or "LEGACY").upper()
-        asof, small = _small_cap_regime_now() if strategy == "H6S" else (None, None)
-        out = entry_status(strategy, small, market_regime, settings.backtest_loop)
+        out = entry_status(settings.auto_scan.strategy, market_regime, settings.backtest_loop)
         out["auto_scan_enabled"] = bool(settings.auto_scan.enabled)
-        if asof:
-            out["asof"] = asof.isoformat()
         return out
     except Exception:
         logger.exception("Entry status unavailable")

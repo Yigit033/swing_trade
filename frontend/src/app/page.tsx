@@ -1,6 +1,7 @@
 "use client";
 import { usePerformance, usePending, useRegime } from "@/hooks/useApi";
 import type { Trade } from "@/lib/api";
+import { StrategyBadge } from "@/components/StrategyBadge";
 import { TrendingUp, TrendingDown, Activity, Clock, Target } from "lucide-react";
 
 function MetricCard({
@@ -172,7 +173,9 @@ export default function DashboardPage() {
             const e = regime.entries;
             if (!e) return null;
             const market = e.index === "IWM" ? "Küçük hisse piyasası (IWM)" : "Piyasa (SPY)";
-            const rule = e.strategy === "H6S" ? "ana strateji (H6S)" : "strateji";
+            const rule = e.strategy === "GRW" ? "ana kural (büyüme + kırılım)" : "strateji";
+            const state = e.regime === "BEAR" ? "düşüş (BEAR)" : e.regime === "CAUTION" ? "temkinli (CAUTION)"
+              : e.regime === "BULL" ? "yükseliş (BULL)" : "belirsiz";
             const last = [...openTrades, ...recentClosed]
               .map((t: Trade) => (t.entry_date || "").slice(0, 10)).filter(Boolean).sort().pop();
             const lastTxt = last ? ` Son alım: ${last}.` : "";
@@ -183,7 +186,7 @@ export default function DashboardPage() {
               text = "Yeni alım yok: otomatik tarama Ayarlar'da kapalı." + lastTxt;
             } else if (e.status === "BLOCKED") {
               color = "var(--red)";
-              text = `Yeni alım yok: ${market} düşüş (BEAR) durumunda, ${rule} bu durumda alım yapmaz.${lastTxt} `
+              text = `Yeni alım yok: ${market} ${state} durumunda, ${rule} ${e.strategy === "GRW" ? "yalnız yükselişte (BULL) alım yapar" : "bu durumda alım yapmaz"}.${lastTxt} `
                 + "Tarama ve açık pozisyonların takibi her gece sürüyor; piyasa düzelince alımlar kendiliğinden başlar.";
             } else if (e.status === "LIMITED") {
               color = "var(--yellow)";
@@ -243,7 +246,7 @@ export default function DashboardPage() {
                   const hasLive = cp != null;
                   return (
                     <tr key={t.id}>
-                      <td><strong style={{ color: "var(--accent)" }}>{t.ticker}</strong>{String(t.strategy || "").toUpperCase() === "H6S" ? <span className="badge badge-green" style={{ marginLeft: 6, fontSize: "0.65rem" }} title="H6S Profesyonel VCE (ana strateji)">H6S</span> : <span className="badge badge-yellow" style={{ marginLeft: 6, fontSize: "0.65rem" }} title="Eski kurallar (kontrol grubu / manuel)">Eski</span>}</td>
+                      <td><strong style={{ color: "var(--accent)" }}>{t.ticker}</strong><StrategyBadge strategy={t.strategy} /></td>
                       <td><TypeBadge type={t.swing_type} /></td>
                       <td style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{fmtDate(t.entry_date)}</td>
                       <td>${t.entry_price?.toFixed(2)}</td>
@@ -255,7 +258,7 @@ export default function DashboardPage() {
                         ) : <span style={{ color: "var(--text-muted)" }}>—</span>}
                       </td>
                       <td style={{ color: "var(--red)" }}>${t.stop_loss?.toFixed(2)}</td>
-                      <td style={{ color: "var(--green)" }}>{(t.target ?? 0) > 0 ? `$${t.target!.toFixed(2)}` : <span style={{ color: "var(--text-muted)" }} title="H6S: hedef yok — 8. seans kapanışında çıkış">8 gün</span>}</td>
+                      <td style={{ color: "var(--green)" }}>{(t.target ?? 0) > 0 ? `$${t.target!.toFixed(2)}` : (String(t.strategy || "").toUpperCase() === "GRW" ? <span style={{ color: "var(--text-muted)" }} title="GRW: hedef yok — kapanış 50 günlük ortalamanın altına inince ertesi açılışta satış">50g ort.</span> : <span style={{ color: "var(--text-muted)" }} title="H6S: hedef yok — 8. seans kapanışında çıkış">8 gün</span>)}</td>
                       <td>
                         <span className={`badge ${(t.quality_score || 0) >= 80 ? "badge-green" : (t.quality_score || 0) >= 65 ? "badge-blue" : "badge-yellow"}`}>
                           {t.quality_score?.toFixed(0)}

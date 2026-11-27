@@ -1075,3 +1075,50 @@ değildir.** Yalnız ileriye doğru izlenir; canlı paper ürün ve diğer gölg
   çeyreklik SEC verisi yok → ret. Gerçek SPY rejimi o gün BEAR olduğundan rejim düzelene kadar GRW alım yapmaz.
 - **Canlı ile lab farkları:** aday listesi Finviz'den, piyasa değeri Finviz'den; portföy değerlemesi gölge raporu
   düzeninde (aynı günün çıkışları girişlerden önce nakde döner). Elenen kırılımlar nedenleriyle kaydedilir.
+
+## Ek X — TRD: büyüyen şirket + yükselen eğilim, haftalık karar (2026-11-28) → KALDI
+
+Kullanıcı ürünün tek grafik kalıbına (VCE) bağımlılığını sorun olarak gördü. Sınanan kural (ön kayıt Ek X, sonuç
+görülmeden yazıldı): havuz G ∧ büyüme (satış yıllık ≥ %25, net kâr artmış) ∧ Close > SMA50 > SMA200; haftada bir
+karar, ertesi açılışta işlem; sıra 12 aylık getiri; sabit %8 stop; hafta kapanışı SMA50 altındaysa satış; %1 risk
+(pozisyon %12.5, en çok 8 hisse); 20 bps + 1.5$/emir; yeni alım yalnız SPY rejimi BULL iken.
+
+| | A 2016–2020 | B 2021–2026 |
+|---|---|---|
+| Portföy | +44.3% | **−68.2%** |
+| Max düşüş | −25.7% | −76.8% |
+| SPY al-tut | +102.0% | +99.2% |
+| İşlem / kazanma | 314 / %33 | 578 / %18 |
+| Stop ile çıkan | %46 | %71 |
+| Havuz farkı [CI] | +1.18 [−0.68, +3.18] | −0.99 [−2.97, +1.21] |
+| Boşta nakit | %31 | %37 |
+
+Betimleyici: büyüme şartsız −20.6% / −81.8%; piyasa şartsız +48.7% / −62.6%; satış büyümesi sırası +44.7% / −53.7%.
+
+**Sonuç.** Kırılım kalıbını kaldırmak paranın boşta kalmasını azalttı ama hesabı dönem B'de batırdı: en hızlı
+yükselmiş hisseler seçilince %8 stop sürekli çalıştı. Bu, "büyüme + kırılım"da (Ek V kıyası, +36.4% / +64.0%)
+kırılım şartının işe yaradığını gösterir: şart kaldırılınca seçim avantajı kayboldu. TRD kapandı, varyantı
+denenmez. Önceden sabitlenen kural ve kullanıcı kararı gereği canlı sanal ana kural H6S'den GRW'ye geçti.
+
+Kod: `lab/trd_rules.py` (saf kurallar), `lab/trend_x.py` (koşucu), test `swing_trader/tests/test_lab_trd.py` (10).
+Yeniden üretim: `python lab/trend_x.py run` (veri Ek V ile aynı; indirme yok).
+
+### Canlı sanal ana kural: H6S → GRW (2026-11-28)
+
+Ek X'in önceden sabitlenen sonucu ve kullanıcı kararıyla canlı paper ürünün otomatik girişi GRW kuralına geçti
+(`auto_scan.strategy = "GRW"`; saklı "H6S" ayarı GRW olarak okunur). H6S yeni pozisyon açmaz; açık H6S pozisyonları
+kendi kuralıyla kapanır ve gölge ileri testi sürer. Eski kurallar kontrol grubu olarak devam eder.
+
+| Parça | Yer |
+|---|---|
+| Giriş (kırılım + SPY BULL + SEC büyüme, risk tabanlı boyut) | `api/auto_scan._auto_track_grw` (gölgeyle aynı `grw_hits`, `growth_check`, `_regime_on`) |
+| PENDING kaydı ve açılış onayı (stop = max(kırılım günü dibi, açılış − %8); açılış ≤ dip → ret) | `paper_trading/tracker._add_grw_trade`, `confirm_pending_trades` |
+| Çıkış (stop; kapanış < SMA50 → ertesi açılış) | `paper_trading/execution.evaluate` (`trend_hold`) |
+| Emir listesi | `api/routers/orders.build_orders` (GRW planı + `legacy_h6s`) |
+| Ana sayfa alım durumu | `api/routers/regime.entry_status` |
+
+Lab/gölge ile farklar: (1) adet sinyal günü kapanışıyla hesaplanır (emir açılıştan önce girilebilsin diye; lab
+açılış fiyatıyla boyutlar); (2) pozisyon takibi temettü düzeltmesiz fiyatla yapılır (aylarca tutulan pozisyonda
+düzeltilmiş fiyat her temettüde geçmiş barları değiştirir); (3) hesap = başlangıç + kapanmış GRW işlemlerinin net
+sonucu (açık pozisyonların kârı sayılmaz). Parite: canlı çıkış motoru 60 rastgele fiyat yolunda gölge kuralı
+(`rules.grw_plan`) ile aynı çıkış günü, nedeni ve fiyatını verir (`tests/test_trading_correctness.py`).

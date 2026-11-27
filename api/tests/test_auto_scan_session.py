@@ -171,45 +171,6 @@ def test_auto_scan_never_exceeds_cash_account(monkeypatch):
     assert opened == ["BIG", "FIT"]                                      # 3.5K + 5K + 1K ≤ 10K
 
 
-
-@pytest.mark.parametrize("regime,expected", [("BULL", ["BIG", "MID"]), ("CAUTION", ["BIG"]), ("BEAR", [])])
-def test_auto_scan_h6s_entries(monkeypatch, regime, expected):
-    """H6S ana strateji: VCE isabetleri → IWM rejimi → %10 pozisyon, nakit sınırı; eski kurallar ayrıca açar."""
-    from unittest.mock import Mock
-    from swing_trader.small_cap.settings_config import SmallCapSettings
-    from swing_trader.shadow import runner as shadow_runner, sources as shadow_src
-    import api.routers.scanner as scanner
-    import api.scanner_jobs as jobs
-    import api.deps as deps
-    s = SmallCapSettings()
-    s.auto_scan.h6s_position_pct = 0.10   # sabit: bu testler kuralı ölçer, varsayılanı değil
-    monkeypatch.setattr("swing_trader.small_cap.settings_config.load_settings", lambda *a, **k: s)
-    monkeypatch.setattr(jobs, "create_exclusive_scan_job", lambda: "job")
-    monkeypatch.setattr(jobs, "release_scan_slot", lambda j: None)
-    legacy = [dict(ticker="OLD", entry_price=10.0, position_size=10)]
-    monkeypatch.setattr(scanner, "_execute_smallcap_scan",
-                        lambda *a, **k: dict(signals=legacy, market_regime="BULL", stats={}))
-    hits = [dict(ticker="MID", dv20=5e7, close=20.0, atr14=1.0),
-            dict(ticker="BIG", dv20=9e7, close=50.0, atr14=2.0),
-            dict(ticker="TOO", dv20=1e7, close=40.0, atr14=1.0)]
-    monkeypatch.setattr(shadow_src, "live_vce_hits", lambda asof: dict(hits=hits, stats={}))
-    monkeypatch.setattr(shadow_runner, "_small_cap_regime", lambda src, asof: {"regime": regime})
-    tracker = Mock()
-    tracker.storage.count_active_trades_for_owner.return_value = 0
-    held = {"H6S": 8000.0, "LEGACY": 0.0}                    # H6S hesabında 8.000$ zaten bağlı
-    tracker.storage.active_notional_for_owner.side_effect = lambda owner, strategy=None: held[strategy]
-    tracker.storage.get_closed_trades.return_value = []                    # kayıp serisi yok → tam boyut
-    tracker.add_trade_from_signal.side_effect = lambda sig, owner: 1
-    monkeypatch.setattr(deps, "get_paper_tracker", lambda: tracker)
-    assert auto_scan._run_auto_scan_once() == "ran"
-    calls = [c.args[0] for c in tracker.add_trade_from_signal.call_args_list]
-    h6s = [c for c in calls if c.get("strategy") == "H6S"]
-    assert [c["ticker"] for c in h6s] == expected             # dolar hacim sırası; TOO nakde sığmaz
-    for c in h6s:
-        assert c["position_size"] == int(1000 / c["entry_price"]) and c["atr14"] > 0
-    assert [c["ticker"] for c in calls if c.get("strategy") != "H6S"] == ["OLD"]   # kontrol grubu
-
-
 def test_loss_streak_brake_rule():
     from swing_trader.paper_trading.risk_rules import loss_streak_active
     L = lambda d, p, st="TIMEOUT": dict(status=st, exit_date=d, realized_pnl_pct=p)
@@ -219,7 +180,8 @@ def test_loss_streak_brake_rule():
     assert not loss_streak_active([L("2026-11-03", -2.0), L("2026-11-04", -1.0)])           # 3 kapanış yok
 
 
-def test_auto_scan_h6s_halves_size_after_loss_streak(monkeypatch):
+def _grw_env(monkeypatch, hits, regime="BULL", growth=None, closed=None, held=0.0, legacy=None, legacy_control=False):
+    """GRW otomatik girişinin sahte ortamı: kırılım isabetleri, SPY rejimi, SEC büyüme cevabı, sanal hesap."""
     from unittest.mock import Mock
     from swing_trader.small_cap.settings_config import SmallCapSettings
     from swing_trader.shadow import runner as shadow_runner, sources as shadow_src
@@ -227,83 +189,96 @@ def test_auto_scan_h6s_halves_size_after_loss_streak(monkeypatch):
     import api.scanner_jobs as jobs
     import api.deps as deps
     s = SmallCapSettings()
-    s.auto_scan.h6s_position_pct = 0.10   # sabit: bu testler kuralı ölçer, varsayılanı değil
-    s.auto_scan.legacy_control = False
+    s.auto_scan.legacy_control = legacy_control
+    assert s.auto_scan.strategy == "GRW"                       # ana kural (2026-11-28)
     monkeypatch.setattr("swing_trader.small_cap.settings_config.load_settings", lambda *a, **k: s)
     monkeypatch.setattr(jobs, "create_exclusive_scan_job", lambda: "job")
     monkeypatch.setattr(jobs, "release_scan_slot", lambda j: None)
-    monkeypatch.setattr(scanner, "_execute_smallcap_scan", lambda *a, **k: dict(signals=[], market_regime="BULL", stats={}))
-    monkeypatch.setattr(shadow_src, "live_vce_hits",
-                        lambda asof: dict(hits=[dict(ticker="BIG", dv20=9e7, close=50.0, atr14=2.0)], stats={}))
-    monkeypatch.setattr(shadow_runner, "_small_cap_regime", lambda src, asof: {"regime": "BULL"})
+    monkeypatch.setattr(scanner, "_execute_smallcap_scan",
+                        lambda *a, **k: dict(signals=legacy or [], market_regime="BULL", stats={}))
+    monkeypatch.setattr(shadow_src, "grw_hits", lambda asof: dict(hits=hits, stats=dict(candidates=len(hits))))
+    monkeypatch.setattr(shadow_src, "fetch_bars", lambda *a, **k: {})
+    monkeypatch.setattr(shadow_runner, "_regime_on", lambda bars, index, day: {"regime": regime})
+    asked = []
+
+    def growth_check(ticker, day):
+        asked.append(ticker)
+        g = (growth or {}).get(ticker, dict(known=True, ok=True))
+        if isinstance(g, Exception):
+            raise g
+        return g
+    monkeypatch.setattr(shadow_src, "growth_check", growth_check)
     tracker = Mock()
-    tracker.storage.count_active_trades_for_owner.return_value = 0
-    tracker.storage.active_notional_for_owner.return_value = 0.0
-    tracker.storage.get_closed_trades.return_value = [
-        dict(strategy="H6S", user_id=None, status="STOPPED", exit_date=f"2026-11-1{i}", realized_pnl_pct=-3.0)
-        for i in range(3)]
+    tracker.storage.check_duplicate.return_value = False
+    tracker.storage.active_notional_for_owner.side_effect = (
+        lambda owner, strategy=None: held if strategy == "GRW" else 0.0)
+    if isinstance(closed, Exception):
+        tracker.storage.get_closed_trades.side_effect = closed
+    else:
+        tracker.storage.get_closed_trades.return_value = closed or []
     tracker.add_trade_from_signal.side_effect = lambda sig, owner: 1
     monkeypatch.setattr(deps, "get_paper_tracker", lambda: tracker)
+    return tracker, asked
+
+
+def _grw_calls(tracker):
+    return [c.args[0] for c in tracker.add_trade_from_signal.call_args_list if c.args[0].get("strategy") == "GRW"]
+
+
+GRW_HITS = [dict(ticker="LOW", cap=2e9, close=20.0, low=19.5, dv20=5e7, key=0.2),      # dip %2.5 aşağıda
+            dict(ticker="TOP", cap=9e9, close=50.0, low=44.0, dv20=9e7, key=1.5),      # dip %12 aşağıda → stop %8
+            dict(ticker="BAD", cap=3e9, close=40.0, low=39.0, dv20=1e7, key=0.9)]
+
+
+def test_auto_scan_grw_entries_ranked_sized_by_risk_and_growth_filtered(monkeypatch):
+    """GRW ana kural: 12 aylık getiri sırası, büyüme şartı, boyut = min(%25, %1 risk ÷ stop uzaklığı)."""
+    legacy = [dict(ticker="OLD", entry_price=10.0, position_size=10)]
+    tracker, asked = _grw_env(monkeypatch, GRW_HITS, growth={"BAD": dict(known=True, ok=False)},
+                              legacy=legacy, legacy_control=True)
+    assert auto_scan._run_auto_scan_once() == "ran"
+    calls = _grw_calls(tracker)
+    assert [c["ticker"] for c in calls] == ["TOP", "LOW"] and asked == ["TOP", "BAD", "LOW"]
+    top, low = calls
+    assert top["position_size"] == int(0.01 * 10000 / 0.08 / 50.0) == 25      # stop %8 → pozisyon %12.5
+    assert low["position_size"] == int(0.25 * 10000 / 20.0) == 125            # stop %2.5 → %40 olurdu, tavan %25
+    assert (top["signal_low"], top["entry_price"], top["regime"]) == (44.0, 50.0, "BULL")
+    others = [c.args[0]["ticker"] for c in tracker.add_trade_from_signal.call_args_list
+              if c.args[0].get("strategy") != "GRW"]
+    assert others == ["OLD"]                                                   # kontrol grubu ayrıca açar
+
+
+@pytest.mark.parametrize("regime", ["BEAR", "CAUTION", "UNKNOWN"])
+def test_auto_scan_grw_buys_only_in_bull_and_skips_sec(monkeypatch, regime):
+    tracker, asked = _grw_env(monkeypatch, GRW_HITS, regime=regime)
     auto_scan._run_auto_scan_once()
-    sig = tracker.add_trade_from_signal.call_args.args[0]
-    assert sig["position_size"] == int(0.05 * 10000 / 50.0) == 10          # yarım boyut
+    assert _grw_calls(tracker) == [] and asked == []                           # alım yok, SEC'e gidilmez
 
 
-
-def test_auto_scan_h6s_brake_fails_safe_to_half_size(monkeypatch):
-    """Kapanan işlemler okunamazsa girişler atlanmaz; temkinli yarım boyut."""
-    from unittest.mock import Mock
-    from swing_trader.small_cap.settings_config import SmallCapSettings
-    from swing_trader.shadow import runner as shadow_runner, sources as shadow_src
-    import api.routers.scanner as scanner
-    import api.scanner_jobs as jobs
-    import api.deps as deps
-    s = SmallCapSettings()
-    s.auto_scan.h6s_position_pct = 0.10   # sabit: bu testler kuralı ölçer, varsayılanı değil
-    s.auto_scan.legacy_control = False
-    monkeypatch.setattr("swing_trader.small_cap.settings_config.load_settings", lambda *a, **k: s)
-    monkeypatch.setattr(jobs, "create_exclusive_scan_job", lambda: "job")
-    monkeypatch.setattr(jobs, "release_scan_slot", lambda j: None)
-    monkeypatch.setattr(scanner, "_execute_smallcap_scan", lambda *a, **k: dict(signals=[], market_regime="BULL", stats={}))
-    monkeypatch.setattr(shadow_src, "live_vce_hits",
-                        lambda asof: dict(hits=[dict(ticker="BIG", dv20=9e7, close=50.0, atr14=2.0)], stats={}))
-    monkeypatch.setattr(shadow_runner, "_small_cap_regime", lambda src, asof: {"regime": "BULL"})
-    tracker = Mock()
-    tracker.storage.count_active_trades_for_owner.return_value = 0
-    tracker.storage.active_notional_for_owner.return_value = 0.0
-    tracker.storage.get_closed_trades.side_effect = RuntimeError("db down")
-    tracker.add_trade_from_signal.side_effect = lambda sig, owner: 1
-    monkeypatch.setattr(deps, "get_paper_tracker", lambda: tracker)
+def test_auto_scan_grw_cash_limit_and_busy_ticker(monkeypatch):
+    tracker, asked = _grw_env(monkeypatch, GRW_HITS, held=8000.0)              # hesapta 8.000$ zaten bağlı
+    tracker.storage.check_duplicate.side_effect = lambda t, user_id=None, strategy=None: t == "BAD"
     auto_scan._run_auto_scan_once()
-    assert tracker.add_trade_from_signal.call_args.args[0]["position_size"] == 10
+    assert [c["ticker"] for c in _grw_calls(tracker)] == ["TOP"]               # 8.000 + 1.250 sığar; LOW (2.500) sığmaz
+    assert asked == ["TOP", "LOW"]                                             # elde olan hisse için SEC'e gidilmez
 
 
-def test_auto_scan_h6s_sizes_from_compounded_equity(monkeypatch):
-    """Ek M: pozisyon boyutu ve nakit sınırı başlangıç + kapanmış net sonuçtan (gerçek hesap gibi)."""
-    from unittest.mock import Mock
-    from swing_trader.small_cap.settings_config import SmallCapSettings
-    from swing_trader.shadow import runner as shadow_runner, sources as shadow_src
-    import api.routers.scanner as scanner
-    import api.scanner_jobs as jobs
-    import api.deps as deps
-    s = SmallCapSettings()
-    s.auto_scan.h6s_position_pct = 0.10   # sabit: bu testler kuralı ölçer, varsayılanı değil
-    s.auto_scan.legacy_control = False
-    monkeypatch.setattr("swing_trader.small_cap.settings_config.load_settings", lambda *a, **k: s)
-    monkeypatch.setattr(jobs, "create_exclusive_scan_job", lambda: "job")
-    monkeypatch.setattr(jobs, "release_scan_slot", lambda j: None)
-    monkeypatch.setattr(scanner, "_execute_smallcap_scan", lambda *a, **k: dict(signals=[], market_regime="BULL", stats={}))
-    monkeypatch.setattr(shadow_src, "live_vce_hits",
-                        lambda asof: dict(hits=[dict(ticker="BIG", dv20=9e7, close=50.0, atr14=2.0)], stats={}))
-    monkeypatch.setattr(shadow_runner, "_small_cap_regime", lambda src, asof: {"regime": "BULL"})
-    tracker = Mock()
-    tracker.storage.count_active_trades_for_owner.return_value = 0
-    tracker.storage.active_notional_for_owner.return_value = 0.0
-    tracker.storage.get_closed_trades.return_value = [                     # +2.000$ brüt kazanç
-        dict(strategy="H6S", user_id=None, status="TIMEOUT", exit_date="2026-11-10",
-             entry_price=10.0, position_size=1000, realized_pnl=2000.0, realized_pnl_pct=20.0)]
-    tracker.add_trade_from_signal.side_effect = lambda sig, owner: 1
-    monkeypatch.setattr(deps, "get_paper_tracker", lambda: tracker)
+def test_auto_scan_grw_halves_risk_after_two_losses(monkeypatch):
+    losers = [dict(strategy="GRW", user_id=None, status="STOPPED", exit_date=f"2026-11-1{i}", realized_pnl_pct=-3.0,
+                   entry_price=10.0, position_size=10, realized_pnl=-3.0) for i in range(2)]
+    tracker, _ = _grw_env(monkeypatch, GRW_HITS[1:2], closed=losers)
     auto_scan._run_auto_scan_once()
-    equity = 10_000 + 2000 - 10_000 * 0.20 / 100 - 2 * 1.5                # spread 10 bps/kenar + 2 emir ücreti
-    assert tracker.add_trade_from_signal.call_args.args[0]["position_size"] == int(0.10 * equity / 50.0) == 23
+    equity = 10_000 + 2 * (-3.0 - 100 * 0.20 / 100 - 2 * 1.5)                  # iki zarar + spread + emir ücretleri
+    assert _grw_calls(tracker)[0]["position_size"] == int(0.005 * equity / 0.08 / 50.0) == 12
+
+
+def test_auto_scan_grw_fails_safe_to_half_risk_when_history_unreadable(monkeypatch):
+    tracker, _ = _grw_env(monkeypatch, GRW_HITS[1:2], closed=RuntimeError("db down"))
+    auto_scan._run_auto_scan_once()
+    assert _grw_calls(tracker)[0]["position_size"] == int(0.005 * 10000 / 0.08 / 50.0) == 12
+
+
+def test_auto_scan_grw_defers_when_sec_is_unreachable(monkeypatch):
+    """SEC'e ulaşılamazsa "büyüme verisi yok" denmez; kalan adaylar sonraki koşuya bırakılır."""
+    tracker, asked = _grw_env(monkeypatch, GRW_HITS, growth={"BAD": RuntimeError("sec 503")})
+    auto_scan._run_auto_scan_once()
+    assert [c["ticker"] for c in _grw_calls(tracker)] == ["TOP"] and asked == ["TOP", "BAD"]

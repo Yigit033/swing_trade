@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import List, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ScoringVolumeTier(BaseModel):
@@ -255,18 +255,26 @@ class AutoScanSettings(BaseModel):
     min_quality: int = Field(default=60, ge=0, le=100)
     top_n: int = Field(default=15, ge=1, le=100)
     portfolio_value: float = Field(default=10_000.0, gt=0)
-    # 2026-11-22 (kullanıcı kararı, Lab v3 Ek J2): otomatik girişin ana stratejisi H6S "Profesyonel
-    # VCE" — canlı evren + sert filtreler + bilanço + VCE, küçük hisse (IWM) piyasa freni, pozisyon
-    # başına hesabın h6s_position_pct'si, 2.5×ATR felaket stop'u, 8. seans kapanışında çıkış. "LEGACY" eski kurallara
-    # tek adımda döner.
-    strategy: Literal["H6S", "LEGACY"] = "H6S"
+    # 2026-11-28 (kullanıcı kararı, Lab v3 Ek X): otomatik girişin ana stratejisi GRW "büyüme + kırılım"
+    # (Ek W'nin donmuş kuralı): fiyat ≥ 10 $, piyasa değeri ≥ 1 mlr $ likit hisselerde VCE kırılımı, yalnız
+    # satışı yıllık ≥ %25 ve net kârı artmış şirketlerde ve SPY rejimi BULL iken; stop = kırılım gününün dibi
+    # (en çok %8), kapanış 50 günlük ortalamanın altına inince ertesi açılışta satış, %1 risk / en çok %25.
+    # Kuralın ayarı yok (shadow.rules.PARAMS_GRW). "LEGACY" eski kurallara tek adımda döner.
+    # H6S (2026-11-22'den beri ana kuraldı) iki sınav döneminde de kaldı (Ek R: −56% / −30%) ve canlıdan
+    # alındı; saklı ayar yamasındaki "H6S" değeri aşağıdaki doğrulayıcıyla GRW'ye çevrilir. H6S gölge ileri
+    # testte ölçülmeye devam eder; açık H6S pozisyonları kendi kuralıyla kapanır.
+    strategy: Literal["GRW", "LEGACY"] = "GRW"
+
+    @field_validator("strategy", mode="before")
+    @classmethod
+    def _retired_h6s(cls, v):
+        return "GRW" if isinstance(v, str) and v.upper() == "H6S" else v
+
     # Eski kurallar ayrı bir sanal hesapla KONTROL GRUBU olarak açmaya devam eder (kıyas için).
     legacy_control: bool = True
-    # 2026-11-22 kullanıcı kararı (Lab v3 Ek O2, ön kayıt şartı geçmedi — etiketli sapma): %10 → %15.
-    # Geçmiş test (50 bps + 1.5$): +35.7 → +66.2%, iki yarıda da daha çok; max düşüş −31.8 → −37.9%.
+    # KULLANILMIYOR (2026-11-28: H6S canlıdan alındı). İki alan yalnız saklı ayar yamaları doğrulansın diye
+    # duruyor (extra="forbid"); hiçbir kod okumaz. GRW boyutu kuralın parçasıdır (%1 risk), ayarı yoktur.
     h6s_position_pct: float = Field(default=0.15, gt=0, le=0.5)
-    # Ek L2 (ölçüldü, eklendi): son 3 kapanmış H6S işleminin hepsi zararlıysa yeni pozisyon yarım boyut.
-    # Sektör sınırı (Ek L1) ölçüldü ve EKLENMEDİ (sektör momentumunu kesiyor: portföy +64.5 → −6.8%).
     h6s_loss_streak_brake: bool = True
 
 

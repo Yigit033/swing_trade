@@ -4,6 +4,7 @@ import { closeTrade, deleteTrade, updateTrade } from "@/lib/api";
 import type { Trade } from "@/lib/api";
 import { useTrades, useTradesLastUpdate, useUpdatePrices, useInvalidateQueries } from "@/hooks/useApi";
 import { RefreshCw, X, CheckSquare, TrendingUp, TrendingDown, Edit2, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { StrategyBadge } from "@/components/StrategyBadge";
 
 type FilterStatus = "ALL" | "OPEN" | "CLOSED" | "PENDING";
 
@@ -591,7 +592,7 @@ export default function TradesPage() {
                                             >
                                                 <td style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>{rowNum}</td>
                                                 <td>
-                                                    <strong style={{ color: "var(--accent)" }}>{t.ticker}</strong>{String(t.strategy || "").toUpperCase() === "H6S" ? <span className="badge badge-green" style={{ marginLeft: 6, fontSize: "0.65rem" }} title="H6S Profesyonel VCE (ana strateji)">H6S</span> : <span className="badge badge-yellow" style={{ marginLeft: 6, fontSize: "0.65rem" }} title="Eski kurallar (kontrol grubu / manuel)">Eski</span>}
+                                                    <strong style={{ color: "var(--accent)" }}>{t.ticker}</strong><StrategyBadge strategy={t.strategy} />
                                                     {t.partial_exit_price != null && t.partial_exit_price > 0 && (
                                                         <div style={{ fontSize: "0.62rem", color: "var(--green)", fontWeight: 600, marginTop: 1 }}>
                                                             T1 @${t.partial_exit_price.toFixed(2)}
