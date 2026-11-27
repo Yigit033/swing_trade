@@ -168,6 +168,36 @@ export default function DashboardPage() {
             ) : null}
           </div>
           ) : null}
+          {(() => {
+            const e = regime.entries;
+            if (!e) return null;
+            const market = e.index === "IWM" ? "Küçük hisse piyasası (IWM)" : "Piyasa (SPY)";
+            const rule = e.strategy === "H6S" ? "ana strateji (H6S)" : "strateji";
+            const last = [...openTrades, ...recentClosed]
+              .map((t: Trade) => (t.entry_date || "").slice(0, 10)).filter(Boolean).sort().pop();
+            const lastTxt = last ? ` Son alım: ${last}.` : "";
+            let color = "var(--text-muted)";
+            let text: string | null = null;
+            if (e.auto_scan_enabled === false) {
+              color = "var(--red)";
+              text = "Yeni alım yok: otomatik tarama Ayarlar'da kapalı." + lastTxt;
+            } else if (e.status === "BLOCKED") {
+              color = "var(--red)";
+              text = `Yeni alım yok: ${market} düşüş (BEAR) durumunda, ${rule} bu durumda alım yapmaz.${lastTxt} `
+                + "Tarama ve açık pozisyonların takibi her gece sürüyor; piyasa düzelince alımlar kendiliğinden başlar.";
+            } else if (e.status === "LIMITED") {
+              color = "var(--yellow)";
+              text = `Sınırlı alım: ${market} temkinli (CAUTION) durumda, aynı anda en çok ${e.max_open ?? 1} açık pozisyon.${lastTxt}`;
+            } else if (e.status === "UNKNOWN") {
+              text = "Alım durumu okunamadı (piyasa verisi henüz gelmedi); sıradaki taramada belli olur.";
+            }
+            if (!text) return null;
+            return (
+              <div style={{ flexBasis: "100%", fontSize: "0.8rem", color, lineHeight: 1.5 }}>
+                {text}
+              </div>
+            );
+          })()}
         </div>
         );
       })()}

@@ -374,6 +374,16 @@ export interface RegimeData {
     fallback_reason?: string;
     /** True when sampled fresh from SPY/^VIX (same path as scanner). */
     live?: boolean;
+    /** Otomatik alım şu an açık mı (canlı auto-scan kurallarıyla aynı). */
+    entries?: {
+        strategy: string;                  // "H6S" | "LEGACY"
+        index: string;                     // freni belirleyen endeks: "IWM" | "SPY"
+        regime: string | null;
+        status: "BLOCKED" | "LIMITED" | "OPEN" | "UNKNOWN";
+        max_open?: number;
+        asof?: string;
+        auto_scan_enabled?: boolean;
+    } | null;
 }
 
 export const getCurrentRegime = (): Promise<RegimeData> =>
