@@ -1139,3 +1139,12 @@ olarak yazılır ve değerlendirmeye girmez. Okuma eksikliği koşu sağlığın
 
 Yerel deneme (2026-11-28, gerçek SEC verisi, hüküm değil): LWLG (çeyrek satışı 37.500 $, zarar büyüyor) → ATLA
 ("satış tabanı anlamsız, nakit yakıyor"); WDC (satış 4.38 milyar $, +%55.5, kâr artıyor) → AL.
+
+## Ek Z — bilanço öncesi alım yapmama kuralı: KALDI (2026-11-28)
+
+Ön kayıt Ek Z (SHA256 `a81d3a09…cfb59f`), veri indirilmeden yazıldı. Kural: GRW sinyali, bilanço tepki seansı
+pozisyonun 2.–10. seansına düşüyorsa alınmaz (SEC 8-K madde 2.02 zaman damgası, UTC → ET). Sonuç: A **+36.4 → +12.7%**,
+B +64.0 → +64.8% (SPY +102 / +99); elenen 48 işlemin ort. net getirisi +4.91, kalanlarınki +1.55 — kural kazananları
+eledi. Bilanço gününü taşıyan 93 işlemin yalnız 7'si boşlukla stopun altında açıldı. Takvim kapsaması %97–99.
+Kod `lab/earnings_z.py`, saf kurallar `lab/ern_rules.py`, test `swing_trader/tests/test_lab_ern.py`. Canlı değişmez;
+varyant denenmez.

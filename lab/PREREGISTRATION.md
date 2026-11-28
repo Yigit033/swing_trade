@@ -1098,3 +1098,84 @@ en geç 2028-06-30'da, o güne kadar ne varsa (yeterlilik sağlanmadıysa yalnı
 **Bilinen sınırlar.** Örneklem küçük (lab'da yılda ~45 işlem; piyasa BULL değilken hiç yok). Haber başlıkları
 yfinance'ın döndürdüğüyle sınırlı. Model sağlayıcısı sunucu ayarına bağlıdır; sağlayıcı ya da model değişirse kayıtlar
 ayrı tutulur ve hüküm yalnız ilk (en çok kayıtlı) model için verilir.
+
+# Ek Z — ERN: GRW'de bilanço açıklamasından hemen önce alım yapmama kuralı (iki dönem)
+
+**Yazıldığı an:** 2026-11-28, kullanıcı kararıyla ("bilanço tarihi kuralını test edelim"), bilanço tarihi verisi
+indirilmeden ve hiçbir sonuç görülmeden.
+
+**Neden.** Profesyonel büyüme hissesi traderları bilanço açıklamasından hemen önce yeni pozisyon açmaz: açıklama günü
+fiyat stopun çok altına boşlukla açılabilir (stop o gün korumaz). GRW bilanço tarihine hiç bakmıyor. Bu, seçimi değil
+riski yöneten bir kural.
+
+**Kural (tek, sabit).** GRW (Ek W'nin donmuş kuralı; lab'da Ek V "lider şartsız" sinyali, `lab/pro_v.py`) aynen; tek
+ek: sinyal günü t, giriş günü e = t+1 açılışı. Hissenin bir bilanço açıklamasının **tepki seansı** R, girişten sonraki
+ilk 9 seans içindeyse (e < R ≤ e + 9 seans, yani pozisyonun 2.–10. seansı) sinyal **alınmaz**. R = e ise (açıklama
+sinyal günü kapanıştan sonra ya da giriş sabahı açılıştan önce yapıldı) tepki giriş açılışında zaten fiyattadır →
+alınır. Elenen sinyal yerine başka bir şey yapılmaz (nakit kalır; o gün başka GRW sinyali varsa portföy kuralı onu
+olağan şekilde alabilir; hisse başına tek pozisyon kuralı elenmiş sinyali "açık pozisyon" saymaz).
+
+**Bilanço tarihi verisi.** SEC EDGAR submissions (`data.sec.gov/submissions/CIK….json` + eski dosyaları): form 8-K
+(ve 8-K/A hariç) içinde madde 2.02 ("Results of Operations") geçen her dosyalama bir bilanço açıklamasıdır. Zaman =
+`acceptanceDateTime` (UTC; 2026-11-28'de AAPL ile doğrulandı: 20:30Z yaz / 21:30Z kış = 16:30 ET) → New York saatine
+çevrilir. Tepki seansı R: açıklama 09:30 ET'den önce ve o gün işlem günüyse o gün; aksi halde sonraki ilk işlem günü.
+
+**Bilinen ileriye bakış.** Lab, gelecekteki açıklama gününü sinyal günü biliyormuş gibi kullanır. Gerçekte şirketler
+tarihi genelde 2–4 hafta önceden duyurur ve çeyrek takvimi düzenlidir; 10 seanslık pencerede tarih çoğunlukla bilinir.
+Canlıda tarih Yahoo/Finviz takviminden okunur; takvim yoksa kural "bilinmiyor → al" (fail-open) çalışır. Bu sınır
+sonucu kural lehine çevirebilir; hüküm buna rağmen aşağıdaki şartlarla verilir.
+
+**Maliyet ve portföy.** Ek V ile aynı: 20 bps gidiş-dönüş + 1.5 $/emir, 10.000 $, işlem başına %1 risk (2 zarardan
+sonra %0.5), en çok %25 pozisyon, nakit yetmezse atla (`lab/pro_rules.portfolio_risk`). Dönemler A 2016-01-04 →
+2020-12-31, B 2021-01-04 → 2026-11-20. Kıyas: aynı koşuda yeniden üretilen GRW (kayıtlı +36.4% / +64.0% ile birebir
+olmalı; olmazsa koşu geçersiz).
+
+**Ölçütler (önceden sabit).**
+- **Z0 (veri):** GRW işlemlerinin en az %85'inde hissenin bilanço takvimi biliniyor (giriş gününün ±120 günü içinde en
+  az bir 8-K 2.02 var). Sağlanmazsa YETERSİZ VERİ.
+- **Z1 (para):** kurallı portföyün toplam getirisi GRW'den yüksek, **iki dönemde de**.
+- **Z2 (risk):** kurallı portföyün en büyük düşüşü GRW'ninkinden 3 puandan fazla kötü değil, iki dönemde de.
+- **Z3 (tutarlılık):** iki dönem birlikte, elenen işlemlerin (GRW'de alınmış olanlar) işlem başı ortalama net getirisi,
+  elenmeyenlerinkinden düşük.
+- **Hüküm:** Z0 ∧ Z1 ∧ Z2 ∧ Z3 → GEÇTİ. Z0 ✘ → YETERSİZ VERİ. Diğer → KALDI.
+
+**Önceden sabit sonuç.** GEÇTİ → kural canlı sanal ürünün ana kuralına (GRW) eklenmeye aday olur, kullanıcı onayıyla
+eklenir; gölgedeki GRW kaydı (Ek W, kilitli) değişmez, kurallı sürüm gölgede ayrı adla yan yana izlenir. KALDI →
+canlıya eklenmez; pencere uzunluğu (5, 15, 20 seans) ya da "bilanço öncesi sat" gibi varyantlar bu veride denenmez
+(sonradan seçme).
+
+**Betimleyici (hükmü değiştirmez).** Elenen sinyal sayısı ve oranı; GRW'de bilanço tepki seansını içinde taşıyan
+işlemlerin tepki günü getirisi dağılımı (boşlukla stopun altında açılış sayısı).
+
+**Bilinen sınırlar.** GRW bu verinin içinden sonradan seçildi (Ek V betimleyici) → kirlenmiş sınav; geçse bile kanıt
+değil, aday. Evren 2026'da listede olanlar (hayatta kalan yanılgısı). 8-K 2.02 kullanmayan ihraççılar (ör. 6-K
+dosyalayan yabancılar) takvimsiz sayılır.
+
+# Ek Z sonucu (2026-11-28, SONUÇ GÖRÜLDÜKTEN SONRA yazıldı)
+
+**Hüküm: KALDI** (Z1 dönem A'da sağlanmadı; Z3 sağlanmadı). Ön kayıt bölüm SHA256
+`a81d3a0943530fbb0300c98796190f9c2ffb960a90d76aadc31ba40137cfb59f`; koşu `python lab/earnings_z.py run`, çıktı
+`output/lab_liq/z_result.json`, takvimler `output/lab_liq/earn8k/` (475 hisse, hepsi CIK eşleşti). GRW birebir
+yeniden üretildi (+36.4 / +64.0).
+
+| | A 2016–2020 | B 2021–2026 |
+|---|---|---|
+| GRW | +36.4% (düşüş −21.4) | +64.0% (düşüş −22.8) |
+| GRW + bilanço kuralı | **+12.7%** (düşüş −23.5) | +64.8% (düşüş −21.8) |
+| SPY (IWM) | +102.0% (+86.4%) | +99.2% (+40.1%) |
+| Takvim kapsaması | %98.6 | %97.0 |
+| Elenen (GRW'nin aldığı) / alınan | 21 / 138 | 27 / 267 |
+| Elenenlerin ort. net / kalanlar | +2.40 / +3.31 | **+6.87** / +0.69 |
+| Bilanço tepki gününü içinde taşıyan işlem | 38 | 55 |
+| Tepki günü açılış boşluğu medyan / alt %10 | +0.6% / −13.0% | −1.1% / −10.5% |
+| Boşlukla stopun altında açılış | 3 | 4 |
+
+İki dönem birlikte elenen n = 48, ort. net +4.91 (kalanlar +1.55). Z0 ✔, Z1 ✘, Z2 ✔, Z3 ✘. Duyarlılık (10 / 50 bps):
+A +15.2 / +7.0; B +70.8 / +47.9.
+
+**Okuma.** Kural korktuğu riski değil, kazananları eledi: bilanço öncesi gelen kırılımlar ortalamada DAHA ÇOK kazandırdı
+(beklenti yükselişi). Bilanço gününü taşıyan 93 işlemin yalnız 7'si boşlukla stopun altında açıldı; tepki günü
+medyanı ≈ 0. Ön kayıttaki ileriye bakış sınırı kural lehineydi; kural yine de kaybetti.
+
+**Sonuç (önceden sabit kural uygulandı).** Canlıya eklenmez; pencere uzunluğu ya da "bilanço öncesi sat" varyantları
+bu veride denenmez. GRW bilanço tarihine bakmamaya devam eder.
