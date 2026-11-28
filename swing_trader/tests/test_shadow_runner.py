@@ -415,3 +415,61 @@ def test_shadow_api_exposes_health_and_forwards_if_needed(tmp_path, monkeypatch)
     assert c.post("/api/shadow/daily-run?if_needed=true", headers={"X-Cron-Secret": "s3"}).status_code == 200
     assert c.post("/api/shadow/daily-run", headers={"X-Cron-Secret": "s3"}).status_code == 200
     assert seen == [dict(if_needed=True), dict(if_needed=False)]
+
+
+# ── EDGAR tatili + yedek koşunun ilk karar zamanını ezmemesi (2026-11-28) ──────────────────────
+
+def test_h4_skips_sec_holiday_instead_of_reporting_backlog(tmp_path):
+    """4 Temmuz (federal tatil, borsa da kapalı): indeks hiç gelmez → beklenmez, BACKLOG yok."""
+    L, src = ShadowLedger(str(tmp_path / "s.db")), FakeSrc()
+    fetched = []
+    real = src.fetch_form4_filings
+
+    def fetch(day):
+        fetched.append(day)
+        if day == date(2025, 7, 4):
+            raise src.SecIndexMissing(str(day))
+        return real(day)
+    src.fetch_form4_filings = fetch
+    runner.run_shadow_daily(now=datetime(2025, 7, 3, 7, 0, tzinfo=NY), ledger=L, src=src)   # gözlem başlangıcı
+    out = runner.run_shadow_daily(now=datetime(2025, 7, 7, 7, 0, tzinfo=NY), ledger=L, src=src)
+    assert out["H4"]["pending_days"] == ["2025-07-03"] and date(2025, 7, 4) not in fetched
+    h = runner.run_health(L, datetime(2025, 7, 7, 7, 5, tzinfo=NY))
+    assert "H4: BACKLOG" not in h["issues"] and h["complete"] is True and h["on_time"] is True
+
+
+def test_sec_closed_matches_federal_not_market_holidays():
+    assert runner._sec_closed(date(2026, 11, 26))          # Şükran Günü: borsa + EDGAR kapalı
+    assert runner._sec_closed(date(2026, 11, 11))          # Gaziler Günü: borsa açık, EDGAR kapalı
+    assert not runner._sec_closed(date(2026, 4, 3))        # Kutsal Cuma: borsa kapalı, EDGAR açık
+    assert not runner._sec_closed(date(2026, 11, 27))
+
+
+def test_backup_rerun_keeps_first_decision_time(tmp_path):
+    """Açılıştan önce koşulmuş seans, açılıştan sonraki yedek koşuyla 'GEÇ' görünmemeli."""
+    L, src = ShadowLedger(str(tmp_path / "s.db")), FakeSrc()
+    first = runner.run_shadow_daily(now=_at(16, 7), ledger=L, src=src)
+    lr = L.get_meta("last_run")
+    lr.update(H4=dict(pending_days=["2025-06-12", "2025-06-13"], processed=[dict(day="2025-06-12")]))
+    L.set_meta("last_run", lr)
+    again = runner.run_shadow_daily(now=_at(16, 10), ledger=L, src=src, if_needed=True)
+    assert "skipped" not in again and again["first_decided_at"] == first["decided_at"] != again["decided_at"]
+    h = runner.run_health(L, _at(16, 10, 5))
+    assert h["complete"] is True and h["on_time"] is True and h["first_decided_at"] == first["decided_at"]
+    # ertesi seans yeni bir ilk karar zamanı başlatır
+    nxt = runner.run_shadow_daily(now=_at(17, 7), ledger=L, src=src)
+    assert nxt["first_decided_at"] == nxt["decided_at"]
+
+
+def test_backup_rerun_that_writes_late_decisions_is_not_on_time(tmp_path):
+    """İlk koşu evren hatasıyla H5'i atladıysa, açılıştan sonra yazılan H5 kararı seansı GEÇ yapar."""
+    L, src = ShadowLedger(str(tmp_path / "s.db")), FakeSrc()
+    ok = src.candidate_universe
+    src.candidate_universe = lambda: (_ for _ in ()).throw(RuntimeError("snapshot down"))
+    runner.run_shadow_daily(now=_at(16, 7), ledger=L, src=src)
+    assert L.trades("H5") == []
+    src.candidate_universe = ok
+    runner.run_shadow_daily(now=_at(16, 11), ledger=L, src=src, if_needed=True)
+    assert L.trades("H5")[0]["late_decision"] == 1
+    h = runner.run_health(L, _at(16, 11, 5))
+    assert h["complete"] is True and h["on_time"] is False

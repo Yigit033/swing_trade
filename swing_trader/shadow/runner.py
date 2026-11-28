@@ -60,6 +60,13 @@ def _late(decided_at: datetime, signal_day: date) -> int:
     return int(decided_at > _entry_open(signal_day))
 
 
+def _sec_closed(day: date) -> bool:
+    """EDGAR federal tatillerde (gözlenen gün dahil) dosyalama kabul etmez: o günün Form 4 indeksi
+    hiç yayımlanmaz. Bu günü beklemek yalnız sahte "H4: BACKLOG" üretir (2026-11-26 Şükran Günü)."""
+    from pandas.tseries.holiday import USFederalHolidayCalendar
+    return len(USFederalHolidayCalendar().holidays(day, day)) > 0
+
+
 def _frame(bars: Dict[str, pd.DataFrame], t: str, start: date, end: date) -> Optional[pd.DataFrame]:
     df = bars.get(t)
     if df is None or len(df) == 0:
@@ -156,7 +163,7 @@ def run_h4(ledger: ShadowLedger, src, universe: set, today_et: date, now: dateti
     done = set(ledger.get_meta("h4_processed", []) or [])
     todo, d = [], max(obs_d, today_et - timedelta(days=10))
     while d < today_et:                              # bugünün dosyalaması 22:00 ET'ye kadar sürer
-        if d.weekday() < 5 and d.isoformat() not in done:
+        if d.weekday() < 5 and d.isoformat() not in done and not _sec_closed(d):
             todo.append(d)
         d += timedelta(days=1)
     out = dict(observation_start=obs, pending_days=[x.isoformat() for x in todo], processed=[])
@@ -166,7 +173,7 @@ def run_h4(ledger: ShadowLedger, src, universe: set, today_et: date, now: dateti
         try:
             filings = src.fetch_form4_filings(F)
         except src.SecIndexMissing:
-            if (today_et - F).days > 4:              # EDGAR tatili → kalıcı olarak boş gün
+            if (today_et - F).days > 4:              # indeks 4 günde de gelmediyse kalıcı olarak boş gün
                 done.add(F.isoformat())
             continue
         errors = sum(1 for f in filings if "error" in f)
@@ -704,13 +711,18 @@ def run_health(ledger: ShadowLedger, now: Optional[datetime] = None) -> Dict:
     last = date.fromisoformat(lr["asof"]) if isinstance(lr, dict) and lr.get("asof") else None
     issues = _run_issues(lr) if last else ["NEVER_RAN"]
     on_time = None
-    if last and lr.get("decided_at"):
-        decided = datetime.fromisoformat(str(lr["decided_at"]).replace("Z", "+00:00"))
-        on_time = decided <= _entry_open(last)
+    first = (lr.get("first_decided_at") or lr.get("decided_at")) if last else None
+    if first:
+        # Zamanında = seansın ilk koşusu açılıştan önce VE o seansın hiçbir kararı geç yazılmadı.
+        # Yedek koşu (ör. eksik kalan bir adım için) sonradan geç bir karar yazdıysa GEÇ sayılır.
+        decided = datetime.fromisoformat(str(first).replace("Z", "+00:00"))
+        late = any(t.get("late_decision") and t.get("signal_date") == last.isoformat() for t in ledger.trades())
+        on_time = decided <= _entry_open(last) and not late
     return dict(
         expected_asof=expected.isoformat(),
         last_asof=last.isoformat() if last else None,
         decided_at=lr.get("decided_at") if last else None,
+        first_decided_at=first,
         next_deadline=_utc_iso(_entry_open(expected)),
         overdue_sessions=len([s for s in rules.sessions_between(last, due) if s > last]) if last else None,
         complete=bool(last == expected and not issues),
@@ -739,7 +751,11 @@ def run_shadow_daily(now: Optional[datetime] = None, ledger: Optional[ShadowLedg
     if not ledger.get_meta("live_start"):
         ledger.set_meta("live_start", asof.isoformat())
         ledger.set_meta("params_sha256", rules.PARAMS_SHA256)
-    out: Dict = dict(asof=asof.isoformat(), decided_at=_utc_iso(now), params_sha256=rules.PARAMS_SHA256)
+    prev = ledger.get_meta("last_run") or {}
+    first = (prev.get("first_decided_at") or prev.get("decided_at")) if prev.get("asof") == asof.isoformat() else None
+    # decided_at = bu koşunun zamanı; first_decided_at = bu seans için ilk koşunun zamanı (yedek koşu ezmez)
+    out: Dict = dict(asof=asof.isoformat(), decided_at=_utc_iso(now), first_decided_at=first or _utc_iso(now),
+                     params_sha256=rules.PARAMS_SHA256)
     if ledger.get_meta("params_sha256") != rules.PARAMS_SHA256:
         # Kurallar ön kayıttan saptıysa yeni sinyal ÜRETME (yalnız açıkları güncelle).
         out["error"] = "PARAMS_CHANGED_WITHOUT_PREREGISTRATION"
