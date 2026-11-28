@@ -1052,3 +1052,49 @@ yine en az kötü parça (büyüme şartsız sürüm iki dönemde de daha kötü
 ya da farklı ortalama denemek = sonradan seçme). Kullanıcı kararı (2026-11-28) gereği canlı SANAL ürünün ana kuralı
 H6S'den "büyüme + kırılım"a (GRW, Ek W'nin donmuş kuralı) geçer. GRW gerçek para adayı değildir; kanıt yalnız
 gölge ileri testten gelebilir.
+
+# Ek Y — RDG: GRW sinyallerine "okuma notu" ileri testi (geçmiş veriyle sınanmaz)
+
+**Yazıldığı an:** 2026-11-28, kullanıcı kararıyla ("okuma notlarını başlat"), hiçbir okuma notu üretilmeden ve hiçbir
+sonuç görülmeden.
+
+**Neden.** 10 işlemlik elle kontrol tablosunda (GRW lab işlemlerinden rastgele seçim) kuralın neredeyse satışı olmayan
+şirketleri de "büyüyen" saydığı görüldü (ör. LWLG: çeyrek satışı 0.16 M$, bir yıl önce 0.02 M$ → "+%595"). Soru:
+şirketi okuyan bir yorum (ne satıyor, büyüme gerçek mi, haberler, sektör), GRW'nin işlemlerini para açısından
+ayırabilir mi?
+
+**Neden geçmişte sınanmaz.** Dil modeli geçmişte ne olduğunu (hissenin sonradan ne yaptığını) biliyor olabilir;
+geriye dönük her okuma testi sonucu görmüş sayılır. Bu yüzden yalnız ileri test: not, girişin açılışından önce
+yazılır ve sonuç ondan sonra oluşur. Modelin bilgi kesim tarihi sinyal gününden öncedir.
+
+**Kapsam.** Gölge defterde GRW için PENDING yazılan her kayıt (yalnız SPY BULL iken oluşur). GRW kuralı, girişleri,
+çıkışları ve boyutu DEĞİŞMEZ; okuma yalnız kayda yazılır, canlı sanal ürünün alımlarını etkilemez.
+
+**Girdi (sabit).** Şirket adı, sektör, sanayi, iş tanımı (ilk 1.200 karakter), piyasa değeri, çalışan sayısı
+(yfinance); SEC büyüme verisi (son çeyrek sonu, satış ve bir yıl önceki satış, satış büyümesi %, net kâr/zarar ve
+bir yıl önceki); sinyal günü kapanışı, kırılım günü dibi, 12 aylık getiri; yayım zamanı okuma anından önce olan en
+çok 10 haber başlığı. Model internete erişmez; yalnız bu kartı ve kendi bilgisini kullanır.
+
+**Model ve talimat.** Canlı sunucunun dil modeli istemcisi (sağlayıcı ve model adı her kayda yazılır), sıcaklık 0.
+Talimat metni `swing_trader/shadow/reading.py` içinde sabittir; SHA256'sı (`READ_PROMPT_SHA256`) her kayda yazılır.
+Talimat ya da girdi listesi değişirse bu ek kapanır ve yeni ek yazılır.
+
+**Çıktı.** JSON: `verdict` ∈ {AL, ATLA}, `reasons` (en çok 3 kısa madde), `red_flags` (en çok 3). Model yoksa,
+yanıt ayrıştırılamazsa ya da hata olursa okuma "yok" sayılır (nedeni kayda yazılır) ve değerlendirmeye girmez.
+
+**Zaman.** Okuma, girişin açılışından (09:30 ET) önce yazılmalıdır; sonra yazılan okuma `late` işaretlenir ve
+değerlendirmeye girmez. Okunamayan kayıt sonraki koşularda yeniden denenir. Okuma eksikliği koşu sağlığını
+"eksik" yapmaz (yedek tetikleyiciler bunun için döngüye girmez).
+
+**Değerlendirme.** İlk kez, zamanında okunmuş ve kapanmış GRW işlemi ≥ 40 VE her grupta (AL, ATLA) ≥ 10 olunca;
+en geç 2028-06-30'da, o güne kadar ne varsa (yeterlilik sağlanmadıysa yalnız betimleyici).
+- **Y1:** AL grubunun işlem başı ortalama net getirisi > ATLA grubunun.
+- **Y2:** ATLA grubunun işlem başı ortalama net getirisi < 0 (okumanın elediği işlemler gerçekten para kaybettirdi).
+- **Hüküm:** Y1 ∧ Y2 → GEÇTİ: okumanın canlı sanal ürüne süzgeç olarak eklenmesi kullanıcıya önerilir (kanıt değil
+  aday; örneklem küçük). Aksi → KALDI: okuma canlıya eklenmez; talimat ya da model değiştirilip yeniden denenmez
+  (sonradan seçme), yeni bir okuma fikri ancak yeni ekle ve farklı türden olursa denenir.
+- ATLA grubu 60 kapanmış işlemde de 10'a ulaşmazsa: "okuma ayırt etmiyor" → KALDI.
+
+**Bilinen sınırlar.** Örneklem küçük (lab'da yılda ~45 işlem; piyasa BULL değilken hiç yok). Haber başlıkları
+yfinance'ın döndürdüğüyle sınırlı. Model sağlayıcısı sunucu ayarına bağlıdır; sağlayıcı ya da model değişirse kayıtlar
+ayrı tutulur ve hüküm yalnız ilk (en çok kayıtlı) model için verilir.

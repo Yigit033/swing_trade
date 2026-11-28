@@ -1122,3 +1122,20 @@ açılış fiyatıyla boyutlar); (2) pozisyon takibi temettü düzeltmesiz fiyat
 düzeltilmiş fiyat her temettüde geçmiş barları değiştirir); (3) hesap = başlangıç + kapanmış GRW işlemlerinin net
 sonucu (açık pozisyonların kârı sayılmaz). Parite: canlı çıkış motoru 60 rastgele fiyat yolunda gölge kuralı
 (`rules.grw_plan`) ile aynı çıkış günü, nedeni ve fiyatını verir (`tests/test_trading_correctness.py`).
+
+## Ek Y — GRW sinyallerine okuma notu (ileri test, 2026-11-28)
+
+Ön kayıt `lab/PREREGISTRATION.md` Ek Y (SHA256 `738bcea1f0a6e6e7eb31e0e32f5471827fb3570ef0016ecd312ba328b0e219b8`),
+okuma notu üretilmeden yazıldı. Gölge defterde PENDING yazılan her GRW kaydına, girişin açılışından önce dil modeli
+bir şirket kartı (iş tanımı, sektör, SEC satış ve net kâr/zarar, fiyat, en çok 10 haber başlığı) okuyup AL ya da ATLA
+yazar. GRW'nin girişi, çıkışı ve boyutu değişmez; not yalnız `details.reading`'e yazılır. Geçmiş veriyle sınanmaz
+(model geçmişi biliyor olabilir). Değerlendirme: zamanında okunmuş ≥ 40 kapanmış işlem ve her grupta ≥ 10; Y1 AL
+ortalaması > ATLA ortalaması, Y2 ATLA ortalaması < 0.
+
+Kod: `swing_trader/shadow/reading.py` (sabit talimat, `READ_PROMPT_SHA256` testte sabitlenmiş), `runner.run_grw_reading`,
+`sources.company_profile` / `read_signal`, rapor `report.reading`, Gölge sayfası "Okuma notu" kartı ve işlem satırı.
+Model, sunucunun dil modeli istemcisi (`LLMClient`, sağlayıcı ve model kayda yazılır); anahtar yoksa not `NO_LLM`
+olarak yazılır ve değerlendirmeye girmez. Okuma eksikliği koşu sağlığını bozmaz.
+
+Yerel deneme (2026-11-28, gerçek SEC verisi, hüküm değil): LWLG (çeyrek satışı 37.500 $, zarar büyüyor) → ATLA
+("satış tabanı anlamsız, nakit yakıyor"); WDC (satış 4.38 milyar $, +%55.5, kâr artıyor) → AL.

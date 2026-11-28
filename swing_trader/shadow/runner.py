@@ -28,6 +28,7 @@ from ..utils.market_calendar import (
 )
 from . import rules
 from .ledger import ShadowLedger
+from .reading import reading_report
 from .report import champion_report, strategy_report
 
 logger = logging.getLogger(__name__)
@@ -499,6 +500,35 @@ def run_grw(ledger: ShadowLedger, src, asof: date, now: datetime) -> Dict:
     return dict(hits=len(hits), regime=regime, added=added, **stats, **counts)
 
 
+def run_grw_reading(ledger: ShadowLedger, src, asof: date, now: datetime, deadline: float = None) -> Optional[Dict]:
+    """Ek Y: bu seansın PENDING GRW kayıtlarına okuma notu (AL / ATLA). Kuralı DEĞİŞTİRMEZ, yalnız kayda yazar.
+
+    Okunamayan kayıt sonraki koşuda yeniden denenir; açılıştan sonra yazılan okuma ``late`` (değerlendirmeye girmez).
+    """
+    fn = getattr(src, "read_signal", None)
+    if fn is None:
+        return None
+    todo = [t for t in ledger.trades("GRW", statuses=("PENDING",)) if t["signal_date"] == asof.isoformat()
+            and ((t.get("details") or {}).get("reading") or {}).get("status") != "OK"]
+    stats: Dict = dict(todo=len(todo), ok=0)
+    for t in todo:
+        if deadline and _time.monotonic() > deadline:
+            stats["deadline"] = True
+            break
+        det = dict(t.get("details") or {})
+        try:
+            r = dict(fn(t["ticker"], asof, det, now))
+        except Exception as e:
+            logger.warning("GRW reading failed for %s: %s", t["ticker"], e)
+            r = dict(status="ERROR", error=str(e)[:200])
+        r.update(read_at=_utc_iso(now), late=_late(now, asof))
+        det["reading"] = r
+        ledger.update_trade(t["id"], {"details": det})
+        k = "ok" if r.get("status") == "OK" else str(r.get("status") or "ERROR")
+        stats[k] = stats.get(k, 0) + 1
+    return stats
+
+
 def _index_ret(frame: Optional[pd.DataFrame], entry: date, exit_: date, exit_field: str = "Close") -> Optional[float]:
     """Endeksin giriş açılışından çıkış gününün ``exit_field`` fiyatına getirisi (%)."""
     if frame is None:
@@ -657,7 +687,7 @@ def build_report(ledger: ShadowLedger, src, asof: date) -> Dict:
     return dict(asof=asof.isoformat(), live_start=live_start.isoformat(),
                 params_sha256=rules.PARAMS_SHA256, params_h6_sha256=rules.PARAMS_H6_SHA256,
                 params_mom_sha256=rules.PARAMS_MOM_SHA256, params_grw_sha256=rules.PARAMS_GRW_SHA256,
-                strategies=strategies, champion=champion)
+                strategies=strategies, champion=champion, reading=reading_report(trades))
 
 
 def _buy_hold(src, ticker: str, start: date, asof: date) -> Optional[float]:
@@ -803,6 +833,11 @@ def run_shadow_daily(now: Optional[datetime] = None, ledger: Optional[ShadowLedg
     except Exception as e:
         logger.exception("Shadow GRW failed")
         out["GRW"] = dict(error=str(e))
+    try:                                  # Ek Y: okuma notu (yalnız kayıt; sağlık kontrolüne girmez)
+        out["GRW_READ"] = run_grw_reading(ledger, src, asof, now, deadline=deadline)
+    except Exception as e:
+        logger.exception("Shadow GRW reading failed")
+        out["GRW_READ"] = dict(error=str(e))
     try:
         upd = update_trades(ledger, src, asof)
         upd["mom"] = update_mom(ledger, src, asof)

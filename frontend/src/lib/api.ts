@@ -749,6 +749,30 @@ export type ShadowTrade = {
     mark_date: string | null;
     late_decision: number | null;
     warmup: number | null;
+    /** Ek Y: GRW kaydına yazılan okuma notu (yalnız kayıt; GRW'nin kararını değiştirmez) */
+    reading?: ShadowReading | null;
+};
+
+export type ShadowReading = {
+    status: "OK" | "NO_LLM" | "PARSE_ERROR" | "ERROR" | string;
+    verdict?: "AL" | "ATLA";
+    reasons?: string[];
+    red_flags?: string[];
+    late?: number;                      // 1 = açılıştan sonra yazıldı → değerlendirmeye girmez
+    read_at?: string;
+    provider?: string;
+    model?: string;
+    error?: string;
+};
+
+/** Ek Y değerlendirmesi: okumanın AL dedikleri ile ATLA dedikleri (yalnız zamanında okunmuş GRW işlemleri). */
+export type ShadowReadingReport = {
+    groups: Record<"AL" | "ATLA", { n: number; closed: number; mean_net: number | null }>;
+    read: number; late: number; missing: number; closed: number;
+    need_closed: number; need_group: number;
+    Y1: boolean | null; Y2: boolean | null;
+    status: "TOPLANIYOR" | "GEÇTİ" | "KALDI" | string;
+    deadline: string;
 };
 
 // Aynı dönemde canlı ürünün paper işlemleri (H6 ile aynı 50 bps maliyet) — Ek F kıyası
@@ -775,7 +799,7 @@ export type ShadowHealth = {
 export type ShadowData = {
     report: { asof: string; live_start: string; params_sha256: string; params_h6_sha256?: string;
               strategies: Record<string, ShadowStrategyReport>;
-              champion?: ShadowChampion | null } | null;
+              champion?: ShadowChampion | null; reading?: ShadowReadingReport | null } | null;
     health?: ShadowHealth | null;
     last_run: Record<string, unknown> | null;
     live_start: string | null;

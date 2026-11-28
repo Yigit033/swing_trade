@@ -7,7 +7,7 @@
  * sonuç görülmeden yazıldı (lab/PREREGISTRATION.md Ek A + Ek C, H6: Ek F, MOM: Ek U, GRW: Ek W). Terfi otomatik değildir.
  */
 import { useEffect, useMemo, useState } from "react";
-import { getShadow, type ShadowChampion, type ShadowData, type ShadowHealth, type ShadowStrategyReport, type ShadowTrade } from "@/lib/api";
+import { getShadow, type ShadowChampion, type ShadowData, type ShadowHealth, type ShadowReading, type ShadowReadingReport, type ShadowStrategyReport, type ShadowTrade } from "@/lib/api";
 import { AlertTriangle, CheckCircle2, Clock, Ghost, Info, RefreshCw } from "lucide-react";
 
 const pct = (v: number | null | undefined, d = 2) =>
@@ -73,7 +73,7 @@ const REASON_LABEL: Record<string, string> = {
     TRAIL: "İz süren çıkış (H6SR: iz süren stop; GRW: kapanış 50 günlük ortalamanın altına indi)",
     NOT_BULL: "Piyasa yükseliş rejiminde değil (alım yok)",
     NO_GROWTH_DATA: "Büyüme verisi yok ya da eski (SEC)",
-    GROWTH_FAIL: "Büyüme şartı sağlanmadı (satış < %25 ya da kâr artmadı)",
+    GROWTH_FAIL: "Büyüme şartı sağlanmadı (satış < %25 ya da net kâr/zarar iyileşmedi)",
     GAP_BELOW_STOP: "Açılış kırılım gününün dibinin altında (işlem yok)",
     TIME_MAX: "En uzun tutuş doldu (40 seans)",
     RANK: "Rotasyon: sırası 20'nin altına düştü",
@@ -147,6 +147,47 @@ function ChampionCard({ c, h6 }: { c: ShadowChampion; h6?: ShadowStrategyReport 
                     ({c.dilution_split.clean.closed}). Fark sürerse filtre kapı olur.
                 </div>
             )}
+        </div>
+    );
+}
+
+/** Ek Y: GRW sinyallerine okuma notu — okumanın AL dedikleri, ATLA dediklerinden daha çok kazandırıyor mu? */
+function ReadingCard({ r }: { r: ShadowReadingReport }) {
+    const color = r.status === "GEÇTİ" ? "var(--success)" : r.status === "KALDI" ? "var(--danger)" : "var(--text-muted)";
+    const g = (v: "AL" | "ATLA") => r.groups[v];
+    return (
+        <div className="card" style={{ borderLeft: `3px solid ${color}`, fontSize: 13 }}>
+            <strong>Okuma notu (GRW) · <span style={{ color }}>{r.status}</span></strong>
+            <div style={{ color: "var(--text-muted)", margin: "4px 0 8px" }}>
+                Her GRW sinyalinde yapay zekâ, açılıştan önce şirketi okur (ne satıyor, büyüme gerçek mi, haberler) ve
+                AL ya da ATLA der. GRW yine her sinyali alır; not yalnız kaydedilir. Zamanında okunmuş {r.need_closed} kapanmış
+                işlem (her grupta en az {r.need_group}) birikince karşılaştırılır: AL dediklerinin ortalaması ATLA dediklerinden
+                yüksek ve ATLA dedikleri zararda ise not canlıya eklenmeye aday olur (Lab v3 Ek Y; en geç {r.deadline}).
+            </div>
+            {(["AL", "ATLA"] as const).map(v => (
+                <div key={v}>
+                    <strong style={{ color: v === "AL" ? "var(--success)" : "var(--danger)" }}>{v}</strong>:{" "}
+                    {g(v).n} işlem · {g(v).closed} kapandı · ortalama net {g(v).mean_net != null ? `%${g(v).mean_net}` : "—"}
+                </div>
+            ))}
+            <div style={{ color: "var(--text-muted)", marginTop: 4 }}>
+                Kapanan {r.closed} / {r.need_closed}
+                {r.late ? ` · geç okunan ${r.late} (değerlendirmeye girmez)` : ""}
+                {r.missing ? ` · okunamayan ${r.missing}` : ""}
+            </div>
+        </div>
+    );
+}
+
+function ReadingNote({ x }: { x: ShadowReading }) {
+    if (x.status !== "OK")
+        return <div style={{ color: "var(--warning, #f59e0b)" }}>Okuma yazılamadı ({x.status}{x.error ? `: ${x.error}` : ""})</div>;
+    const al = x.verdict === "AL";
+    return (
+        <div style={{ marginTop: 2 }}>
+            <strong style={{ color: al ? "var(--success)" : "var(--danger)" }}>Okuma: {x.verdict}</strong>
+            {x.late ? " (geç)" : ""}
+            {[...(x.reasons || []), ...(x.red_flags || []).map(f => `⚠ ${f}`)].map((s, i) => <div key={i}>· {s}</div>)}
         </div>
     );
 }
@@ -316,6 +357,8 @@ export default function ShadowPage() {
                 </div>
             )}
 
+            {data.report?.reading && <ReadingCard r={data.report.reading} />}
+
             {data.report?.champion && <ChampionCard c={data.report.champion} h6={data.report.strategies["H6"]} />}
 
             <div className="card">
@@ -366,6 +409,7 @@ export default function ShadowPage() {
                                           t.strategy === "MOM" && t.key != null ? `12 ay skoru %${(t.key * 100).toFixed(0)}` : null,
                                           t.strategy === "GRW" && t.key != null ? `12 ay getirisi %${(t.key * 100).toFixed(0)}` : null,
                                         ].filter(Boolean).join(" · ") || "—"}
+                                        {t.reading && <ReadingNote x={t.reading} />}
                                     </td>
                                 </tr>
                             ))}

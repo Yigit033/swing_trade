@@ -152,4 +152,5 @@ def growth_on(q: pd.DataFrame, day: date) -> Dict:
         if p.rev > 0:
             out["sales_growth_pct"] = round(100 * float(cur.rev / p.rev - 1), 1)
         out["ni"], out["ni_prev"] = float(cur.ni), float(p.ni)
+        out["rev"], out["rev_prev"] = float(cur.rev), float(p.rev)       # Ek Y okuma kartı (kural değişmez)
     return out

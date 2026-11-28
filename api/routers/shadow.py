@@ -26,6 +26,16 @@ _TRADE_FIELDS = ("id", "strategy", "ticker", "event_date", "signal_date", "decid
                  "bars", "ret_pct", "net_pct", "iwm_ret", "mark_price", "mark_date", "late_decision", "warmup")
 
 
+def _reading(t):
+    """Ek Y okuma notu (yalnız GRW): karar, gerekçeler, kırmızı bayraklar, geç mi, model."""
+    d = t.get("details")
+    r = (d.get("reading") if isinstance(d, dict) else None) or None
+    if not r:
+        return None
+    keys = ("status", "verdict", "reasons", "red_flags", "late", "read_at", "provider", "model", "error")
+    return {k: r.get(k) for k in keys if r.get(k) is not None}
+
+
 @router.get("")
 def get_shadow(limit: int = Query(300, ge=1, le=2000)):
     from swing_trader.shadow.ledger import ShadowLedger
@@ -45,7 +55,7 @@ def get_shadow(limit: int = Query(300, ge=1, le=2000)):
         "last_run": ledger.get_meta("last_run"),
         "live_start": ledger.get_meta("live_start"),
         "h4_observation_start": ledger.get_meta("h4_observation_start"),
-        "trades": [{k: t.get(k) for k in _TRADE_FIELDS} for t in trades[:limit]],
+        "trades": [dict({k: t.get(k) for k in _TRADE_FIELDS}, reading=_reading(t)) for t in trades[:limit]],
         "total_trades": len(trades),
     })
 

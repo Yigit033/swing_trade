@@ -444,6 +444,30 @@ def growth_check(ticker: str, day: date) -> Dict:
     return growth.growth_on(growth.quarters_table(facts), day)
 
 
+def company_profile(ticker: str) -> Dict:
+    """Ek Y okuma kartı için şirket bilgisi + haber başlıkları (yfinance). Hata → boş alanlar (okuma yine yazılır)."""
+    import yfinance as yf
+
+    tk = yf.Ticker(ticker)
+    out: Dict = dict(info={}, news=[])
+    try:
+        out["info"] = dict(tk.info or {})
+    except Exception as e:
+        logger.warning("profile info failed for %s: %s", ticker, e)
+    try:
+        out["news"] = list(tk.news or [])
+    except Exception as e:
+        logger.warning("profile news failed for %s: %s", ticker, e)
+    return out
+
+
+def read_signal(ticker: str, asof: date, details: Dict, now) -> Dict:
+    """Ek Y: GRW kaydına okuma notu (AL / ATLA) — kural kararlarını etkilemez."""
+    from . import reading
+
+    return reading.read_signal(ticker, asof, details, now, profile=company_profile(ticker))
+
+
 def champion_trades(since: date) -> List[Dict]:
     """Canlı ürünün paper işlemleri (kapanmış, REJECTED hariç, girişi ``since`` ve sonrası).
 
