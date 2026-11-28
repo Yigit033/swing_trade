@@ -1562,7 +1562,7 @@ export default function SettingsPage() {
                 />
                 <FieldBool
                     label="Ana strateji: GRW büyüme + kırılım"
-                    hint="Açık: otomatik girişler büyüme + kırılım kuralıyla: fiyatı 10 $, piyasa değeri 1 milyar $ üstü hisselerde kırılım; yalnız satışı en az %25 büyüyen ve kârı artan şirketlerde ve piyasa yükselişteyken. Stop kırılım gününün dibi (en çok %8); kapanış 50 günlük ortalamanın altına inince ertesi açılışta satış; işlem başına %1 risk. Kuralın ayarı yoktur. Kapalı: eski kurallara tek adımda dönüş. Not: geçmiş testte hesabı büyüttü (+%36 / +%64) ama endeksin gerisinde kaldı (+%102 / +%99) — Lab v3 Ek V, W, X; karar ileri testte."
+                    hint="Açık: otomatik girişler büyüme + kırılım kuralıyla: fiyatı 10 $, piyasa değeri 1 milyar $ üstü hisselerde kırılım; yalnız satışı en az %25 büyüyen ve net sonucu (kâr ya da zarar) bir yıl öncesinden iyi olan şirketlerde ve piyasa yükselişteyken. Stop kırılım gününün dibi (en çok %8); kapanış 50 günlük ortalamanın altına inince ertesi açılışta satış; işlem başına %1 risk. Kuralın ayarı yoktur. Kapalı: eski kurallara tek adımda dönüş. Not: geçmiş testte hesabı büyüttü (+%36 / +%64) ama endeksin gerisinde kaldı (+%102 / +%99) — Lab v3 Ek V, W, X; karar ileri testte."
                     value={nstr(["auto_scan", "strategy"], "GRW") === "GRW"}
                     onChange={(v) => sstr(["auto_scan", "strategy"], v ? "GRW" : "LEGACY")}
                 />

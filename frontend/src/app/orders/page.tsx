@@ -78,7 +78,7 @@ export default function OrdersPage() {
             </div>
 
             <div className="card" style={{ borderLeft: "3px solid var(--accent)", fontSize: 13 }}>
-                <strong>Bu liste sanal (paper) hesap içindir.</strong> Bu kural yalnız satışı en az %25 büyüyen ve kârı artan
+                <strong>Bu liste sanal (paper) hesap içindir.</strong> Bu kural yalnız satışı en az %25 büyüyen ve net sonucu (kâr ya da zarar) bir yıl öncesinden iyi olan
                 şirketlerdeki kırılımları alır ve yalnız piyasa yükselişteyken alım yapar. Geçmiş testte hesabı büyüttü
                 (2016–2020 +%36, 2021–26 +%64) ama endeksin gerisinde kaldı (+%102 ve +%99) ve sonuçlar görüldükten sonra
                 seçildi (Lab v3 Ek V, W, X). Gerçek değeri ileri testte ölçülüyor (Gölge sayfası).
